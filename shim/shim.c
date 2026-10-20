@@ -467,6 +467,11 @@ void shim_main(uint64_t dtb)
 	stage = "no payload";
 	#if defined(DALI_PAYLOAD_PROBE)
 	con_str("DALI", "payload probe done");
+	#if defined(DALI_DISPLAY)
+	con_str("NEXT", "photo of result; power off at 120s");
+	/* Visible text is the result; leave a fixed window to photograph it. */
+	reset(120);
+	#endif
 	#if defined(DALI_RAMLOG_PROBE)
 	con_str("NEXT", "warm reset; hold volume down for fastboot");
 	reset(2);

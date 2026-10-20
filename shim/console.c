@@ -152,8 +152,8 @@ void con_str(const char *label, const char *s)
 	if (row >= (FB_H - MARGIN) / CH_H)
 		con_clear(con_bg);
 #endif
-	put_str(0, label, YELLOW);
-	put_str(LABEL_COLS, s, WHITE);
+	int col = put_str(0, label, YELLOW);
+	put_str(col < LABEL_COLS ? LABEL_COLS : col + 1, s, WHITE);
 	row++;
 #if defined(DALI_DISPLAY)
 	dali_display_flush();

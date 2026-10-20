@@ -1,3 +1,10 @@
+## Visible loader trial preparation (2026-10-21)
+
+- User asked to continue. Stock Android online; both physical boot partitions and host backups again match original hashes.
+- Prepare validation-only display/log probe (no XNU destination writes) with the already packaged matching `shim/out-dali/gh-39425210357/dali-init_boot.img` (SHA-256 f6d2c91e8e5db820303cff4b8c73e83b69c21461f0efbc81705b7293f39e308e). Payload `dali-payload.bin` SHA-256 fad995c21929a90414ddae8ba8dca751980e336625b96f7a5829a9874ae7f82e.
+- Gave visible probe results a fixed 120-second photography window and fixed long-label overlap in console text. Probe SHA-256 `c51cabc5017a20ac3737caca1505fd9aa3f4f3f6ba10e1979e63f725ccf06442`. Build passes. Not yet flashed; temporary boot_b/init_boot_b pair will be restored from full originals immediately after the photo/result.
+- Next: use actual visible LOADER/validation text to identify current failure; then continue XNU refresh integration. Do not infer failure stages from power-off timing.
+
 ## Current handoff: visible Dali boot console (2026-10-21)
 
 - **User confirmed probe 2 shows colors and text.** Hardware-tested commit `26daaf5`, probe SHA-256 `6a2ffb241d5d04a3ca7305297d1ad0621871afef50292172059c381720e1a254`. First probe `b063b31` showed no output.
