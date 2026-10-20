@@ -220,6 +220,77 @@ root-side hashes matched their saved full-partition backups exactly. No
 userdata, super or GPT changes occurred. Never infer XNU entry from a timed
 parse-only success.
 
+## Improving observability (2026-10-21)
+
+**Timing-only results are provisional.** The metadata comparison probe shut
+down after 57 seconds, not a clean outcome-code match. An absolute deadline
+also stops immediately if parsing already exceeded it, and external shutdown
+has not been ruled out. The previously inferred validation error is not a
+captured error string. Both stock partitions are restored and their hashes
+have been verified. User requests visible output and better diagnostics.
+
+Confirmed display source is Xiaomi's
+[`mtk_kernel_device_modules`, `bsp-dali-v-oss`](https://github.com/MiCode/mtk_kernel_device_modules/tree/e45c3199537fbba9aae5fb06c31fc8dbd3c1dcee).
+The matching panel driver is
+[`panel-o12-42-02-0a-dsc-cmd.c`](https://github.com/MiCode/mtk_kernel_device_modules/blob/e45c3199537fbba9aae5fb06c31fc8dbd3c1dcee/drivers/gpu/drm/panel/panel-o12-42-02-0a-dsc-cmd.c).
+It selects four DSI lanes, RGB888, LPM/no-EOT/non-continuous-clock flags and
+DSC parameters. Runtime `/proc/mtkfb` confirms this panel at 1280x2772,
+CMDQ enabled and command-mode transactions. Display remains unimplemented in
+the shim: writes to presumed splash memory have not visibly refreshed it.
+Read the vendor `mediatek_v2/mtk_dsi.c`, `mtk_drm_crtc.c` and
+`mtk_disp_ovl_exdma.c` for a minimal retained-configuration refresh path;
+older mainline DSI offsets alone do not validate a Dali sequence.
+
+Android has an active ramoops backend in reserved RAM:
+
+| Parameter | Read from the running device |
+| --- | --- |
+| Base / total | 0xaec00000 / 0x410000 |
+| Console / pmsg | 0x200000 each |
+| Record / ftrace | 0x1000 each |
+| ECC / mem_type | 0 / 0 |
+
+In the matching Linux `fs/pstore/ram.c`, dump records precede console, pmsg,
+and ftrace. This gives a candidate console base 0xaec0f000. Buffer header is
+12 bytes: signature `0x43474244`, 32-bit start and size, then data. Confirm
+warm-reset retention before implementing a shim writer. Power-off cannot be
+used as a RAM-retention workflow. A benign marker through `/dev/pmsg0` and
+stock Android warm reboot can check the backend without flashing a probe.
+
+Six UARTs are registered at 0x16000000 through 0x16050000; ttyS3 is active.
+Board pin routing and external access remain unknown. These UARTs are not
+established as accessible through the attached USB cable.
+
+### Reserved log retention and no-reset handoff
+
+A benign /dev/pmsg0 marker was recovered after a stock Android warm reboot.
+The same test through fastboot returned an empty pstore. Therefore a
+firmware-resetting ramlog probe is insufficient for the present restore path.
+Stock CONFIG_KEXEC/CONFIG_KEXEC_FILE are disabled and /dev/mem is absent.
+
+`bash shim/build-dali-chain-probe.sh` builds a diagnostic from the full stock
+backups. It embeds the exact stock raw kernel and generic ramdisk, preserves
+the stock boot cmdline, and produces a legacy-LZ4 boot-v4 image. The shim
+relocates the bundle to the verified high-RAM candidate; after parse-only
+payload diagnostics, it restores the stock generic ramdisk in RAM, moves
+LK's bootconfig trailer intact, updates chosen initrd-end, copies original
+Linux to 0x80000000 and jumps without invoking firmware. Linux should then
+expose the shim log as console-ramoops-0. Restore original boot/init_boot from
+root ADB immediately after collecting logs. If the chain fails, manual
+fastboot restoration remains the recovery path, but loses the RAM log.
+
+The opt-in logger checks the exact reserved-memory region in the live FDT
+before initializing the stock-format console header (including after fastboot
+cleared it). No storage access exists in the shim. It limits output to 16KiB
+and commits header counters after data with a DSB. In this diagnostic,
+framebuffer writes are skipped so the unconfirmed panel path cannot hide
+or interfere with the RAM log. XNU destination writes and entry stay disabled.
+
+Actual ARM64 QEMU checks relocation, valid and invalid payload outcomes,
+exact stock kernel/generic-ramdisk copies, bootconfig preservation, chosen
+end correction and x0=FDT/x1..x3=0 at the original kernel entry. This confirms
+the handoff mechanics in emulation, not Android booting on Dali hardware.
+
 ## Work still needed for an iOS boot
 
 - Diagnose the target-only payload validation failure. Shim execution is

@@ -12,6 +12,10 @@
 #include "mmu.h"
 #include "loader.h"
 #include "ufs.h"
+#include "ramlog.h"
+#if defined(DALI_ANDROID_CHAIN)
+#include "android_chain.h"
+#endif
 
 #if !defined(BOARD_DALI)
 #define IMEM_RESTART_REASON	0x146aa65cUL	/* qcom,msm-imem restart_reason@65c */
@@ -127,7 +131,12 @@ static void __attribute__((noreturn)) reset(unsigned after_s)
 	delay_ms(after_s * 1000);
 #endif
 #if defined(BOARD_DALI)
+	#if defined(DALI_RAMLOG_PROBE)
+	/* Keep reserved DRAM for the stock pstore reader after recovery. */
+	smc(PSCI_SYSTEM_RESET, 0, 0, 0);
+	#else
 	smc(PSCI_SYSTEM_OFF, 0, 0, 0);
+	#endif
 #else
 	wr32(IMEM_RESTART_REASON, RESTART_BOOTLOADER);
 	__asm__ volatile("dsb sy" ::: "memory");
@@ -189,7 +198,9 @@ void exc_handler(uint64_t slot, uint64_t *regs)
 	con_hex("X0", regs[0]);
 	con_hex("X1", regs[1]);
 	con_hex("X30", regs[29]);	/* stashed lr is just above the frame */
-#if defined(DALI_PAYLOAD_PROBE_STAGED)
+#if defined(DALI_RAMLOG_PROBE)
+	reset(2);
+#elif defined(DALI_PAYLOAD_PROBE_STAGED)
 	/* Distinct from all loader-return deadlines (10..90 seconds). */
 	reset(110);
 #else
@@ -412,6 +423,13 @@ static uint32_t to_us(uint64_t ticks)
 
 void shim_main(uint64_t dtb)
 {
+#if defined(DALI_RAMLOG)
+	ramlog_init(dtb);
+	con_str("BEGIN", "reserved-RAM diagnostic; no storage writes");
+	con_hex("EL", rsr("CurrentEL"));
+	con_hex("DTB", dtb);
+	con_hex("CNTFRQ", rsr("cntfrq_el0"));
+#endif
 #if defined(DALI_PAYLOAD_PROBE_STAGED)
 	probe_started_ticks = now();
 	probe_clock_ready = 1;
@@ -428,12 +446,21 @@ void shim_main(uint64_t dtb)
 	const char *why = loader_boot(dtb);
 	con_str("LOADER", why);
 	con_skip();
+#if defined(DALI_ANDROID_CHAIN)
+	con_str("RECOVERY", "restoring stock generic ramdisk in RAM");
+	con_str("CHAIN_ERROR", android_chain_boot(dtb));
+	reset(2);
+#endif
 
 #if defined(BOARD_DALI)
 	/* A missing payload must not enter the Qualcomm UFS/MMU diagnostic path. */
 	stage = "no payload";
 	#if defined(DALI_PAYLOAD_PROBE)
 	con_str("DALI", "payload probe done");
+	#if defined(DALI_RAMLOG_PROBE)
+	con_str("NEXT", "warm reset; hold volume down for fastboot");
+	reset(2);
+	#endif
 	/* The probe uses power-off time as a screen-independent pass/fail signal. */
 	#if defined(DALI_PAYLOAD_PROBE_STAGED)
 	#if defined(DALI_PAYLOAD_PROBE_METADATA)

@@ -252,6 +252,15 @@ static void launch_xnu(const struct payload *p, uintptr_t adt_pa)
 #endif
 
 #if defined(BOARD_DALI)
+#if defined(DALI_ANDROID_CHAIN)
+static uint64_t generic_frame_start, generic_frame_end;
+int loader_generic_range(uint64_t *start, uint64_t *end)
+{
+	*start = generic_frame_start;
+	*end = generic_frame_end;
+	return generic_frame_start != 0;
+}
+#endif
 struct payload_stream {
 	uint64_t pos, size, adt_bytes;
 	uint32_t meta_target;
@@ -264,6 +273,21 @@ static const char *payload_metadata_ready(struct payload_stream *s,
 	    uint64_t rd_start, uint64_t rd_end)
 {
 	const struct payload *p = (const struct payload *)payload_meta_bytes;
+#if defined(DALI_RAMLOG_PROBE)
+	con_hex("PAYLOAD_SIZE", s->size);
+	con_hex("NSEGS", p->nsegs);
+	con_hex("VIRT_BASE", p->virt_base);
+	con_hex("KERNEL_END", p->kernel_end);
+	con_hex("ADT_OFF", p->adt_off);
+	con_hex("ADT_SIZE", p->adt_size);
+	for (uint32_t i = 0; i < p->nsegs; i++) {
+		con_hex("SEGMENT", i);
+		con_hex("FILE_OFF", p->segs[i].file_off);
+		con_hex("FILE_SIZE", p->segs[i].file_size);
+		con_hex("VMADDR", p->segs[i].vmaddr);
+		con_hex("VMSIZE", p->segs[i].vmsize);
+	}
+#endif
 #if defined(DALI_PAYLOAD_PROBE_METADATA)
 	/* Stop before validation/copies: compare actual decoded bytes with source. */
 	loader_probe_metadata = 1;
@@ -651,9 +675,14 @@ static const char *loader_boot_dali(uintptr_t dtb)
 	if (err)
 		return err;
 	PROBE_STAGE(2);
+	con_str("INITBOOT", "searching final LZ4 frame");
 	if (!find_initboot_frame(rd_start, ramdisk_end, &frame_start, &frame_end, &content_size))
 		return "no final LZ4 init_boot frame";
 	PROBE_STAGE(3);
+#if defined(DALI_ANDROID_CHAIN)
+	generic_frame_start = frame_start;
+	generic_frame_end = ramdisk_end;
+#endif
 	con_hex2("INITBOOT", "frame=", frame_start, "size=", content_size);
 	static struct cpio_stream cpio;
 	err = decode_initboot(frame_start, frame_end, content_size,

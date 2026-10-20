@@ -2,67 +2,49 @@
 
 ### >>> UPDATE 2026-10-20 (Dali / MT6991 bring-up; read first) <<<
 
-**TEMPORARY TEST IN PROGRESS (2026-10-21):** active boot_b contains metadata
-comparison probe `15bdc94955c7c0e707eb386e4b05b28a428b8615f56ecf8c43f22c0e907d555b`;
-init_boot_b contains candidate `f6d2c91e8e5db820303cff4b8c73e83b69c21461f0efbc81705b7293f39e308e`.
-Both writes and reboot OKAY after dali / slot b / unlocked confirmed. Await
-shutdown time and manual fastboot return. Then restore full original
-init_boot_b.img and boot_b.img from backup/dali-25060RK16C-pairtest-20261020/,
-reboot Android and verify root-side hashes before another test. Restored
-state descriptions below refer to immediately before this trial.
-No userdata/super/GPT writes.
+**STATE (2026-10-21):** stock Android is online and both original boot
+partitions are restored. Root-side hashes exactly match the full backups:
+boot_b `6dc40de74fa7de4f435c513047c51fe10634c1891666031039c52a08b27a3cd5`,
+init_boot_b `08794a432befcf0504ee4933a51260cb6ccc4785b69f345c4b5968e8e6053d2d`.
+No XNU entry has been confirmed. Minimal shim execution is confirmed by its
+20-second automatic power-off; framebuffer text is not visible. Subsequent
+50–60-second observations are **provisional timing inferences**, not captured
+loader errors. The metadata-comparison probe gave 57 seconds, inconclusive.
 
-**STATE (2026-10-21):** Dali is not confirmed to enter XNU. Legacy-LZ4
-packaging reaches LK's kernel jump; a minimal shim probe powers off after
-about 20 seconds although the panel retains its logo. The corrected parse-only
-probe (`c33c47b6cd223c640eea89f688b59ad57ee8bde890f4769b2d5c70c6ae851ce2`)
-powered off after approximately **60 seconds**, as reported by the user.
-Its absolute deadline maps to stage 5: SWEETXNU base header accepted, but
-`payload_validate()` returned false before stage 6. The exception deadline is
-110 seconds and full parsing is 90 seconds. No XNU destination writes are
-enabled in this probe. Earlier 40/50-second inferences were confounded by a
-shared exception delay and processing time and should not be relied upon.
+**CURRENT PRIORITY:** user asks for better diagnostics and visible output.
+Exact panel/MT6991 display sources were found in MiCode/mtk_kernel_device_modules
+branch bsp-dali-v-oss. Command-mode DSC refresh requires display-controller
+support beyond presumed framebuffer writes; no display MMIO sequence is yet
+implemented. UARTs exist, but external routing is not established.
 
-The same ARM64 binary parses the reconstructed 73,915,162-byte initrd under
-QEMU at EL2; normal and deliberately faulted runs reach the distinct
-90/110-second paths. The target-only validation failure remains unexplained.
-**Both stock boot partitions have now been restored** and Android root-side
-hashes exactly match the saved full-partition backups: `boot_b` =
-`6dc40de74fa7de4f435c513047c51fe10634c1891666031039c52a08b27a3cd5`,
-`init_boot_b` = `08794a432befcf0504ee4933a51260cb6ccc4785b69f345c4b5968e8e6053d2d`.
-A validation-reason parse-only image is now built (SHA-256
-`fbb4d92939ee82a4b9949e31eed3b9641b79d656f8c2543f9445c7219c0ad3e2`).
-Host replay returns `payload verified`; actual ARM64 QEMU execution at EL2
-reaches stage 8 with validation reason 0 and requests the 90-second deadline.
-The new failure deadlines are listed in `docs/dali-bringup.md` (10–70 seconds
-for validation groups; 80 other loader errors; 90 success; 110 exceptions).
-The user observed shutdown after 57 seconds from logo appearance, consistent
-with the 60-second segment-file rejection deadline (kernel handoff occurs
-after the logo). Both originals were flashed back successfully; Android is
-online. Root-side hashes exactly match both saved full-partition backups.
-Next: distinguish file-offset overflow, offsets before metadata and file-end
-bounds, using a changed deadline to check the timing inference.
-The finer `PROBE_MODE=files` image was tested:
-`c95fcfc4bc7330977b8154330154bfe9430cbb1997e36b26584fcfdb721fefeb`.
-It uses 10/30/50-second deadlines for the three segment file checks;
-other errors 80, successful parse 90, exceptions 110. User reports shutdown
-after 52 seconds, consistent with file_end > payload_size (50s). This is a
-timing inference; actual error text and metadata values are not captured.
-Both originals were restored successfully and Android returned.
+Stock /dev/pmsg0 marker testing proved RAM log retention across Android warm
+reboot; **Android -> fastboot -> Android clears the log**. A simple ramlog+
+firmware-reset image cannot retrieve logs through the existing rescue path.
+Both original pstore files were saved under /tmp locally. Kexec is disabled
+in the stock kernel and /dev/mem is absent.
 
-All local segment file ends are below payload size 16,608,064, and the ADT
-bounds check precedes them. Thus a target file-end rejection would require a
-different runtime metadata/size input or corruption. Next compare target
-metadata fingerprints against the exact packaged payload without destination
-writes, rather than bypassing validation. Restoration hashes exactly match both full backups. A source-comparison
-probe is currently installed for the temporary test above: `15bdc94955c7c0e707eb386e4b05b28a428b8615f56ecf8c43f22c0e907d555b`.
-Build using `PROBE_MODE=metadata PAYLOAD_REFERENCE=out-dali/gh-39425210357/dali-payload.bin`.
-It stops at metadata readiness and compares actual size/header/segment bytes:
-10s size differs; 30s header differs; 50s segment table differs; 70s exact
-match; 80s earlier loader error; 110s exception. It never writes XNU targets
-or enters XNU.
+Prepared **no-reset stock-kernel chainload diagnostic**, not yet flashed:
+`shim/out-dali/chain/dali-chain-probe-boot.img`, SHA-256
+`b436ec2974afb0275b75e2f3486e9eb47b7b2fb4769850560732ea247be01098`.
+It relocates its 40,742,912-byte bundle to 0x200000000, records text in
+FDT-verified reserved ramoops console RAM, parses the candidate payload with
+no XNU destination writes, restores the original generic ramdisk in RAM,
+preserves LK bootconfig, copies the original 36,866,560-byte kernel back to
+0x80000000 and jumps with the Linux register contract. Original boot cmdline
+is preserved. Bundle ends below DTB 0x87c80000; high relocation ends at
+0x2026db000, inside the previously verified usable RAM interval.
 
-No userdata, super, or GPT writes have occurred.
+Actual ARM64 QEMU verifies exact copied kernel and generic ramdisk bytes,
+unchanged 1,044-byte bootconfig trailer, correct initrd-end (0xab1d213d), and
+x0=FDT/x1..x3=0 at the original kernel entry. Valid and deliberately invalid
+payloads both reach the stock handoff with an explicit log; initially cleared
+ramoops headers are initialized only after the live FDT confirms the exact
+reserved region. This is not proof stock Android boots on hardware through
+the chain. Next: temporary paired test; if Android returns, collect pstore
+and restore both originals through root ADB. Otherwise use manual fastboot
+recovery, accepting that the diagnostic RAM log is lost in that fallback.
+
+No userdata formatting, super or GPT writes have occurred.
 
 - Fastboot reports current slot `b`, `unlocked: yes`, and does not implement
   `fastboot boot`. Per the user's instruction, `boot_b` (64 MiB) and

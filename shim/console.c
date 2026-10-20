@@ -4,6 +4,7 @@
  */
 #include "console.h"
 #include "font.h"
+#include "ramlog.h"
 
 #define SCALE		3
 #define CH_W		(8 * SCALE)
@@ -17,6 +18,12 @@ static int row;
 
 void con_clear(uint32_t bg)
 {
+#if defined(DALI_RAMLOG_PROBE)
+	/* Isolate logging from the currently unconfirmed panel/framebuffer path. */
+	con_bg = bg;
+	row = 0;
+	return;
+#endif
 	for (int y = 0; y < FB_H; y++) {
 		volatile uint32_t *line = con_fb + y * (FB_STRIDE / 4);
 		for (int x = 0; x < FB_W; x++)
@@ -68,6 +75,16 @@ void con_skip(void)
 
 void con_str(const char *label, const char *s)
 {
+#if defined(DALI_RAMLOG)
+	ramlog_write(label);
+	ramlog_write(": ");
+	ramlog_write(s);
+	ramlog_write("\n");
+	ramlog_commit();
+#endif
+#if defined(DALI_RAMLOG_PROBE)
+	return;
+#endif
 	put_str(0, label, YELLOW);
 	put_str(LABEL_COLS, s, WHITE);
 	row++;
@@ -83,6 +100,24 @@ void con_hex(const char *label, uint64_t v)
 void con_hex2(const char *label, const char *a, uint32_t va, const char *b, uint32_t vb)
 {
 	char buf[9];
+#if defined(DALI_RAMLOG)
+	ramlog_write(label);
+	ramlog_write(": ");
+	ramlog_write(a);
+	fmt_hex(buf, va, 8);
+	ramlog_write(buf);
+	if (b) {
+		ramlog_write(" ");
+		ramlog_write(b);
+		fmt_hex(buf, vb, 8);
+		ramlog_write(buf);
+	}
+	ramlog_write("\n");
+	ramlog_commit();
+#endif
+#if defined(DALI_RAMLOG_PROBE)
+	return;
+#endif
 	int col = put_str(0, label, YELLOW);
 	col = col < LABEL_COLS ? LABEL_COLS : col + 1;
 	col = put_str(col, a, YELLOW);

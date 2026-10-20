@@ -23,7 +23,8 @@ _start:
 	msr	daifset, #0xf
 	mov	x19, x0			/* DTB pointer from ABL */
 	msr	spsel, #1
-	adr	x1, _stack_top
+	adrp	x1, _stack_top
+	add	x1, x1, :lo12:_stack_top
 	mov	sp, x1
 	adr	x1, vectors
 	#ifdef BOARD_DALI
@@ -36,13 +37,52 @@ _start:
 	msr	vbar_el1, x1
 	isb
 	/* zero .bss */
-	adr	x1, _bss_start
-	adr	x2, _bss_end
+	adrp	x1, _bss_start
+	add	x1, x1, :lo12:_bss_start
+	adrp	x2, _bss_end
+	add	x2, x2, :lo12:_bss_end
 1:	cmp	x1, x2
 	b.hs	2f
 	str	xzr, [x1], #8
 	b	1b
-2:	mov	x0, x19
+2:
+#ifdef DALI_ANDROID_CHAIN
+	/* Preserve the shim, stack and embedded stock kernel before replacing the
+	 * original LK kernel buffer. This interval is the verified Dali high RAM
+	 * candidate; this diagnostic never writes the XNU destination segments.
+	 */
+	adr	x9, _head
+	mov	x3, #0x200000000
+	sub	x10, x3, x9
+	mov	x1, x9
+	adrp	x2, _end
+	add	x2, x2, :lo12:_end
+6:	ldp	x4, x5, [x1], #16
+	stp	x4, x5, [x3], #16
+	cmp	x1, x2
+	b.lo	6b
+	dsb	sy
+	ic	iallu
+	dsb	sy
+	isb
+	adrp	x1, _stack_top
+	add	x1, x1, :lo12:_stack_top
+	add	x1, x1, x10
+	mov	sp, x1
+	adr	x1, vectors
+	add	x1, x1, x10
+	mrs	x2, CurrentEL
+	cmp	x2, #8
+	b.ne	7f
+	msr	vbar_el2, x1
+7:	msr	vbar_el1, x1
+	isb
+	adr	x1, relocated_start
+	add	x1, x1, x10
+	br	x1
+#endif
+relocated_start:
+	mov	x0, x19
 	bl	shim_main
 3:	wfe
 	b	3b
@@ -52,7 +92,8 @@ _start:
 secondary_entry:
 	msr	daifset, #0xf
 	msr	spsel, #1
-	adr	x1, _sec_stacks
+	adrp	x1, _sec_stacks
+	add	x1, x1, :lo12:_sec_stacks
 	add	x1, x1, x0, lsl #12
 	add	x1, x1, #0x1000
 	mov	sp, x1
@@ -69,6 +110,21 @@ secondary_entry:
 	bl	secondary_main
 4:	wfe
 	b	4b
+
+#ifdef DALI_ANDROID_CHAIN
+/* Linux arm64 entry contract: x0=FDT, x1..x3=0; no return to overwritten code. */
+	.globl android_chain_enter
+android_chain_enter:
+	mov	x4, x1
+	mov	x1, xzr
+	mov	x2, xzr
+	mov	x3, xzr
+	dsb	sy
+	ic	iallu
+	dsb	sy
+	isb
+	br	x4
+#endif
 
 /*
  * Exception vectors. Each slot stashes x29/x30, loads its slot number
