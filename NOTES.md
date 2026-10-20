@@ -1,3 +1,10 @@
+## Current handoff: dynamic Dali display mapping patch (2026-10-21)
+
+- Updated patch `0083-sweet-dali-command-refresh.patch` to place the Dali MMIO alias immediately after the actual framebuffer span, instead of at a fixed VA. The payload reports `virt_base=0xfffffe0006000000`, which is `VM_MIN_KERNEL_ADDRESS + 96 MiB`. With the captured Dali framebuffer mapping occupying one 32 MiB L2 block, MMIO begins at `VM_MIN + 64 MiB`; its bounded 16 MiB aperture ends at `+80 MiB`, below the kernel base.
+- Local syntax compilation passed for `arm_vm_init.c` and `sweet_early.c` (0/2 failed). The patch applies cleanly and all three resulting files match the compilation source byte-for-byte.
+- Superseded XNU workflow run `39473503422` used the earlier fixed VA and was cancelled; next dispatch must use the new commit.
+- The phone remains on the restored stock boot pair; no XNU entry has been confirmed and this mapping patch has not been flashed.
+
 ## Current handoff: payload validation passes (2026-10-21)
 
 - User photo shows RESULT `payload verified`, REASON0; exactly one LZ4 magic and one valid frame; payload size0xFD6B40, 10 segments, ADT offset0xFD5050, size0x1AEC. The frame lies in the initrd after vendor material and before the bootconfig tail; decoded CPIO extraction and payload validation succeeded.

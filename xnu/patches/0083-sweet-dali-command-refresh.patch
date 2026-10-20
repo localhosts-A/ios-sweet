@@ -1,15 +1,12 @@
 diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
 --- a/osfmk/arm64/arm_vm_init.c
 +++ b/osfmk/arm64/arm_vm_init.c
-@@ -1828,9 +1828,73 @@
- #if defined(SWEET)
- /* The reserved low-globals/kernel region is excluded from VM allocation. */
+@@ -1830,7 +1830,70 @@
  #define SWEET_EARLY_FB_VA (VM_MIN_KERNEL_ADDRESS + ARM_TT_L2_SIZE)
-+#define SWEET_EARLY_DALI_IO_VA (VM_MIN_KERNEL_ADDRESS + 3 * ARM_TT_L2_SIZE)
  
  static vm_map_address_t
 -sweet_early_map_final(boot_args *args)
-+sweet_early_map_dali_io(boot_args *args)
++sweet_early_map_dali_io(boot_args *args, vm_map_address_t va)
 +{
 +	/* The command-mode panel and its live pipeline are specific to Dali. */
 +	if (args->Video.v_width != 1280 || args->Video.v_height != 2772 ||
@@ -17,10 +14,9 @@ diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
 +	    args->Video.v_baseAddr >= 0xff000000ULL) {
 +		return 0;
 +	}
-+	const vm_map_address_t va = SWEET_EARLY_DALI_IO_VA;
 +	if ((va & ~ARM_TT_L1_OFFMASK) !=
 +	    (SWEET_EARLY_FB_VA & ~ARM_TT_L1_OFFMASK) ||
-+	    va < SWEET_EARLY_FB_VA + 2 * ARM_TT_L2_SIZE ||
++	    0x01000000ULL > ARM_TT_L2_SIZE ||
 +	    va + 0x01000000ULL < va || va + 0x01000000ULL > gVirtBase) {
 +		return 0;
 +	}
@@ -52,6 +48,7 @@ diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
 +		uint64_t pa = io_pages[i];
 +		vm_map_address_t page_va = va + (pa - 0x32000000ULL);
 +		if (page_va + PAGE_SIZE < page_va || page_va + PAGE_SIZE > gVirtBase ||
++		    (page_va & ~ARM_TT_L2_OFFMASK) != (va & ~ARM_TT_L2_OFFMASK) ||
 +		    (page_va & PAGE_MASK) || (pa & PAGE_MASK)) {
 +			return 0;
 +		}
@@ -76,15 +73,15 @@ diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
  {
  	const vm_map_address_t va = SWEET_EARLY_FB_VA;
  	const uint64_t block_size = ARM_TT_L2_SIZE;
-@@ -1862,6 +1926,7 @@
+@@ -1862,6 +1925,7 @@
  		    ARM_TTE_BLOCK_ATTRINDX(CACHE_ATTRINDX_WRITECOMB) |
  		    ARM_TTE_BLOCK_AF | ARM_TTE_BLOCK_PNX | ARM_TTE_BLOCK_NX;
  	}
-+	*dali_io_alias = sweet_early_map_dali_io(args);
++	*dali_io_alias = sweet_early_map_dali_io(args, va + blocks * block_size);
  	__asm__ volatile("dsb ishst" ::: "memory");
  	return va + (fb_pa - map_start);
  }
-@@ -1881,6 +1946,7 @@
+@@ -1881,6 +1945,7 @@
  	vm_map_address_t dynamic_memory_begin;
  #if defined(SWEET)
  	vm_map_address_t sweet_early_fb_alias;
@@ -92,7 +89,7 @@ diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
  #endif
  
  	/*
-@@ -2200,7 +2266,7 @@
+@@ -2200,7 +2265,7 @@
  
  #if defined(SWEET)
  	/* phystokv() must still refer to the bootstrap aperture here. */
@@ -101,7 +98,7 @@ diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
  #endif
  	arm_vm_physmap_init(args);
  	set_mmu_ttb_alternate(cpu_ttep & TTBR_BADDR_MASK);
-@@ -2209,7 +2275,7 @@
+@@ -2209,7 +2274,7 @@
  
  #if defined(SWEET)
  	/* The final TTBR1 is live; leave the outgoing VA=PA framebuffer alias. */
