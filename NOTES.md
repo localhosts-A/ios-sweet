@@ -2,6 +2,20 @@
 
 ### >>> UPDATE 2026-10-20 (Dali / MT6991 bring-up; read first) <<<
 
+**TEMPORARY STOCK-CHAIN TEST IN PROGRESS (2026-10-21):** active boot_b is
+`shim/out-dali/chain/dali-chain-probe-boot.img`
+(`b436ec2974afb0275b75e2f3486e9eb47b7b2fb4769850560732ea247be01098`),
+init_boot_b is candidate `f6d2c91e8e5db820303cff4b8c73e83b69c21461f0efbc81705b7293f39e308e`.
+Both flashes and reboot succeeded after checking dali / slot b / unlocked.
+Expect direct stock Android handoff. If ADB returns: immediately save pstore
+logs before any reboot, then restore init_boot_b and boot_b using verified
+full originals in /data/local/tmp/ios-sweet-stock-20261021/ and root DD,
+sync, verify physical partition hashes. If Android does not return after about
+120 seconds, request manual fastboot and restore host full backups from
+backup/dali-25060RK16C-pairtest-20261020/. Fastboot clears RAM logs, so capture
+ADB/pstore first whenever possible. Do not start another test before restore.
+Restored descriptions below refer to immediately before this trial.
+
 **STATE (2026-10-21):** stock Android is online and both original boot
 partitions are restored. Root-side hashes exactly match the full backups:
 boot_b `6dc40de74fa7de4f435c513047c51fe10634c1891666031039c52a08b27a3cd5`,
@@ -23,7 +37,7 @@ firmware-reset image cannot retrieve logs through the existing rescue path.
 Both original pstore files were saved under /tmp locally. Kexec is disabled
 in the stock kernel and /dev/mem is absent.
 
-Prepared **no-reset stock-kernel chainload diagnostic**, not yet flashed:
+Prepared **no-reset stock-kernel chainload diagnostic**, now installed for the temporary trial above:
 `shim/out-dali/chain/dali-chain-probe-boot.img`, SHA-256
 `b436ec2974afb0275b75e2f3486e9eb47b7b2fb4769850560732ea247be01098`.
 It relocates its 40,742,912-byte bundle to 0x200000000, records text in
