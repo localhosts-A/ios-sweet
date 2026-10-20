@@ -1,4 +1,5 @@
 diff --git a/iokit/Kernel/arm/DaliRTC.cpp b/iokit/Kernel/arm/DaliRTC.cpp
+new file mode 100644
 --- /dev/null
 +++ b/iokit/Kernel/arm/DaliRTC.cpp
 @@ -0,0 +1,296 @@
