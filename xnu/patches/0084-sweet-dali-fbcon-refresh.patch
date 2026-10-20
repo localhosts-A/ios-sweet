@@ -1,0 +1,58 @@
+diff --git a/osfmk/arm64/sweet_early.c b/osfmk/arm64/sweet_early.c
+index 0782e32..e6f55d1 100644
+--- a/osfmk/arm64/sweet_early.c
++++ b/osfmk/arm64/sweet_early.c
+@@ -187,7 +187,7 @@ dali_display_init(void)
+ static void
+ dali_display_flush(void)
+ {
+-	if (!early_display_ready || early_flushing || early_disabled) {
++	if (!early_display_ready || early_flushing) {
+ 		return;
+ 	}
+ 	early_flushing = 1;
+@@ -228,6 +228,12 @@ failed:
+ 	early_flushing = 0;
+ }
+ 
++void
++sweet_early_refresh(void)
++{
++	dali_display_flush();
++}
++
+ void
+ sweet_early_init(const boot_args *args)
+ {
+diff --git a/osfmk/arm64/sweet_early.h b/osfmk/arm64/sweet_early.h
+index 175839b..9c824ba 100644
+--- a/osfmk/arm64/sweet_early.h
++++ b/osfmk/arm64/sweet_early.h
+@@ -14,6 +14,7 @@ void sweet_early_putc(char c);
+ void sweet_early_panic(const char *fmt, va_list *args);
+ void sweet_early_relocate(uint64_t base, uint64_t io_base);
+ void sweet_early_disable(void);
++void sweet_early_refresh(void);
+ #else
+ static inline void sweet_early_init(const boot_args *args)
+ {
+@@ -25,6 +26,7 @@ static inline void sweet_early_mark(unsigned int stage, const char *label)
+ 	(void)label;
+ }
+ static inline void sweet_early_disable(void) {}
++static inline void sweet_early_refresh(void) {}
+ #endif
+ 
+ #endif
+diff --git a/pexpert/arm/pe_serial.c b/pexpert/arm/pe_serial.c
+index 19f27cd..1ab5f63 100644
+--- a/pexpert/arm/pe_serial.c
++++ b/pexpert/arm/pe_serial.c
+@@ -739,6 +739,7 @@ fbcon_newline(void)
+ 	fbcon_row = (fbcon_row + 1) % fbcon_rows;
+ 	fbcon_clear_row(fbcon_row);
+ 	fbcon_clear_row((fbcon_row + 1) % fbcon_rows);
++	sweet_early_refresh();
+ }
+ 
+ static void
