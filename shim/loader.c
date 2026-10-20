@@ -137,15 +137,46 @@ static uint64_t read_le64(uint64_t p)
 static void copy_bytes(uint64_t dst, const uint8_t *src, uint64_t n)
 {
 	volatile uint8_t *d = (volatile uint8_t *)dst;
-	for (uint64_t i = 0; i < n; i++)
-		d[i] = src[i];
+	/* MMU-off RAM is Device memory: wide accesses must be aligned. */
+	while (n && ((uintptr_t)d & 7)) {
+		*d++ = *src++;
+		n--;
+	}
+	while (n >= 8) {
+		uint64_t value;
+		if (((uintptr_t)src & 7) == 0) {
+			value = *(const volatile uint64_t *)src;
+		} else if (((uintptr_t)src & 3) == 0) {
+			const volatile uint32_t *s = (const volatile uint32_t *)src;
+			value = s[0] | ((uint64_t)s[1] << 32);
+		} else {
+			value = 0;
+			for (unsigned int i = 0; i < 8; i++)
+				value |= (uint64_t)src[i] << (8 * i);
+		}
+		*(volatile uint64_t *)d = value;
+		d += 8;
+		src += 8;
+		n -= 8;
+	}
+	while (n--)
+		*d++ = *src++;
 }
 
 static void zero_bytes(uint64_t dst, uint64_t n)
 {
 	volatile uint8_t *d = (volatile uint8_t *)dst;
-	for (uint64_t i = 0; i < n; i++)
-		d[i] = 0;
+	while (n && ((uintptr_t)d & 7)) {
+		*d++ = 0;
+		n--;
+	}
+	while (n >= 8) {
+		*(volatile uint64_t *)d = 0;
+		d += 8;
+		n -= 8;
+	}
+	while (n--)
+		*d++ = 0;
 }
 #endif
 
@@ -387,6 +418,7 @@ static const char *payload_metadata_ready(struct payload_stream *s,
 #endif
 	if (!payload_validate(p, s->size, rd_start, rd_end))
 		return "invalid SWEETXNU metadata";
+	con_hex2("META", "segs=", p->nsegs, "bytes=", s->size);
 	PROBE_STAGE(6);
 	s->p = p;
 	s->adt_pa = payload_adt_pa(p);
@@ -400,8 +432,10 @@ static const char *payload_metadata_ready(struct payload_stream *s,
 	for (uint32_t i = 0; i < p->nsegs; i++) {
 		const struct payload_seg *seg = &p->segs[i];
 		uint64_t dst = p->phys_base + (seg->vmaddr - p->virt_base);
-		if (seg->vmsize > seg->file_size)
+		if (seg->vmsize > seg->file_size) {
+			con_hex2("CLEAR", "seg=", i, "bytes=", seg->vmsize - seg->file_size);
 			zero_bytes(dst + seg->file_size, seg->vmsize - seg->file_size);
+		}
 	}
 #endif
 	s->ready = 1;
@@ -736,9 +770,25 @@ static int find_initboot_frame(uint64_t rd_start, uint64_t rd_end,
 	return 0;
 }
 
+static uint64_t loader_ticks(void)
+{
+	uint64_t value;
+	__asm__ volatile("isb; mrs %0, cntpct_el0" : "=r"(value));
+	return value;
+}
+
+static uint64_t loader_elapsed_ms(uint64_t started)
+{
+	uint64_t frequency;
+	__asm__ volatile("mrs %0, cntfrq_el0" : "=r"(frequency));
+	return frequency ? (loader_ticks() - started) * 1000 / frequency : 0;
+}
+
 static const char *decode_initboot(uint64_t start, uint64_t end, uint64_t content_size,
 	    struct cpio_stream *cpio, uint64_t rd_start, uint64_t rd_end)
 {
+	uint64_t started = loader_ticks(), next_progress = 4ULL << 20;
+	con_str("DECODE", "LZ4 and destination copies begin");
 	uint64_t cur = start + 4;
 	const volatile uint8_t *descriptor = (const volatile uint8_t *)cur;
 	uint8_t flg = descriptor[0];
@@ -767,6 +817,10 @@ static const char *decode_initboot(uint64_t start, uint64_t end, uint64_t conten
 		if (err)
 			return err;
 		total_out += out_size;
+		if (total_out >= next_progress) {
+			con_hex2("LOAD", "bytes=", total_out, "ms=", loader_elapsed_ms(started));
+			next_progress += 4ULL << 20;
+		}
 		cur += compressed_size;
 		if (flg & 0x10)
 			cur += 4;
@@ -778,6 +832,7 @@ static const char *decode_initboot(uint64_t start, uint64_t end, uint64_t conten
 	if (!cpio->payload.ready || cpio->payload.pos != cpio->payload.size ||
 	    cpio->payload.adt_bytes != cpio->payload.p->adt_size)
 		return "incomplete SWEETXNU payload in init_boot";
+	con_hex2("DECODE", "bytes=", total_out, "ms=", loader_elapsed_ms(started));
 	return 0;
 }
 
