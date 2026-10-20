@@ -20,6 +20,7 @@ on:
     paths:
       - "xnu/patches/**"
       - ".github/workflows/xnu.yml"
+      - "tools/enable_xnu_ccache.py"
 
 concurrency:
   group: xnu-${{ github.ref }}
@@ -31,6 +32,10 @@ env:
   MACOS_VERSION: ${{ inputs.macos_version || '13.5' }}
   KERNEL_CONFIG: ${{ inputs.kernel_config || 'DEVELOPMENT' }}
   MACHINE_CONFIG: ${{ inputs.machine_config || 'SWEET' }}
+  CCACHE_DIR: ${{ github.workspace }}/.ci-cache/ccache
+  CCACHE_MAXSIZE: 2G
+  CCACHE_COMPILERCHECK: content
+  SWEET_KDK_DMG: ${{ github.workspace }}/.ci-cache/kdk/KDK.dmg
 
 jobs:
   build:
@@ -51,11 +56,12 @@ jobs:
           # libfirehose_kernel is built arm64e-only; the SWEET kernel is plain arm64
           sed -i '' 's/ARCHS="x86_64 arm64e" VALID_ARCHS="x86_64 arm64e"/ARCHS="x86_64 arm64e arm64" VALID_ARCHS="x86_64 arm64e arm64"/' dxb/build.sh
           grep -c 'VALID_ARCHS="x86_64 arm64e arm64"' dxb/build.sh
+          python3 tools/enable_xnu_ccache.py dxb/build.sh
           ls dxb/patches
 
       - name: Deps
         run: |
-          brew install jq gum bash cmake ninja
+          brew install jq gum bash cmake ninja ccache
           # build.sh only checks that xcodes exists (Xcode is preinstalled); no bottle on macOS 14
           printf '#!/bin/sh\nexit 0\n' | sudo tee /usr/local/bin/xcodes >/dev/null
           sudo chmod +x /usr/local/bin/xcodes
@@ -67,12 +73,48 @@ jobs:
           xcodebuild -version
           xcrun --find iig
 
+      - name: Cache toolchain identity
+        id: toolchain
+        run: |
+          identity=$({ xcodebuild -version; xcrun clang --version; xcrun --sdk macosx --show-sdk-version; ccache --version; } | shasum -a 256 | cut -d ' ' -f 1)
+          echo "key=$identity" >> "$GITHUB_OUTPUT"
+          echo "SWEET_CCACHE=$(command -v ccache)" >> "$GITHUB_ENV"
+
+      - name: Restore KDK download
+        uses: actions/cache@v4
+        with:
+          path: .ci-cache/kdk
+          key: kdk-dmg-v1-${{ runner.os }}-${{ env.MACOS_VERSION }}-${{ env.DXB_SHA }}
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ci-cache/ccache
+          key: xnu-ccache-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.MACOS_VERSION }}-${{ env.KERNEL_CONFIG }}-${{ env.MACHINE_CONFIG }}-${{ steps.toolchain.outputs.key }}-${{ env.DXB_SHA }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            xnu-ccache-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.MACOS_VERSION }}-${{ env.KERNEL_CONFIG }}-${{ env.MACHINE_CONFIG }}-${{ steps.toolchain.outputs.key }}-${{ env.DXB_SHA }}-
+
+      - name: Initialize compiler cache statistics
+        run: |
+          ccache --show-config
+          ccache --zero-stats
+
       - name: Build
         working-directory: dxb
         env:
           # keep going after errors so one run reports every compile failure
           MAKEFLAGS: ${{ inputs.keep_going == 'false' && '' || '-k' }}
         run: bash build.sh
+
+      - name: Compiler cache statistics
+        if: always()
+        run: |
+          if command -v ccache >/dev/null; then
+            echo '### Compiler cache' >> "$GITHUB_STEP_SUMMARY"
+            echo '```text' >> "$GITHUB_STEP_SUMMARY"
+            ccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Verify SWEET init diagnostics
         working-directory: dxb

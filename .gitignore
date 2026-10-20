@@ -9,3 +9,6 @@ shim/out-dali/
 xnu/out/
 xnu/out-*/
 __pycache__/
+
+# GitHub Actions compiler and KDK download caches
+.ci-cache/
