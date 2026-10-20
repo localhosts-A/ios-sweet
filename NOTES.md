@@ -1,3 +1,8 @@
+## ACTIVE TIMED RAM-ROOT TRIAL (2026-10-21)
+
+- Fresh immediate Android dali/model/_b/completed1/root/64+8MiB and both physical original SHA256 matched; host original/candidate hashes rechecked; fastboot dali/slot_b/unlocked/sizes matched. Timed pair CI39503871642 init_boot_b then boot_b writes OKAY, reboot OKAY. Authoritative ignored manifest `shim/out-dali/timed-39503871642/trial-state.json` is trial_rebooted. Await raw shimTOPRGU/WDT_STATUS/COUNTER, decimalXNU T...ms/skmem/root photo/video and reset observation; newest framebuffer rows before blank cursor boundary. No runtime result yet.
+- **ORIGINAL RESTORATION PENDING:** on manual fastboot return, bounded read-only boot-reason/reboot-reason variables then immediately restore full original init_boot_b then boot_b from backup/dali-25060RK16C-pairtest-20261020/, reboot Android and root-hash verify both. Recovery helper preserved in ignored candidate directory `device_pair.py` (explicit recover/verify modes). No userdata/UFS/super/GPT/watchdog writes. Older originals_verified manifests describe previous restored trials, not current physical state.
+
 ## Current handoff: timed pair ready, full cached build verified (2026-10-21)
 
 - Actions39503871642 SUCCESS at9a84ee6 (DEVELOPMENT/SWEET). Compiler1376/1380 cache hits99.71%,only4misses; modified four source files byte-match local compiled patch0090 sources, native RTC source also exact-match. Kernel17243752bytes SHA b5ea794dce8cd5861fd54b766fcd96fd974b73bf162a3cbd80f2a0791f8b2009. Actual binary contains timed bootstrap/root/skmem and RTC hardware markers; diagnostic source gate passed.
