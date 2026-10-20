@@ -2,7 +2,8 @@
 """Build the minimal Apple Device Tree that the SWEET xnu needs to boot.
 
 Only what the early boot path actually reads (see NOTES.md); every MMIO
-address comes from the sweet live FDT. Usage:  mkadt.py OUT.adt [--dump] [--qemu] [--highmem]
+address comes from the selected board's live FDT. Usage: mkadt.py OUT.adt
+[--board sweet|dali] [--dump] [--qemu] [--highmem]
 """
 import hashlib, os, struct, sys
 
@@ -32,6 +33,17 @@ VTIMER_INTID = 19
 # QEMU virt (-M virt,gic-version=3 -cpu cortex-a76): GICD/GICR and the generic timer's CNTFRQ
 QEMU_GICD, QEMU_GICR, QEMU_TIMEBASE = 0x08000000, 0x080a0000, 62500000
 QEMU_VTIMER_INTID = 27
+
+# Redmi K80 Ultra / Dali (MT6991). The memory range is the largest continuous
+# interval left after excluding the explicit reserved ranges in the live
+# /proc/iomem map; keep the shim and bootloader in low memory.
+DALI_PHYS_BASE, DALI_MEM_SIZE = 0x200000000, 0x13fe00000
+DALI_GICD, DALI_GICD_SIZE = 0x0c400000, 0x40000
+DALI_GICR, DALI_GICR_SIZE = 0x0c440000, 0x200000
+DALI_FB, DALI_FB_SIZE = 0xfc990000, 0x3660000
+DALI_FB_W, DALI_FB_H = 1280, 2772
+DALI_UFS, DALI_UFS_SIZE = 0x16810000, 0x2a00
+DALI_TIMEBASE, DALI_VTIMER_INTID = 13000000, 27
 
 BOOT_MANIFEST_HASH = hashlib.sha384(b'sweet boot manifest').digest()
 
@@ -68,10 +80,33 @@ def node(name, props=(), children=()):
     return n
 
 
-def build(seed=None, qemu=False, highmem=False):
-    """qemu=True: same tree, but with QEMU virt's GIC addresses and CNTFRQ (tools/qemu-sweet.py)."""
-    phys_base, mem_size = (HIGH_PHYS_BASE, HIGH_MEM_SIZE) if highmem else (PHYS_BASE, MEM_SIZE)
-    gicd, gicr, timebase = (QEMU_GICD, QEMU_GICR, QEMU_TIMEBASE) if qemu else (GICD, GICR, TIMEBASE)
+def build(seed=None, qemu=False, highmem=False, dali=False):
+    """Build a SWEET or Dali ADT; qemu=True selects QEMU virt's GIC and timer."""
+    if dali:
+        if qemu or highmem:
+            raise ValueError('--board dali cannot be combined with --qemu or --highmem')
+        phys_base, mem_size = DALI_PHYS_BASE, DALI_MEM_SIZE
+        gicd, gicd_size = DALI_GICD, DALI_GICD_SIZE
+        gicr, gicr_size = DALI_GICR, DALI_GICR_SIZE
+        timebase, vtimer_intid = DALI_TIMEBASE, DALI_VTIMER_INTID
+        fb, fb_size = DALI_FB, DALI_FB_SIZE
+        fb_w, fb_h, fb_stride = DALI_FB_W, DALI_FB_H, DALI_FB_W * 4
+        ufs, ufs_size, ufs_lun = DALI_UFS, DALI_UFS_SIZE, 2
+        cpu_count = 1  # first boot remains on the firmware-started CPU
+        cpu_compat = cstr('arm,armv8')
+        board_compat = cstr('xiaomi,sweet') + cstr('xiaomi,dali') + cstr('mediatek,mt6991')
+        firmware_name = 'dali-shim'
+    else:
+        phys_base, mem_size = (HIGH_PHYS_BASE, HIGH_MEM_SIZE) if highmem else (PHYS_BASE, MEM_SIZE)
+        gicd, gicr, timebase = (QEMU_GICD, QEMU_GICR, QEMU_TIMEBASE) if qemu else (GICD, GICR, TIMEBASE)
+        gicd_size, gicr_size = GICD_SIZE, GICR_SIZE
+        vtimer_intid = QEMU_VTIMER_INTID if qemu else VTIMER_INTID
+        fb, fb_size, fb_w, fb_h, fb_stride = FB, FB_SIZE, FB_W, FB_H, FB_STRIDE
+        ufs, ufs_size, ufs_lun = UFS, UFS_SIZE, 0
+        cpu_count = 1 if qemu else 8
+        cpu_compat = cstr('qcom,kryo470') + cstr('ARM,v8')
+        board_compat = cstr('xiaomi,sweet') + cstr('qcom,sm7150')
+        firmware_name = 'sweet-shim'
     seed = seed if seed is not None else os.urandom(64)
     phandle = iter(range(1, 1000))
     ph = lambda: ('AAPL,phandle', u32(next(phandle)))
@@ -82,8 +117,8 @@ def build(seed=None, qemu=False, highmem=False):
         ('dram-size', u64(mem_size)),
         ('random-seed', seed),
         ('debug-enabled', u32(1)),
-        ('firmware-version', cstr('sweet-shim')),
-        ('system-firmware-version', cstr('sweet-shim')),
+        ('firmware-version', cstr(firmware_name)),
+        ('system-firmware-version', cstr(firmware_name)),
         # iBoot's SHA-384 of the boot manifest; /sbin/mount -P 1 exits unless
         # it exists (bind mounts /private/preboot/<hex>/usr/standalone/firmware,
         # tolerating a missing directory). Fixed stand-in value.
@@ -124,11 +159,11 @@ def build(seed=None, qemu=False, highmem=False):
     # and uses cpus=N to select an initial prefix (N <= 8).
     # QEMU retains its original single-CPU tree: its MPIDRs differ from sweet.
     cpu_nodes = []
-    for core in range(1 if qemu else 8):
-        cpu_nodes.append(node(f'cpu{core}', [
+    for core in range(cpu_count):
+        cpu_props = [
             ph(),
             ('device_type', cstr('cpu')),
-            ('compatible', cstr('qcom,kryo470') + cstr('ARM,v8')),
+            ('compatible', cpu_compat),
             ('reg', u32(core << 8)),  # actual MPIDR Aff1:Aff0, NOT logical ID
             ('cpu-id', u32(core)),   # descriptive: XNU assigns IDs by DT order
             ('cluster-id', u32(0)),  # descriptive; see ml_parse_cpu_topology
@@ -139,12 +174,16 @@ def build(seed=None, qemu=False, highmem=False):
             ('l3-cache-id', u32(0)),     # shared L3
             ('state', cstr('running' if core == 0 else 'stopped')),
             ('timebase-frequency', u32(timebase)),
-            ('clock-frequency', u32(2304000000 if core >= 6 else 1804800000)),
-            ('bus-frequency', u32(100000000)),
-            ('memory-frequency', u32(1866000000)),
-            ('peripheral-frequency', u32(timebase)),
-            ('fixed-frequency', u32(timebase)),
-        ]))
+        ]
+        if not dali:
+            cpu_props += [
+                ('clock-frequency', u32(2304000000 if core >= 6 else 1804800000)),
+                ('bus-frequency', u32(100000000)),
+                ('memory-frequency', u32(1866000000)),
+                ('peripheral-frequency', u32(timebase)),
+                ('fixed-frequency', u32(timebase)),
+            ]
+        cpu_nodes.append(node(f'cpu{core}', cpu_props))
     cpus = node('cpus', [ph(), ('#address-cells', u32(1)),
                          ('#size-cells', u32(0))], cpu_nodes)
 
@@ -152,8 +191,8 @@ def build(seed=None, qemu=False, highmem=False):
         ph(),
         ('compatible', cstr('arm,gic-v3')),
         ('interrupt-controller', b''),
-        ('virtual-timer-intid', u32(QEMU_VTIMER_INTID if qemu else VTIMER_INTID)),
-        ('reg', u64(gicd - SOC_BASE, GICD_SIZE, gicr - SOC_BASE, GICR_SIZE)),
+        ('virtual-timer-intid', u32(vtimer_intid)),
+        ('reg', u64(gicd - SOC_BASE, gicd_size, gicr - SOC_BASE, gicr_size)),
     ])
     arm_io = node('arm-io', [
         ph(),
@@ -181,17 +220,18 @@ def build(seed=None, qemu=False, highmem=False):
 
     fbcon = node('sweet-fbcon', [
         ph(),
-        ('reg', u64(FB, FB_SIZE)),
-        ('width', u32(FB_W)),
-        ('height', u32(FB_H)),
-        ('stride', u32(FB_STRIDE)),
+            ('reg', u64(fb, fb_size)),
+            ('width', u32(fb_w)),
+            ('height', u32(fb_h)),
+            ('stride', u32(fb_stride)),
     ])
 
     # bsd/dev/sweet_ufs.c: the UFS host ABL leaves running (absolute physical reg).
     ufs = node('sweet-ufs', [
         ph(),
         ('compatible', cstr('qcom,ufshc')),
-        ('reg', u64(UFS, UFS_SIZE)),
+        ('reg', u64(ufs, ufs_size)),
+        ('lun', u32(ufs_lun)),
     ])
 
     # pmap_compute_max_asids requires the node even when no overrides are set.
@@ -217,7 +257,7 @@ def build(seed=None, qemu=False, highmem=False):
     # (iPhone10,3). 'xiaomi,sweet' stays for SweetPlatformExpert matching.
     return node('device-tree', [
         ph(),
-        ('compatible', cstr('D22AP') + cstr('iPhone10,3') + cstr('xiaomi,sweet') + cstr('qcom,sm7150') + cstr('AppleARM')),
+        ('compatible', cstr('D22AP') + cstr('iPhone10,3') + board_compat + cstr('AppleARM')),
         ('model', cstr('iPhone10,3')),
         ('target-type', cstr('D22')),
         ('target-sub-type', cstr('D22AP')),
@@ -228,9 +268,17 @@ def build(seed=None, qemu=False, highmem=False):
 
 
 if __name__ == '__main__':
-    root = build(qemu='--qemu' in sys.argv, highmem='--highmem' in sys.argv)
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument('output')
+    ap.add_argument('--board', choices=('sweet', 'dali'), default='sweet')
+    ap.add_argument('--dump', action='store_true')
+    ap.add_argument('--qemu', action='store_true')
+    ap.add_argument('--highmem', action='store_true')
+    args = ap.parse_args()
+    root = build(qemu=args.qemu, highmem=args.highmem, dali=args.board == 'dali')
     blob = adt.serialize(root)
-    open(sys.argv[1], 'wb').write(blob)
-    if '--dump' in sys.argv:
+    open(args.output, 'wb').write(blob)
+    if args.dump:
         adt.dump(adt.parse(blob)[0])
-    print(f'{sys.argv[1]}: {len(blob)} bytes', file=sys.stderr)
+    print(f'{args.output}: {len(blob)} bytes', file=sys.stderr)

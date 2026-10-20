@@ -1,5 +1,93 @@
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
+### >>> UPDATE 2026-10-20 (Dali / MT6991 bring-up; read first) <<<
+
+**STATE:** a separate local branch, `port/dali-mt6991`, is being prepared for
+Redmi K80 Ultra (`dali`, MT6991). This is not a bootable iOS port yet; the
+first XNU image test only showed the handset boot logo and did not confirm PID 1.
+
+- Fastboot reports current slot `b`, `unlocked: yes`, and does not implement
+  `fastboot boot`. Per the user's instruction, both 64 MiB boot slots were
+  backed up to `backup/dali-25060RK16C-20261020/`; device and backup SHA-256
+  values matched.
+- The Dali handoff probe was temporarily flashed to active `boot_b`. The phone
+  disappeared from USB about 22 seconds after reboot; the user then re-entered
+  fastboot. The original `boot_b.img` was restored and verified by root-side
+  SHA-256 after Android booted. No other partition was written. The user could
+  not confirm the screen contents, so the FDT display result remains unknown.
+- Dali support now has a separate early probe, an ADT generator option
+  (`tools/mkadt.py --board dali`), a board constants header, high-RAM identity
+  mapping, and Android boot v4 shim packaging (`TARGET_BOARD=dali`). The full
+  Dali shim builds locally with Clang/LLD and unpacks as boot v4.
+- Downloaded iPhone X iOS 16.7.16 (20H392) OS, SystemOS and AppOS images into
+  ignored `research/ipsw-x/`. Built a 16 GiB HFS+ root image locally (about
+  12 GiB used) and repaired it with `fsck`; it has not been written to the phone.
+- Built a 32 MiB HFS+ RAM-disk test root with the SWEET PID 1 test init, then
+  packaged the existing Sweet XNU artifact with the Dali ADT into a 50,352,128
+  byte Android boot v4 image. Flashed it only to `boot_b`; the user saw only
+  the handset logo, so XNU entry/init is unconfirmed. The original 64 MiB
+  `boot_b.img` was restored and its on-device SHA-256 again matched
+  `6dc40de74fa7de4f435c513047c51fe10634c1891666031039c52a08b27a3cd5`.
+  `userdata`, `super`, and the partition table were not written.
+- The saved stock `boot_b` has an AVB footer v1 with an OEM `SHA256_RSA4096`
+  vbmeta descriptor. This is distinct from the Android boot-v4
+  `boot_signature` field, which is zero in both stock and test images. A test
+  footer signed with a local RSA-4096 key produced a LK public-key-chain
+  mismatch, but MTK `expdb` logs also show `img_auth_required = 0` and
+  `avb_ret = 0`; LK proceeded to the logo. The image still did not reach a
+  confirmed XNU entry.
+- The first footer trial used nonzero boot-v4 OS version/patch fields. The Dali
+  boot build now leaves those fields zero, matching the stock GKI v4 header and
+  AOSP's boot-v4 requirement. A second footer trial with the corrected header
+  still showed only the handset logo. The original `boot_b` was restored after
+  each trial and its on-device SHA-256 matched
+  `6dc40de74fa7de4f435c513047c51fe10634c1891666031039c52a08b27a3cd5`.
+- MTK logging is available through the 128 MiB `expdb` partition and AEE boot
+  logs; `/sys/fs/pstore` was empty. `expdb` contains `invalid boot image header`
+  lines around the trials, but they also appear in older boot records, so they
+  still need correlation with the boot/init_boot/vendor_boot handoff.
+- Read-only pulls of the stock images confirmed the actual GKI v4 chain:
+  `boot_b` is kernel-only, `init_boot_b` contains the generic LZ4 ramdisk, and
+  `vendor_boot_b` contains the DTB plus LZ4 vendor fragments. AOSP requires
+  the generic ramdisk after vendor ramdisks in the concatenated initrd. This
+  makes the earlier custom payload in `boot`'s ramdisk a plausible cause of
+  the logo-only result, though it does not prove it was the only cause.
+- `shim/build.sh` now emits a kernel-only Dali boot-v4 image. New
+  `shim/build-dali-initboot.sh` and `tools/mkinitboot.py` package a `sweet.payload`
+  CPIO entry in a 64 KiB independent-block LZ4 frame and add the stock-style
+  AVB v1 hash footer (`Algorithm: NONE`). The local image fills the 8 MiB
+  init_boot partition; `unpack_bootimg`, `avbtool info_image`, and LZ4/CPIO
+  extraction all validate it. Neither corrected image was flashed.
+- `shim/loader.c` now strips an optional Android bootconfig trailer, locates
+  the final LZ4 frame in the concatenated initrd, extracts the CPIO payload,
+  and streams its segments and ADT to their final
+  physical addresses. A temporary host harness decoded the 16,608,008-byte
+  ramdisk stream and verified all 10 XNU segment copies plus the 6,892-byte
+  ADT against the source payload.
+- The Dali boot probe and full shim both build as Android v4 images with zero
+  ramdisk size. `xnu/patches/0082-dali-dynamic-framebuffer.patch` makes XNU's
+  early diagnostics use `boot_args.Video`; it applies cleanly to the latest
+  successful build tree and the four affected C/assembly units pass local
+  syntax checks. A new XNU binary has not yet been built from this patch.
+- The AVB footer did not resolve the logo-only result. No valid OEM signature
+  can be produced without Xiaomi's private key; the local test key is not
+  trusted by the OEM chain.
+- Live Linux maps the device's UFS disk as `target0:0:0:2`; its `userdata`
+  block device is on UFS LUN 2. The current SWEET XNU UFS driver hard-codes LUN
+  0. `tools/mkadt.py` now emits `lun=2` for Dali (and `lun=0` for Sweet), and
+  patch `0028` reads that ADT property. This change needs an XNU rebuild before
+  a full-root boot test.
+- The D22AP `/product` node has now been extracted from the iPhone X IPSW and
+  is included in the generated Dali ADT.
+- Live facts used so far: candidate XNU RAM `0x200000000 + 0x13fe00000`, GICD
+  `0x0c400000/0x40000`, GICR `0x0c440000/0x200000`, 13 MHz generic timer
+  (virtual timer PPI 11 = INTID 27), UFSHCI `0x16810000/0x2a00`, framebuffer
+  `0xfc990000/0x3660000`, 1280×2772 (stride assumed 5120).
+- Next: rebuild XNU with the ADT-selected UFS LUN and dynamic Dali framebuffer
+  diagnostics. Then use paired `boot`/`init_boot` images to distinguish kernel
+  entry, console setup and PID 1. Do not create the proposed userdata partition
+  until the XNU path is demonstrated.
+
 ## Agent handoff / active work (2026-10-15, latest)
 
 ### >>> UPDATE 2026-10-18 (read first, then the 10-17 handoff below) <<<

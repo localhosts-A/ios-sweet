@@ -1,25 +1,24 @@
 /*
  * Milestone 2: one boot answers the questions that decide the XNU port.
  *   - CPU feature registers (16K granule, GIC sysreg interface)
- *   - PSCI/SMCCC version and which PSCI calls the Qualcomm TZ offers
+ *   - PSCI/SMCCC version and which calls the boot firmware offers
  *   - SMP: PSCI CPU_ON for the 7 secondaries, each reports its MPIDR
- *   - GICv3 Group 1 IRQ from the virtual timer (INTID 19 on Qualcomm)
+ *   - GICv3 Group 1 IRQ from the board's virtual timer
  * Any unexpected exception paints a blue panic screen.
  */
 #include <stdint.h>
+#include "board.h"
 #include "console.h"
 #include "mmu.h"
 #include "loader.h"
 #include "ufs.h"
 
+#if !defined(BOARD_DALI)
 #define IMEM_RESTART_REASON	0x146aa65cUL	/* qcom,msm-imem restart_reason@65c */
 #define RESTART_BOOTLOADER	0x77665500U
 #define PSHOLD			0x0c264000UL
+#endif
 
-#define GICD_BASE		0x17a00000UL
-#define GICR_BASE		0x17a60000UL
-#define GICR_SIZE		0x100000UL
-#define GICR_PE_SIZE		0x20000UL
 #define GICR_TYPER		0x08
 #define GICR_WAKER		0x14
 #define GICR_SGI		0x10000
@@ -30,8 +29,6 @@
 #define GICR_ISPENDR0		(GICR_SGI + 0x200)
 #define GICR_ISACTIVER0		(GICR_SGI + 0x300)
 #define GICR_ICFGR1		(GICR_SGI + 0xc04)
-#define VTIMER_INTID		19	/* DT: <GIC_PPI 3 ...>, not the usual 27 */
-#define PTIMER_INTID		18	/* DT: <GIC_PPI 2 ...> */
 #define SGI_INTID		1
 
 #define PSCI_VERSION		0x84000000UL
@@ -39,13 +36,12 @@
 #define PSCI_CPU_OFF		0x84000002UL
 #define PSCI_CPU_ON		0xc4000003UL
 #define PSCI_MIGRATE_INFO_TYPE	0x84000006UL
+#define PSCI_SYSTEM_OFF		0x84000008UL
 #define PSCI_SYSTEM_RESET	0x84000009UL
 #define PSCI_FEATURES		0x8400000aUL
 #define PSCI_SYSTEM_SUSPEND	0xc400000eUL
 #define PSCI_SYSTEM_RESET2	0xc4000012UL
 #define SMCCC_VERSION		0x80000000UL
-
-#define NR_CPUS			8
 
 #define rsr(r) ({ uint64_t _v; __asm__ volatile("mrs %0, " r : "=r"(_v)); _v; })
 #define wsr(r, v) __asm__ volatile("msr " r ", %0" : : "r"((uint64_t)(v)))
@@ -64,6 +60,7 @@ static volatile uint64_t sec_probe[4];	/* CPU1 redistributor write test */
 static volatile uint32_t irq_count, irq_other, irq_last;
 static volatile int irq_src;
 
+#if !defined(BOARD_DALI)
 /* ICC_SGI1R_EL1 value targeting the calling core only. */
 static uint64_t sgi_self(unsigned id)
 {
@@ -73,6 +70,7 @@ static uint64_t sgi_self(unsigned id)
 	       (uint64_t)id << 24 |
 	       (1U << (m & 0xf));		/* target list: Aff0 */
 }
+#endif
 
 static uint64_t smc(uint64_t fn, uint64_t a1, uint64_t a2, uint64_t a3)
 {
@@ -106,10 +104,14 @@ static void __attribute__((noreturn)) reset(unsigned after_s)
 	con_skip();
 	con_str("RESET", after_s > 20 ? "in 40s" : "in 20s");
 	delay_ms(after_s * 1000);
+#if defined(BOARD_DALI)
+	smc(PSCI_SYSTEM_OFF, 0, 0, 0);
+#else
 	wr32(IMEM_RESTART_REASON, RESTART_BOOTLOADER);
 	__asm__ volatile("dsb sy" ::: "memory");
 	smc(PSCI_SYSTEM_RESET, 0, 0, 0);
 	wr32(PSHOLD, 0);
+#endif
 	for (;;)
 		__asm__ volatile("wfe");
 }
@@ -220,6 +222,7 @@ static uintptr_t find_gicr(void)
 	return 0;
 }
 
+#if !defined(BOARD_DALI)
 static void gicd_wait_rwp(void)
 {
 	for (int i = 0; i < 1000000 && (rd32(GICD_BASE) & (1U << 31)); i++)
@@ -339,6 +342,7 @@ static void test_gic(void)
 	wr32(r + GICR_ICENABLER0, 0xffffffff);
 	isb();
 }
+#endif
 
 /* ---- main ---- */
 
@@ -347,6 +351,7 @@ static void __attribute__((unused)) psci_line(const char *label, uint64_t fn)
 	con_hex2(label, "feat=", smc(PSCI_FEATURES, fn, 0, 0), 0, 0);
 }
 
+#if !defined(BOARD_DALI)
 static uint64_t scratch[8192];	/* 64KB, lives in our (later cacheable) image */
 
 static uint64_t ticks_fill(uint32_t c)
@@ -367,12 +372,15 @@ static uint64_t ticks_mem(void)
 
 static uint32_t to_us(uint64_t ticks)
 {
-	return ticks * 10 / 192;	/* 19.2 MHz */
+	return (uint32_t)(ticks * 1000000ULL / TIMER_HZ);
 }
+#endif
 
 void shim_main(uint64_t dtb)
 {
+#if !defined(BOARD_DALI)
 	struct mmu_info mi;
+#endif
 
 	/* An xnu payload in the ramdisk means: boot it (MMU stays off). */
 	stage = "loader";
@@ -383,6 +391,12 @@ void shim_main(uint64_t dtb)
 	con_str("LOADER", why);
 	con_skip();
 
+#if defined(BOARD_DALI)
+	/* A missing payload must not enter the Qualcomm UFS/MMU diagnostic path. */
+	stage = "no payload";
+	con_str("DALI", "no XNU payload; power off in 20s");
+	reset(20);
+#else
 	/* No payload: probe the internal UFS while the MMU is still off. */
 	stage = "ufs";
 	test_ufs();
@@ -432,4 +446,5 @@ void shim_main(uint64_t dtb)
 
 	stage = "done";
 	reset(40);
+#endif
 }

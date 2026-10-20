@@ -41,7 +41,7 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
 new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/sweet_ufs.c
-@@ -0,0 +1,536 @@
+@@ -0,0 +1,551 @@
 +/*
 + * SWEET internal UFS root device (read-only).
 + *
@@ -505,6 +505,9 @@ new file mode 100644
 +	uintptr_t const *reg = NULL;
 +	unsigned int size = 0;
 +	char want[64] = "userdata";
++	uint32_t lun = 0;
++	uint32_t const *lun_prop = NULL;
++	unsigned int lun_size = 0;
 +	int error;
 +
 +	if (SecureDTLookupEntry(NULL, "/sweet-ufs", &node) != kSuccess ||
@@ -526,7 +529,19 @@ new file mode 100644
 +		return ENOMEM;
 +	}
 +	su.dma_pa = ptoa_64(pn);
-+	su.lun = 0;
++	if (SecureDTGetProperty(node, "lun", (void const **)&lun_prop,
++	    &lun_size) == kSuccess) {
++		if (lun_size < sizeof(*lun_prop)) {
++			printf("SWEET UFS: invalid LUN property size %u\n", lun_size);
++			return EINVAL;
++		}
++		memcpy(&lun, lun_prop, sizeof(lun));
++		if (lun > 0xff) {
++			printf("SWEET UFS: invalid LUN %u\n", lun);
++			return EINVAL;
++		}
++	}
++	su.lun = (uint8_t)lun;
 +	su.secsize = DEV_BSIZE;
 +
 +	lck_mtx_lock(&sweet_ufs_lock);

@@ -1,5 +1,10 @@
 # ios-sweet
 
+An experimental bring-up for the Redmi K80 Ultra (`dali`, MT6991) is being
+prepared locally; it does not boot iOS yet. See [docs/dali-bringup.md](docs/dali-bringup.md)
+for its hardware map and current limits. The working port documented below is
+still the Redmi Note 10 Pro (`sweet`, SM7150).
+
 **Apple's iOS 16 running on a Redmi Note 10 Pro.**
 
 This project ports Apple's open-source XNU kernel (xnu-8796, the iOS 16 generation) to the Xiaomi Redmi Note 10 Pro (`sweet`, Qualcomm SM7150 / Snapdragon 732G). On top of it runs the **unmodified iOS 16.7.16 (20H392) userland of the iPhone X**: launchd, the system daemons, backboardd, SpringBoard and the stock apps.
