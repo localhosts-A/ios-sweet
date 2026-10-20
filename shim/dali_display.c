@@ -25,6 +25,7 @@ static uintptr_t mutex_regs[4];
 static unsigned int mutex_count;
 static unsigned int mutex_id;
 static int ready;
+static int flushing;
 static uint32_t status;
 
 static uint32_t rd(uintptr_t p)
@@ -87,6 +88,7 @@ static int adopt_surface(uintptr_t ovl)
 int dali_display_init(uintptr_t fdt)
 {
 	ready = 0;
+	flushing = 0;
 	mutex_count = 0;
 	active_ovl = 0;
 	status = 1;
@@ -155,11 +157,13 @@ int dali_display_init(uintptr_t fdt)
 
 int dali_display_flush(void)
 {
-	if (!ready)
+	if (!ready || flushing)
 		return 0;
+	flushing = 1; /* Exception output must not recurse into faulting MMIO. */
 	if (!wait_bits(DSI + DSI_INTSTA, DSI_BUSY, 0)) {
 		status = 6;
 		ready = 0;
+		flushing = 0;
 		return 0;
 	}
 	uint32_t cmd = rd(DSI + DSI_CMDQ0);
@@ -188,6 +192,7 @@ int dali_display_flush(void)
 	status = done && idle ? 0 : 7;
 	if (status)
 		ready = 0; /* A failed transaction must not stall every console line. */
+	flushing = 0;
 	return !status;
 }
 

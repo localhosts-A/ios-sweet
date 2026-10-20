@@ -5,6 +5,8 @@ cd "$(dirname "$0")"
 TARGET_BOARD=${TARGET_BOARD:-sweet}
 TARGET=()
 LINKFLAGS=()
+DISPLAY_OBJECTS=()
+DISPLAY_SOURCES=()
 case "$TARGET_BOARD" in
 	sweet)
 		CC=aarch64-linux-gnu-gcc
@@ -20,7 +22,9 @@ case "$TARGET_BOARD" in
 		NM=llvm-nm
 		TARGET=(--target=aarch64-none-elf)
 		LINKFLAGS=(-fuse-ld=lld)
-		CFLAGS=(-O2 -ffreestanding -fno-builtin -fno-jump-tables -nostdlib -fno-pic -mgeneral-regs-only -mstrict-align -fno-stack-protector -Wall -Wextra -DBOARD_DALI)
+		CFLAGS=(-O2 -ffreestanding -fno-builtin -fno-jump-tables -nostdlib -fno-pic -mgeneral-regs-only -mstrict-align -fno-stack-protector -Wall -Wextra -DBOARD_DALI -DDALI_DISPLAY)
+		DISPLAY_SOURCES=(dali_display.c)
+		DISPLAY_OBJECTS=(out/dali_display.o)
 		;;
 	*)
 		echo "unsupported TARGET_BOARD=$TARGET_BOARD" >&2
@@ -28,16 +32,16 @@ case "$TARGET_BOARD" in
 		;;
 esac
 mkdir -p out
-for f in start.S shim.c console.c mmu.c fdt.c loader.c ufs.c; do
+for f in start.S shim.c console.c mmu.c fdt.c loader.c ufs.c "${DISPLAY_SOURCES[@]}"; do
 	"$CC" "${TARGET[@]}" "${CFLAGS[@]}" -c "$f" -o "out/${f%.*}.o"
 done
 # The image runs wherever ABL puts it with no relocation pass: only the
 # header's image_size (start.o, linked at 0) may be an absolute address.
-abs=$("$READELF" -r out/shim.o out/console.o out/mmu.o out/fdt.o out/loader.o out/ufs.o | grep -c ABS64 || true)
+abs=$("$READELF" -r out/shim.o out/console.o out/mmu.o out/fdt.o out/loader.o out/ufs.o "${DISPLAY_OBJECTS[@]}" | grep -c ABS64 || true)
 [ "$abs" = 0 ] || { echo "error: $abs absolute relocations in C objects" >&2; exit 1; }
 
 "$CC" "${TARGET[@]}" "${CFLAGS[@]}" "${LINKFLAGS[@]}" -static -T shim.ld -Wl,--build-id=none -Wl,-N \
-	out/start.o out/shim.o out/console.o out/mmu.o out/fdt.o out/loader.o out/ufs.o -o out/shim.elf
+	out/start.o out/shim.o out/console.o out/mmu.o out/fdt.o out/loader.o out/ufs.o "${DISPLAY_OBJECTS[@]}" -o out/shim.elf
 $OBJCOPY -O binary out/shim.elf out/Image
 # ABL copies the file; pad to image_size so .bss/stacks exist as zeroed bytes.
 end_hex=$("$NM" out/shim.elf | awk '$3=="_end"{print $1}')
@@ -70,6 +74,8 @@ else
 		--os_version 17.0.0 --os_patch_level 2035-06 \
 		--cmdline "console=null" -o out/shim-boot.img
 fi
-# Host render of the console layout.
-gcc -O1 -Wall -o out/host_test console.c host_test.c && ./out/host_test
+# Host render of the Sweet console layout (the host has no Dali MMIO).
+if [ "$TARGET_BOARD" = sweet ]; then
+	gcc -O1 -Wall -o out/host_test console.c host_test.c && ./out/host_test
+fi
 ls -l out/Image out/shim-boot.img

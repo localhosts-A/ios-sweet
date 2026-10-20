@@ -24,6 +24,8 @@ extern volatile uint32_t *con_fb;
 #if defined(DALI_DISPLAY)
 void con_set_surface(uintptr_t pa, uint32_t pitch, uint32_t format);
 void con_pixel(unsigned int x, unsigned int y, uint32_t color);
+uint32_t con_row_bytes(void);
+uint32_t con_depth(void);
 #endif
 void con_clear(uint32_t bg);
 void con_skip(void);

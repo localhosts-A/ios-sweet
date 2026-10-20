@@ -4,6 +4,8 @@ cd "$(dirname "$0")"
 
 OUT=out-dali
 TARGET=(--target=aarch64-none-elf)
+DISPLAY_SOURCES=()
+DISPLAY_OBJECTS=()
 CFLAGS=(-O2 -ffreestanding -fno-builtin -fno-jump-tables -nostdlib -fno-pic
 	-mgeneral-regs-only -mstrict-align -fno-stack-protector -Wall -Wextra
 	-DBOARD_DALI -DDALI_PAYLOAD_PROBE -DDALI_PAYLOAD_PROBE_PARSE_ONLY)
@@ -36,18 +38,20 @@ PY
 	*) echo 'PROBE_MODE must be stages, validation, files, metadata or ramlog' >&2; exit 1 ;;
 esac
 if [[ "${PROBE_MODE:-validation}" != ramlog ]]; then
-	CFLAGS+=(-DDALI_PAYLOAD_PROBE_STAGED)
+	CFLAGS+=(-DDALI_PAYLOAD_PROBE_STAGED -DDALI_DISPLAY)
+	DISPLAY_SOURCES=(dali_display.c)
+	DISPLAY_OBJECTS=("$OUT/dali_display.o")
 fi
 mkdir -p "$OUT"
 
-for f in start.S shim.c console.c ramlog.c mmu.c fdt.c loader.c ufs.c; do
+for f in start.S shim.c console.c ramlog.c mmu.c fdt.c loader.c ufs.c "${DISPLAY_SOURCES[@]}"; do
 	clang "${TARGET[@]}" "${CFLAGS[@]}" -c "$f" -o "$OUT/${f%.*}.o"
 done
 
 clang "${TARGET[@]}" "${CFLAGS[@]}" -static -fuse-ld=lld -T shim.ld \
 	-Wl,--build-id=none -Wl,-N \
 	"$OUT/start.o" "$OUT/shim.o" "$OUT/console.o" "$OUT/mmu.o" \
-	"$OUT/fdt.o" "$OUT/loader.o" "$OUT/ufs.o" "$OUT/ramlog.o" -o "$OUT/payload-probe.elf"
+	"$OUT/fdt.o" "$OUT/loader.o" "$OUT/ufs.o" "$OUT/ramlog.o" "${DISPLAY_OBJECTS[@]}" -o "$OUT/payload-probe.elf"
 llvm-objcopy -O binary "$OUT/payload-probe.elf" "$OUT/payload-probe.Image"
 end_hex=$(llvm-nm "$OUT/payload-probe.elf" | awk '$3 == "_end" { print $1 }')
 test -n "$end_hex"

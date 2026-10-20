@@ -13,6 +13,9 @@
 #include "loader.h"
 #include "ufs.h"
 #include "ramlog.h"
+#if defined(DALI_DISPLAY)
+#include "dali_display.h"
+#endif
 #if defined(DALI_ANDROID_CHAIN)
 #include "android_chain.h"
 #endif
@@ -423,6 +426,9 @@ static uint32_t to_us(uint64_t ticks)
 
 void shim_main(uint64_t dtb)
 {
+#if defined(DALI_DISPLAY)
+	dali_display_init(dtb);
+#endif
 #if defined(DALI_RAMLOG)
 	ramlog_init(dtb);
 	con_str("BEGIN", "reserved-RAM diagnostic; no storage writes");
@@ -442,6 +448,10 @@ void shim_main(uint64_t dtb)
 	stage = "loader";
 	con_clear(RED);
 	con_str("SHIM", "sweet milestone 4: xnu loader");
+#if defined(DALI_DISPLAY)
+	con_hex("DISPLAY", dali_display_status());
+	con_hex("FB", (uintptr_t)con_fb);
+#endif
 	con_skip();
 	const char *why = loader_boot(dtb);
 	con_str("LOADER", why);

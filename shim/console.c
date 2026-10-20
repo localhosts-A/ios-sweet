@@ -24,6 +24,9 @@ static uint32_t surface_pitch = FB_STRIDE;
 static uint32_t surface_format = 2;
 static unsigned int surface_bpp = 4;
 
+uint32_t con_row_bytes(void) { return surface_pitch; }
+uint32_t con_depth(void) { return surface_bpp * 8; }
+
 void con_set_surface(uintptr_t pa, uint32_t pitch, uint32_t format)
 {
 	con_fb = (volatile uint32_t *)pa;
@@ -145,6 +148,10 @@ void con_str(const char *label, const char *s)
 #if defined(DALI_RAMLOG_PROBE)
 	return;
 #endif
+#if defined(DALI_DISPLAY)
+	if (row >= (FB_H - MARGIN) / CH_H)
+		con_clear(con_bg);
+#endif
 	put_str(0, label, YELLOW);
 	put_str(LABEL_COLS, s, WHITE);
 	row++;
@@ -180,6 +187,10 @@ void con_hex2(const char *label, const char *a, uint32_t va, const char *b, uint
 #endif
 #if defined(DALI_RAMLOG_PROBE)
 	return;
+#endif
+#if defined(DALI_DISPLAY)
+	if (row >= (FB_H - MARGIN) / CH_H)
+		con_clear(con_bg);
 #endif
 	int col = put_str(0, label, YELLOW);
 	col = col < LABEL_COLS ? LABEL_COLS : col + 1;

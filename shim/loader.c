@@ -236,6 +236,15 @@ static void launch_xnu(const struct payload *p, uintptr_t adt_pa)
 	ba->Video.v_width = FB_W;
 	ba->Video.v_height = FB_H;
 	ba->Video.v_depth = 32;
+#if defined(DALI_DISPLAY)
+	/* Hand XNU the same validated surface used by the visible shim console. */
+	ba->Video.v_display = con_fb != 0;
+	if (con_fb) {
+		ba->Video.v_baseAddr = (uintptr_t)con_fb;
+		ba->Video.v_rowBytes = con_row_bytes();
+		ba->Video.v_depth = con_depth();
+	}
+#endif
 	ba->deviceTreeP = adt_pa - pa_of_va_base; /* XNU reads this with the MMU on: a VA. */
 	ba->deviceTreeLength = (uint32_t)p->adt_size;
 	for (int i = 0; i < BOOT_LINE_LENGTH; i++)

@@ -1,8 +1,16 @@
+## Current handoff: visible Dali boot console (2026-10-21)
+
+- **User confirmed probe 2 shows colors and text.** Hardware-tested commit `26daaf5`, probe SHA-256 `6a2ffb241d5d04a3ca7305297d1ad0621871afef50292172059c381720e1a254`. First probe `b063b31` showed no output.
+- **Phone is stock Android online; original boot_b restored.** Root-side hashes verified exactly: boot_b `6dc40de74fa7de4f435c513047c51fe10634c1891666031039c52a08b27a3cd5`; init_boot_b `08794a432befcf0504ee4933a51260cb6ccc4785b69f345c4b5968e8e6053d2d`. No diagnostic image installed. No userdata, super/GPT, init_boot or bootloader writes during these two display trials (only boot_b).
+- Integrated the successful retained display into normal Dali shim and non-RAMLOG payload probes: initialize before output, flush after lines, page console on overflow, guard refresh reentry, pass adopted framebuffer base/pitch/depth in XNU boot args. RAMLOG/stock-chain display behavior unchanged. Other-board build remains separate.
+- Normal Dali shim and validation payload probe both build without warnings. Normal boot image `shim/out/shim-boot.img` SHA-256 `0fe9fcb03cda12fbd07d9232363a7cb02d73d35d4fdac8919520767832fd1b9b`. Validation-only image `shim/out-dali/dali-payload-probe-boot.img` SHA-256 `38dd0554df69809f67f5bfce35a7ba4532fbe745743946059e12ee892efa703f`. **These integrated images have not been flashed; only standalone probe 2 is visually confirmed.**
+- The user requested adding visible diagnostics; boot-stage text is now demonstrated. **No XNU entry evidence yet.** Next meaningful trial can use the visible loader messages (photograph final error/metadata) with the matching payload/init_boot and restore originals afterward. XNU ongoing command-mode refresh, TE service/cold display initialization remain separate unfinished work. Do not format userdata or repeat the failed Android chain.
+
 ## Display probe 2 prepared (2026-10-21)
 
 - Stock Android and both original boot hashes verified after probe 1 (no colors/text).
 - Read-only `lk_b` copy at `/tmp/dali-lk-b-20261021.bin`; local payload/disassembly outside Git. LK `ddp_dsi_trigger` at payload offset0x52468 uses command0x002c3909, command queue0x44 and retains START=1 through transfer at0x5257c..0x5259c. No Linux DSI_EN prerequisite in this CPU trigger path. LK mutex bit names independently confirm DSI0 MAC0 bit23 and id0..4 scan.
-- Probe 2 removes the ungrounded DSI_EN prerequisite, retains LK HS settings, and clears START only after transfer idle. Same validation/bounds/storage protections. Build succeeds without warnings; image SHA-256 `6a2ffb241d5d04a3ca7305297d1ad0621871afef50292172059c381720e1a254`. **Not yet flashed at this checkpoint; visibility unconfirmed.**
+- Probe 2 removes the ungrounded DSI_EN prerequisite, retains LK HS settings, and clears START only after transfer idle. Same validation/bounds/storage protections. Build succeeds without warnings; image SHA-256 `6a2ffb241d5d04a3ca7305297d1ad0621871afef50292172059c381720e1a254`. **SUCCESS AND RESTORED:** user confirmed visible colors/text. After manual fastboot, confirmed dali/slot b, restored full stock boot_b, rebooted Android, verified both original partition hashes. init_boot_b stayed stock. No diagnostic image remains.
 - Next: boot_b-only trial, then restore and hash-check originals. No SRAM scratch writes, userdata formatting, GPT/super or bootloader writes. Debugfs was temporarily mounted for inspection; generic `mtkdrm` register-read interface is absent.
 
 ## Active display work (2026-10-21)
