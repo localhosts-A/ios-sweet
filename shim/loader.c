@@ -95,6 +95,13 @@ volatile uint32_t loader_probe_validation;
 #define VALIDATION_REJECT(n) 0
 #endif
 
+#if defined(DALI_PAYLOAD_PROBE_FILES)
+volatile uint32_t loader_probe_file_check;
+#define FILE_REJECT(n) (loader_probe_file_check = (n), VALIDATION_REJECT(6))
+#else
+#define FILE_REJECT(n) VALIDATION_REJECT(6)
+#endif
+
 static uint32_t read_le32(uint64_t p)
 {
 	const volatile uint8_t *b = (const volatile uint8_t *)p;
@@ -178,10 +185,12 @@ static int payload_validate(const struct payload *p, uint64_t payload_size,
 		    add_overflow_u64(s->vmaddr, s->vmsize, &va_end) ||
 		    va_end > p->kernel_end)
 			return VALIDATION_REJECT(5);
-		if (add_overflow_u64(s->file_off, s->file_size, &file_end) ||
-		    s->file_off < PAYLOAD_HEADER_SIZE + p->nsegs * sizeof(struct payload_seg) ||
-		    file_end > payload_size)
-			return VALIDATION_REJECT(6);
+		if (add_overflow_u64(s->file_off, s->file_size, &file_end))
+			return FILE_REJECT(1);
+		if (s->file_off < PAYLOAD_HEADER_SIZE + p->nsegs * sizeof(struct payload_seg))
+			return FILE_REJECT(2);
+		if (file_end > payload_size)
+			return FILE_REJECT(3);
 		off = s->vmaddr - p->virt_base;
 		if (off > p->mem_size || s->vmsize > p->mem_size - off)
 			return VALIDATION_REJECT(7);

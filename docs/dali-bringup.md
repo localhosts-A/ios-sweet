@@ -192,6 +192,15 @@ The validation-reason probe retains every validation condition:
 | 90 seconds | Complete parse succeeds |
 | 110 seconds | Exception handler |
 
+The validation-reason image (`fbb4d929…c0ad3e2`) shut down 57 seconds after
+logo appearance, consistent with the 60-second segment-file rejection path.
+Both originals were restored, Android returned, and root-side hashes matched.
+This remains a timing inference rather than a captured error string.
+`PROBE_MODE=files bash shim/build-dali-payload-probe.sh` further separates
+file-offset addition overflow (10s), offsets before the metadata end (30s),
+and file ends beyond the payload size (50s); other errors are 80s, success
+90s and exceptions 110s. Moving the deadline also checks timing causality.
+
 After the corrected checkpoint test, both stock partitions were restored and
 root-side hashes matched their saved full-partition backups exactly. No
 userdata, super or GPT changes occurred. Never infer XNU entry from a timed

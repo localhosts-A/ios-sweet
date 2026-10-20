@@ -11,7 +11,8 @@ CFLAGS=(-O2 -ffreestanding -fno-builtin -fno-jump-tables -nostdlib -fno-pic
 case "${PROBE_MODE:-validation}" in
 	stages) ;;
 	validation) CFLAGS+=(-DDALI_PAYLOAD_PROBE_VALIDATE) ;;
-	*) echo 'PROBE_MODE must be stages or validation' >&2; exit 1 ;;
+	files) CFLAGS+=(-DDALI_PAYLOAD_PROBE_VALIDATE -DDALI_PAYLOAD_PROBE_FILES) ;;
+	*) echo 'PROBE_MODE must be stages, validation or files' >&2; exit 1 ;;
 esac
 mkdir -p "$OUT"
 
