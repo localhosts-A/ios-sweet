@@ -24,7 +24,7 @@ volatile uint32_t loader_probe_metadata;
 #define MAX_PAYLOAD_SIZE	(32ULL << 20)
 #define LZ4_BLOCK_SIZE		(64U << 10)
 #define LZ4_FRAME_MAGIC		0x184d2204U
-#define INITBOOT_SEARCH_WINDOW	(16ULL << 20)
+#define INITBOOT_SEARCH_WINDOW	(128ULL << 20)
 
 struct payload_seg {
 	uint64_t vmaddr, vmsize, file_off, file_size;
@@ -89,6 +89,9 @@ static uint8_t lz4_block_out[LZ4_BLOCK_SIZE] __attribute__((aligned(16)));
 #if defined(DALI_DISPLAY) && defined(DALI_PAYLOAD_PROBE)
 static int report_has_meta;
 static uint64_t report_payload_size;
+static uint64_t report_rd_start, report_rd_end, report_ramdisk_end;
+static uint64_t report_frame, report_frame_end;
+static uint32_t report_magics, report_frames;
 static uint32_t report_segment = UINT32_MAX, report_reason, report_file_check;
 #define REPORT_REJECT(n) (report_reason = (n))
 #define REPORT_FILE(n) (report_file_check = (n))
@@ -250,6 +253,13 @@ void loader_display_report(const char *result)
 	}
 	if (report_reason == 7) check = "segment destination bounds";
 	con_str("CHECK", check);
+	con_hex("INITRD_LO", report_rd_start);
+	con_hex("INITRD_HI", report_rd_end);
+	con_hex("RAM_END", report_ramdisk_end);
+	con_hex("LZ4_MAGIC", report_magics);
+	con_hex("LZ4_VALID", report_frames);
+	con_hex("FRAME", report_frame);
+	con_hex("FRAME_END", report_frame_end);
 	if (report_has_meta) {
 		const struct payload *p = (const struct payload *)payload_meta_bytes;
 		con_hex("PAYLOAD", report_payload_size);
@@ -617,14 +627,42 @@ static int frame_layout(uint64_t start, uint64_t limit, uint64_t *frame_end,
 			return 0;
 		cur += 4;
 	}
-	uint64_t padding = limit - cur;
-	if (padding > 4096)
-		return 0;
-	for (uint64_t i = 0; i < padding; i++)
-		if (*(const volatile uint8_t *)(cur + i) != 0)
-			return 0;
 	*frame_end = cur;
 	return 1;
+}
+
+/* Identify our local CPIO archive before accepting a frame among vendor data. */
+static int frame_has_payload(uint64_t start)
+{
+	uint64_t block_at = start + 15;
+	uint32_t block = read_le32(block_at);
+	uint32_t size = block & 0x7fffffffU, out_size;
+	const uint8_t *out;
+	if (!block || !size)
+		return 0;
+	if (block & 0x80000000U) {
+		out = (const uint8_t *)(block_at + 4);
+		out_size = size;
+	} else {
+		if (!lz4_block_decode((const uint8_t *)(block_at + 4), size,
+		    lz4_block_out, &out_size))
+			return 0;
+		out = lz4_block_out;
+	}
+	/* 110-byte newc header, 14-byte name including NUL, then SWEETXNU. */
+	if (out_size < 132 || parse_hex8(out + 94) != 14 ||
+	    parse_hex8(out + 54) < PAYLOAD_HEADER_SIZE ||
+	    parse_hex8(out + 54) > MAX_PAYLOAD_SIZE)
+		return 0;
+	static const char cpio_magic[] = "070701";
+	static const char name[] = "sweet.payload";
+	for (unsigned int i = 0; i < sizeof(cpio_magic) - 1; i++)
+		if (out[i] != (uint8_t)cpio_magic[i])
+			return 0;
+	for (unsigned int i = 0; i < sizeof(name); i++)
+		if (out[110 + i] != (uint8_t)name[i])
+			return 0;
+	return magic_ok((const char *)out + 124);
 }
 
 /* Android may append [bootconfig][padding][size][checksum][#BOOTCONFIG\n]. */
@@ -672,14 +710,28 @@ static int find_initboot_frame(uint64_t rd_start, uint64_t rd_end,
 	uint64_t low = rd_end > INITBOOT_SEARCH_WINDOW ? rd_end - INITBOOT_SEARCH_WINDOW : rd_start;
 	if (low < rd_start)
 		low = rd_start;
-	for (uint64_t at = rd_end - 4;; at--) {
-		if (read_le32(at) == LZ4_FRAME_MAGIC &&
-		    frame_layout(at, rd_end, frame_end, content_size)) {
-			*frame_start = at;
-			return 1;
+	uint64_t at = rd_end - 4;
+	uint32_t window = read_le32(at);
+	for (;;) {
+		if (window == LZ4_FRAME_MAGIC) {
+#if defined(DALI_DISPLAY) && defined(DALI_PAYLOAD_PROBE)
+			report_magics++;
+#endif
+			if (frame_layout(at, rd_end, frame_end, content_size)) {
+#if defined(DALI_DISPLAY) && defined(DALI_PAYLOAD_PROBE)
+				report_frames++;
+#endif
+				if (frame_has_payload(at)) {
+					*frame_start = at;
+					return 1;
+				}
+			}
 		}
 		if (at == low)
 			break;
+		at--;
+		/* One byte load per position rather than four Device-memory loads. */
+		window = (window << 8) | *(const volatile uint8_t *)at;
 	}
 	return 0;
 }
@@ -736,21 +788,32 @@ static const char *loader_boot_dali(uintptr_t dtb)
 	if (!fdt_chosen_u64(dtb, "linux,initrd-start", &rd_start) ||
 	    !fdt_chosen_u64(dtb, "linux,initrd-end", &rd_end))
 		return "no initrd in /chosen";
-	if (rd_end <= rd_start)
+	if (rd_end <= rd_start || rd_end - rd_start > INITBOOT_SEARCH_WINDOW)
 		return "invalid initrd range";
+#if defined(DALI_DISPLAY) && defined(DALI_PAYLOAD_PROBE)
+	report_rd_start = rd_start;
+	report_rd_end = rd_end;
+#endif
 	PROBE_STAGE(1);
 	con_hex2("INITRD", "lo=", rd_start, "hi=", rd_end);
 	const char *err = strip_bootconfig(rd_start, rd_end, &ramdisk_end);
 	if (err)
 		return err;
+#if defined(DALI_DISPLAY) && defined(DALI_PAYLOAD_PROBE)
+	report_ramdisk_end = ramdisk_end;
+#endif
 	PROBE_STAGE(2);
-	con_str("INITBOOT", "searching final LZ4 frame");
+	con_str("INITBOOT", "finding SWEET CPIO LZ4 frame");
 	if (!find_initboot_frame(rd_start, ramdisk_end, &frame_start, &frame_end, &content_size))
-		return "no final LZ4 init_boot frame";
+		return "no SWEET CPIO LZ4 frame";
+#if defined(DALI_DISPLAY) && defined(DALI_PAYLOAD_PROBE)
+	report_frame = frame_start;
+	report_frame_end = frame_end;
+#endif
 	PROBE_STAGE(3);
 #if defined(DALI_ANDROID_CHAIN)
 	generic_frame_start = frame_start;
-	generic_frame_end = ramdisk_end;
+	generic_frame_end = frame_end;
 #endif
 	con_hex2("INITBOOT", "frame=", frame_start, "size=", content_size);
 	static struct cpio_stream cpio;
