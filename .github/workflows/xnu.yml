@@ -74,6 +74,12 @@ jobs:
           MAKEFLAGS: ${{ inputs.keep_going == 'false' && '' || '-k' }}
         run: bash build.sh
 
+      - name: Verify SWEET BSD init progress patch
+        working-directory: dxb
+        run: |
+          grep -Fq '#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)' xnu/bsd/kern/bsd_init.c
+          grep -Fq '#define DEBUG_BSDINIT 1' xnu/bsd/kern/bsd_init.c
+
       - name: Package build tree for local compiles
         if: always()
         run: |
