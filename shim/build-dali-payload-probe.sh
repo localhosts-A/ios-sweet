@@ -12,7 +12,28 @@ case "${PROBE_MODE:-validation}" in
 	stages) ;;
 	validation) CFLAGS+=(-DDALI_PAYLOAD_PROBE_VALIDATE) ;;
 	files) CFLAGS+=(-DDALI_PAYLOAD_PROBE_VALIDATE -DDALI_PAYLOAD_PROBE_FILES) ;;
-	*) echo 'PROBE_MODE must be stages, validation or files' >&2; exit 1 ;;
+	metadata)
+		test -n "${PAYLOAD_REFERENCE:-}" || { echo 'PAYLOAD_REFERENCE is required' >&2; exit 1; }
+		mkdir -p "$OUT"
+		python3 - "$PAYLOAD_REFERENCE" "$OUT/probe-expected-meta.h" <<'PY'
+import struct
+import sys
+from pathlib import Path
+b = Path(sys.argv[1]).read_bytes()
+if len(b) < 680 or b[:8] != b'SWEETXNU':
+    raise SystemExit('Invalid reference payload')
+version, nsegs = struct.unpack_from('<II', b, 8)
+if version != 1 or not 1 <= nsegs <= 32 or len(b) < 680 + 32 * nsegs:
+    raise SystemExit('Invalid reference metadata')
+meta = b[:680 + 32 * nsegs]
+rows = [', '.join(f'0x{x:02x}' for x in meta[i:i + 16]) for i in range(0, len(meta), 16)]
+Path(sys.argv[2]).write_text(
+    f'#define EXPECTED_PAYLOAD_SIZE {len(b)}ULL\n'
+    'static const uint8_t expected_payload_meta[] = {\n' +
+    ',\n'.join(rows) + '\n};\n')
+PY
+		CFLAGS+=(-DDALI_PAYLOAD_PROBE_METADATA -I"$OUT") ;;
+	*) echo 'PROBE_MODE must be stages, validation, files or metadata' >&2; exit 1 ;;
 esac
 mkdir -p "$OUT"
 

@@ -201,6 +201,20 @@ file-offset addition overflow (10s), offsets before the metadata end (30s),
 and file ends beyond the payload size (50s); other errors are 80s, success
 90s and exceptions 110s. Moving the deadline also checks timing causality.
 
+The file-check image (`c95fcfc4…21fefeb`) shut down after about 52 seconds,
+consistent with its 50-second file-end-bounds path. The originals were restored
+and root-side hashes matched. Local payload bounds are valid, so a separate
+comparison probe checks size and all metadata bytes against the exact packaged
+source, then stops before destination writes or XNU entry:
+
+```sh
+PROBE_MODE=metadata PAYLOAD_REFERENCE=out-dali/gh-39425210357/dali-payload.bin \
+    bash shim/build-dali-payload-probe.sh
+```
+
+Metadata-mode deadlines: size mismatch 10s, header mismatch 30s, segment-table
+mismatch 50s, exact match 70s, earlier loader error 80s, exception 110s.
+
 After the corrected checkpoint test, both stock partitions were restored and
 root-side hashes matched their saved full-partition backups exactly. No
 userdata, super or GPT changes occurred. Never infer XNU entry from a timed

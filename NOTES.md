@@ -2,18 +2,6 @@
 
 ### >>> UPDATE 2026-10-20 (Dali / MT6991 bring-up; read first) <<<
 
-**TEMPORARY TEST IN PROGRESS (2026-10-21):** active `boot_b` contains the
-file-check-specific parse-only probe
-`c95fcfc4bc7330977b8154330154bfe9430cbb1997e36b26584fcfdb721fefeb`,
-paired with candidate `init_boot_b`
-`f6d2c91e8e5db820303cff4b8c73e83b69c21461f0efbc81705b7293f39e308e`.
-Both flashes and reboot succeeded after checking dali / slot b / unlocked.
-Await shutdown timing and manual fastboot return, then restore original
-`init_boot_b.img` and `boot_b.img` from
-`backup/dali-25060RK16C-pairtest-20261020/`, reboot Android and verify hashes.
-Do not start another experiment before recovery. Restored descriptions below
-refer to the pre-test state. No userdata/super/GPT writes.
-
 **STATE (2026-10-21):** Dali is not confirmed to enter XNU. Legacy-LZ4
 packaging reaches LK's kernel jump; a minimal shim probe powers off after
 about 20 seconds although the panel retains its logo. The corrected parse-only
@@ -44,12 +32,25 @@ after the logo). Both originals were flashed back successfully; Android is
 online. Root-side hashes exactly match both saved full-partition backups.
 Next: distinguish file-offset overflow, offsets before metadata and file-end
 bounds, using a changed deadline to check the timing inference.
-The active finer `PROBE_MODE=files` image is:
+The finer `PROBE_MODE=files` image was tested:
 `c95fcfc4bc7330977b8154330154bfe9430cbb1997e36b26584fcfdb721fefeb`.
 It uses 10/30/50-second deadlines for the three segment file checks;
-other errors 80, successful parse 90, exceptions 110. Host fault injection
-selects each of the three expected rejection codes. Source commit 5ac23bb
-introduced the staged/validation diagnostics; 254803f recorded the test.
+other errors 80, successful parse 90, exceptions 110. User reports shutdown
+after 52 seconds, consistent with file_end > payload_size (50s). This is a
+timing inference; actual error text and metadata values are not captured.
+Both originals were restored successfully and Android returned.
+
+All local segment file ends are below payload size 16,608,064, and the ADT
+bounds check precedes them. Thus a target file-end rejection would require a
+different runtime metadata/size input or corruption. Next compare target
+metadata fingerprints against the exact packaged payload without destination
+writes, rather than bypassing validation. Restoration hashes exactly match both full backups. A source-comparison
+probe is built but not flashed: `15bdc94955c7c0e707eb386e4b05b28a428b8615f56ecf8c43f22c0e907d555b`.
+Build using `PROBE_MODE=metadata PAYLOAD_REFERENCE=out-dali/gh-39425210357/dali-payload.bin`.
+It stops at metadata readiness and compares actual size/header/segment bytes:
+10s size differs; 30s header differs; 50s segment table differs; 70s exact
+match; 80s earlier loader error; 110s exception. It never writes XNU targets
+or enters XNU.
 
 No userdata, super, or GPT writes have occurred.
 

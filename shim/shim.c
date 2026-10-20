@@ -61,6 +61,9 @@ extern volatile uint32_t loader_probe_validation;
 #if defined(DALI_PAYLOAD_PROBE_FILES)
 extern volatile uint32_t loader_probe_file_check;
 #endif
+#if defined(DALI_PAYLOAD_PROBE_METADATA)
+extern volatile uint32_t loader_probe_metadata;
+#endif
 static uint64_t probe_started_ticks;
 static int probe_clock_ready;
 #endif
@@ -433,6 +436,9 @@ void shim_main(uint64_t dtb)
 	con_str("DALI", "payload probe done");
 	/* The probe uses power-off time as a screen-independent pass/fail signal. */
 	#if defined(DALI_PAYLOAD_PROBE_STAGED)
+	#if defined(DALI_PAYLOAD_PROBE_METADATA)
+	reset(loader_probe_metadata ? loader_probe_metadata * 20 - 10 : 80);
+	#else
 	#if defined(DALI_PAYLOAD_PROBE_FILES)
 	reset(why[0] == 'p' ? 90 : loader_probe_file_check ?
 	    loader_probe_file_check * 20 - 10 : 80);
@@ -442,6 +448,7 @@ void shim_main(uint64_t dtb)
 	    loader_probe_validation * 10 : 80);
 	#else
 	reset(why[0] == 'p' ? 90 : 10 + loader_probe_stage * 10);
+	#endif
 	#endif
 	#endif
 	#else

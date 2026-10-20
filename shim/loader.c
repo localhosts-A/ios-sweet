@@ -12,6 +12,11 @@
 #include "fdt.h"
 #include "loader.h"
 
+#if defined(DALI_PAYLOAD_PROBE_METADATA)
+#include "probe-expected-meta.h"
+volatile uint32_t loader_probe_metadata;
+#endif
+
 #define BOOT_LINE_LENGTH	608
 #define PAGE_16K		0x4000UL
 #define PAYLOAD_HEADER_SIZE	0x2a8U
@@ -259,6 +264,24 @@ static const char *payload_metadata_ready(struct payload_stream *s,
 	    uint64_t rd_start, uint64_t rd_end)
 {
 	const struct payload *p = (const struct payload *)payload_meta_bytes;
+#if defined(DALI_PAYLOAD_PROBE_METADATA)
+	/* Stop before validation/copies: compare actual decoded bytes with source. */
+	loader_probe_metadata = 1;
+	if (s->size != EXPECTED_PAYLOAD_SIZE)
+		return "metadata probe: payload size differs";
+	loader_probe_metadata = 2;
+	for (uint32_t i = 0; i < PAYLOAD_HEADER_SIZE; i++)
+		if (payload_meta_bytes[i] != expected_payload_meta[i])
+			return "metadata probe: header differs";
+	loader_probe_metadata = 3;
+	if (s->meta_target != sizeof(expected_payload_meta))
+		return "metadata probe: segment count differs";
+	for (uint32_t i = PAYLOAD_HEADER_SIZE; i < s->meta_target; i++)
+		if (payload_meta_bytes[i] != expected_payload_meta[i])
+			return "metadata probe: segment table differs";
+	loader_probe_metadata = 4;
+	return "metadata probe: exact match";
+#endif
 	if (!payload_validate(p, s->size, rd_start, rd_end))
 		return "invalid SWEETXNU metadata";
 	PROBE_STAGE(6);
