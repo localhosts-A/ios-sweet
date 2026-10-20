@@ -1,3 +1,11 @@
+## Current handoff: fixed counter pair ready (2026-10-21)
+
+- CI39505675608 SUCCESS at78a6dd7; final installed Mach-O instruction gate and local downloaded-kernel inspection both pass: helper52bytes, ISB then CNTPCT_EL0 then CNTFRQ_EL0. Source5/5 exact-match (four timed files + native RTC). Compiler1379/1380hits99.93%,1miss. Kernel SHA59419a72ca051dfd32cf3103248c857999b9d5ce310c3e333e86785f94a9726c.
+- Durable ignored pair `shim/out-dali/timed-39505675608/`: exact same shim d91cce49.../root/base+RAMDiskADT/args as previous timed trial. New init_boot90f38f3343c007a63cc9b642fc0e42a7b064ecf7a62a1f4aab341177fddc6798, payload5fd52ee2e0a6ffa92aa6536f5e8c7f6dfebbe70b0c28738ed3ea48dcbd5d5212;29228704bytes/11segments,7537202byteLZ4,8MiB init_boot. Full structural/root/LZ4CPIO/AVB/host-original verification passed; manifest prepared. No active trial yet; fresh preflight next before authorized temporary trial and recovery.
+
+
+- Counter codegen fix committed/pushed78a6dd7; cached full Actions39505675608 dispatched. Local emitted startup object includes both MRS instructions, ordered after ISB. Final linked Mach-O instruction inspection added to CI. Phone original pair physically verified; no active trial.
+
 ## Current handoff: timestamp diagnostic codegen fixed (2026-10-21)
 
 - Actual CI39503871642 Mach-O helper disassembly has ISB and CNTFRQ_EL0 read, but NO CNTPCT_EL0 read; x9 is undefined. Darwin assembler treats semicolon as comment in the `isb; mrs...` inline string. This explains bogus/nonmonotonic photo timestamps, not the automatic reset. kprintf supports ll; no format workaround needed.
