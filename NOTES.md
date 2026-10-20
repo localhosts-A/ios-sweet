@@ -1,3 +1,8 @@
+## ACTIVE MEMORY-ROOT TRIAL (2026-10-21)
+
+- After correcting photo wrap interpretation to setconf, temporary memory-root pair from `shim/out-dali/ramroot-39496962026/` now flashed: fresh Android original/host/candidate hashes matched, fastboot dali/slot_b/unlocked/64+8MiB matched; init_boot_b then boot_b writes OKAY and reboot OKAY. Manifest is trial_rebooted. Same RTC kernel,12MiB RAM-only HFSX root and static PID1, args rd=md0 serial=3. No UFS/userdata/super/GPT writes; no new kernel build. Await screen md0/HFS/PID1 or panic, and manual fastboot. Framebuffer wrap means newest rows can be at TOP.
+- **ORIGINAL RESTORATION PENDING.** On fastboot return, immediately restore full original init_boot_b then boot_b from backup/dali-25060RK16C-pairtest-20261020/, boot Android and verify both root-side hashes. Expected originals unchanged6dc40d... and08794a... (full manifest hashes). Do not treat previous RTC manifest originals_verified as current device state; current memory-root manifest is authoritative for this active trial.
+
 ## Current handoff: corrected root-selection focus; memory-root trial prepared (2026-10-21)
 
 - User correction accepted: rotated photo051452 shows newest TOP rows end at calling setconf, after bsd_autoconf/kmeminit/loopattach/ether_family_init/net_init_run/inittodr. sysctl_mib_init stall diagnosis retracted; no kernel source changes or CI run made for it. RTC hardware success stands. Last RTC pair fully restored and Android/readback verified.
