@@ -23,8 +23,15 @@ def main() -> None:
             error "Configured ccache executable is missing"
             return 1
         fi
-        export CC="${SWEET_CCACHE} ${CC}"
-        export CXX="${SWEET_CCACHE} ${CXX}"
+        # Xcode accepts a compiler executable path, not a shell command string.
+        # Each wrapper invokes ccache with the real toolchain compiler explicitly.
+        local cache_bin="${WORK_DIR}/.ccache-bin"
+        mkdir -p "${cache_bin}"
+        printf '%s\\n' '#!/bin/sh' "exec \\"${SWEET_CCACHE}\\" \\"${CC}\\" \\"\\$@\\"" > "${cache_bin}/clang"
+        printf '%s\\n' '#!/bin/sh' "exec \\"${SWEET_CCACHE}\\" \\"${CXX}\\" \\"\\$@\\"" > "${cache_bin}/clang++"
+        chmod +x "${cache_bin}/clang" "${cache_bin}/clang++"
+        export CC="${cache_bin}/clang"
+        export CXX="${cache_bin}/clang++"
         info "Compiler cache enabled: ${SWEET_CCACHE}"
     fi
 ''')

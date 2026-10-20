@@ -1,6 +1,10 @@
+## Current update: fix Xcode compiler-cache executable wrappers (2026-10-21)
+
+- Corrected RTC run39496483616 failed during bootstrap Xcode build because CC/CXX were ccache command strings, which Xcode treats as one nonexistent path. Cache helper now generates executable clang/clang++ shell wrappers that pass the actual selected compiler to ccache. Patched script bash syntax passes. Exact git apply of0089 matches all5 intended/local-compiled source files. Rebuild both corrections; hardware remains deferred.
+
 ## Current handoff: RTC patch format correction; rebuilding with cache (2026-10-21)
 
-- Run39495162966 built a kernel but failed the mandatory RTC source gate: upstream git apply skipped0089 with `dev/null: No such file or directory`. New-file diff lacked `new file mode 100644`. Added that metadata; exact `git apply --check` on matching clean CI sources now passes (plain patch dry-run previously missed this distinction). Do not use this run as an RTC image. Rebuild current branch with compiler/KDK caches enabled. Phone disconnected; user says finish images first, no device trial until reconnect/fresh preflight. Last physical state remains verified original pair.
+- Run39495162966 built a kernel but failed the mandatory RTC source gate: upstream git apply skipped0089 with `dev/null: No such file or directory`. New-file diff lacked `new file mode 100644`. Added that metadata; exact `git apply --check` on matching clean CI sources now passes (plain patch dry-run previously missed this distinction). Do not use this run as an RTC image. Corrected build `39496483616` at `cf97a72` dispatched with compiler/KDK caches enabled: https://github.com/localhosts-A/ios-sweet/actions/runs/39496483616 . Phone disconnected; user says finish images first, no device trial until reconnect/fresh preflight. Last physical state remains verified original pair.
 
 ## Current handoff: native RTC CI running; compiler/download caching prepared (2026-10-21)
 
