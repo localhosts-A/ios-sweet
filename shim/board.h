@@ -10,6 +10,7 @@
 #define PTIMER_INTID		30	/* FDT PPI 14 -> GIC INTID 16 + 14 */
 #define TIMER_HZ		13000000UL
 #define UFS_BASE		0x16810000UL	/* MediaTek UFSHCI */
+#define WDT_BASE		0x1c010000UL	/* live watchdog FDT, MT6589-compatible TOPRGU */
 #define BOARD_MAP_END		0x400000000ULL	/* identity-map through 16 GiB */
 #define NR_CPUS			1	/* initial Dali boot is single-core */
 #else

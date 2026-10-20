@@ -8,6 +8,7 @@
  * and caches off, x0 = boot_args (physical).
  */
 #include <stdint.h>
+#include "board.h"
 #include "console.h"
 #include "fdt.h"
 #include "loader.h"
@@ -784,6 +785,22 @@ static uint64_t loader_elapsed_ms(uint64_t started)
 	return frequency ? (loader_ticks() - started) * 1000 / frequency : 0;
 }
 
+static void dali_watchdog_snapshot(const char *when)
+{
+	/* Read-only: mode/length per vendor mtk_wdt.c and live /watchdog@1c010000. */
+	uint32_t mode = *(const volatile uint32_t *)(WDT_BASE + 0x00);
+	uint32_t length = *(const volatile uint32_t *)(WDT_BASE + 0x04);
+	uint32_t status = *(const volatile uint32_t *)(WDT_BASE + 0x0c);
+	uint64_t ticks = loader_ticks(), frequency;
+	__asm__ volatile("mrs %0, cntfrq_el0" : "=r"(frequency));
+	uint64_t ms = frequency ? (ticks / frequency) * 1000 +
+	    ((ticks % frequency) * 1000) / frequency : 0;
+	con_str("WDT_READ", when);
+	con_hex2("TOPRGU", "mode=", mode, "length=", length);
+	con_hex("WDT_STATUS", status);
+	con_hex2("COUNTER", "ms=", ms, "hz=", frequency);
+}
+
 static const char *decode_initboot(uint64_t start, uint64_t end, uint64_t content_size,
 	    struct cpio_stream *cpio, uint64_t rd_start, uint64_t rd_end)
 {
@@ -840,6 +857,7 @@ static const char *loader_boot_dali(uintptr_t dtb)
 {
 	uint64_t rd_start, rd_end, ramdisk_end, frame_start, frame_end, content_size;
 	PROBE_STAGE(0);
+	dali_watchdog_snapshot("loader entry");
 	if (!fdt_chosen_u64(dtb, "linux,initrd-start", &rd_start) ||
 	    !fdt_chosen_u64(dtb, "linux,initrd-end", &rd_end))
 		return "no initrd in /chosen";
@@ -877,6 +895,7 @@ static const char *loader_boot_dali(uintptr_t dtb)
 	if (err)
 		return err;
 	PROBE_STAGE(8);
+	dali_watchdog_snapshot("payload copied");
 	con_hex2("PAYLOAD", "bytes=", cpio.payload.size, "segs=", cpio.payload.p->nsegs);
 	con_hex("PHYS", cpio.payload.p->phys_base);
 	con_hex("ADT", cpio.payload.adt_pa);

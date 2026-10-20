@@ -1,0 +1,211 @@
+diff --git a/osfmk/kern/startup.c b/osfmk/kern/startup.c
+--- a/osfmk/kern/startup.c
++++ b/osfmk/kern/startup.c
+@@ -218,12 +218,30 @@
+ 
+ TUNABLE(startup_debug_t, startup_debug, "startup_debug", 0);
+ 
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++/* Same physical counter as the shim; independent of calendar/RTC setup. */
++uint64_t sweet_boot_counter_ms(void);
++uint64_t
++sweet_boot_counter_ms(void)
++{
++	uint64_t ticks, frequency;
++	__asm__ volatile("isb; mrs %0, cntpct_el0" : "=r"(ticks));
++	__asm__ volatile("mrs %0, cntfrq_el0" : "=r"(frequency));
++	return frequency ? (ticks / frequency) * 1000 +
++	       ((ticks % frequency) * 1000) / frequency : 0;
++}
++#endif
++
+ static inline void
+ kernel_bootstrap_log(const char *message)
+ {
+ 	if ((startup_debug & STARTUP_DEBUG_VERBOSE) &&
+ 	    startup_phase >= STARTUP_SUB_KPRINTF) {
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++		kprintf("T%llums kernel_bootstrap: %s\n", sweet_boot_counter_ms(), message);
++#else
+ 		kprintf("kernel_bootstrap: %s\n", message);
++#endif
+ 	}
+ 	kernel_debug_string_early(message);
+ }
+@@ -233,7 +251,11 @@
+ {
+ 	if ((startup_debug & STARTUP_DEBUG_VERBOSE) &&
+ 	    startup_phase >= STARTUP_SUB_KPRINTF) {
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++		kprintf("T%llums kernel_bootstrap_thread: %s\n", sweet_boot_counter_ms(), message);
++#else
+ 		kprintf("kernel_bootstrap_thread: %s\n", message);
++#endif
+ 	}
+ 	kernel_debug_string_early(message);
+ }
+@@ -411,7 +433,8 @@
+ 		if ((startup_debug & STARTUP_DEBUG_VERBOSE) &&
+ 		    startup_phase >= STARTUP_SUB_KPRINTF &&
+ 		    cur->subsystem != logged_subsystem) {
+-			kprintf("kernel_startup: phase %u begin\n", cur->subsystem);
++			kprintf("T%llums kernel_startup: phase %u begin\n",
++			    sweet_boot_counter_ms(), cur->subsystem);
+ 			logged_subsystem = cur->subsystem;
+ 		}
+ #endif
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -496,8 +496,15 @@
+ #define DEBUG_BSDINIT 0
+ #endif
+ 
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++extern uint64_t sweet_boot_counter_ms(void);
++#endif
+ #if DEBUG_BSDINIT
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++#define bsd_init_kprintf(x, ...) kprintf("T%llums bsd_init: " x, sweet_boot_counter_ms(), ## __VA_ARGS__)
++#else
+ #define bsd_init_kprintf(x, ...) kprintf("bsd_init: " x, ## __VA_ARGS__)
++#endif
+ #else
+ #define bsd_init_kprintf(x, ...)
+ #endif
+diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
+--- a/iokit/bsddev/IOKitBSDInit.cpp
++++ b/iokit/bsddev/IOKitBSDInit.cpp
+@@ -36,6 +36,13 @@
+ #include <IOKit/IOUserClient.h>
+ #include <libkern/c++/OSAllocation.h>
+ 
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++extern "C" uint64_t sweet_boot_counter_ms(void);
++#define SWEET_ROOT_LOG(fmt, ...) kprintf("T%llums root: " fmt, sweet_boot_counter_ms(), ## __VA_ARGS__)
++#else
++#define SWEET_ROOT_LOG(fmt, ...) do { } while (0)
++#endif
++
+ extern "C" {
+ #include <libkern/amfi/amfi.h>
+ #include <sys/codesign.h>
+@@ -564,6 +571,7 @@
+ boolean_t
+ IOSetRecoveryBoot(bsd_bootfail_mode_t mode, uuid_t volume_uuid, boolean_t reboot)
+ {
++	SWEET_ROOT_LOG("recovery mode=%d reboot=%d\n", (int)mode, (int)reboot);
+ 	IODTNVRAM *nvram = NULL;
+ 	const OSSymbol *boot_command_sym = NULL;
+ 	OSString *boot_command_recover = NULL;
+@@ -608,6 +616,7 @@
+ 			goto do_reboot;
+ 		}
+ 
++		SWEET_ROOT_LOG("recovery waiting for IODTNVRAM\n");
+ 		// Wait for NVRAM to be readable...
+ 		nvram = OSDynamicCast(IODTNVRAM, IOService::waitForService(
+ 			    IOService::serviceMatching("IODTNVRAM")));
+@@ -678,6 +687,7 @@
+ 
+ 	int xchar, dchar;
+ 
++	SWEET_ROOT_LOG("IOFindBSDRoot entry; IOBSD wait begin\n");
+ 	// stall here for anyone matching on the IOBSD resource to finish (filesystems)
+ 	matching = IOService::serviceMatching(gIOResourcesKey);
+ 	assert(matching);
+@@ -691,6 +701,7 @@
+ 	matching->release();
+ 	matching = NULL;
+ 
++	SWEET_ROOT_LOG("IOBSD wait returned\n");
+ 	if (mountAttempts++) {
+ 		IOLog("mount(%d) failed\n", mountAttempts);
+ 		IOSleep( 5 * 1000 );
+@@ -706,6 +717,7 @@
+ 	    && !PE_parse_boot_argn("rootdev", rdBootVar, kMaxBootVar )) {
+ 		rdBootVar[0] = 0;
+ 	}
++	SWEET_ROOT_LOG("requested rd=%s\n", rdBootVar[0] ? rdBootVar : "<none>");
+ 
+ 	if ((regEntry = IORegistryEntry::fromPath( "/chosen", gIODTPlane ))) {
+ 		do {
+@@ -753,6 +765,7 @@
+ 			data = (OSData *)regEntry->getProperty("RAMDisk");      /* Find the ram disk, if there */
+ 			if (data) {                                                                                      /* We found one */
+ 				uintptr_t *ramdParms;
++				SWEET_ROOT_LOG("RAMDisk property found\n");
+ 				ramdParms = (uintptr_t *)data->getBytesNoCopy();        /* Point to the ram disk base and size */
+ #if __LP64__
+ #define MAX_PHYS_RAM    (((uint64_t)UINT_MAX) << 12)
+@@ -803,8 +816,10 @@
+ 		}
+ 		if (xchar >= 0) {                                                                                /* Do we have a valid memory device name? */
+ 			OSSafeReleaseNULL(matching);
++			SWEET_ROOT_LOG("mdevlookup index=%d\n", xchar);
+ 			*root = mdevlookup(xchar);                                                      /* Find the device number */
+-			if (*root >= 0) {                                                                        /* Did we find one? */
++			if (*root >= 0) {
++				SWEET_ROOT_LOG("memory root selected major=%d minor=%d\n", major(*root), minor(*root));                                                                        /* Did we find one? */
+ 				rootName[0] = 'm';                                                              /* Build root name */
+ 				rootName[1] = 'd';                                                              /* Build root name */
+ 				rootName[2] = (char) dchar;                                                     /* Build root name */
+@@ -893,6 +908,7 @@
+ 		IOService::startDeferredMatches();
+ 	}
+ 
++	SWEET_ROOT_LOG("media wait begin timeout=%u sec\n", ROOTDEVICETIMEOUT);
+ 	do {
+ 		t.tv_sec = ROOTDEVICETIMEOUT;
+ 		t.tv_nsec = 0;
+@@ -921,6 +937,7 @@
+ 
+ #if XNU_TARGET_OS_OSX && defined(__arm64__)
+ 			// The disk isn't found - have the user pick from System Recovery.
++			SWEET_ROOT_LOG("media absent; recovery requested\n");
+ 			(void)IOSetRecoveryBoot(BSD_BOOTFAIL_MEDIA_MISSING, NULL, true);
+ #elif XNU_TARGET_OS_IOS
+ 			panic("Failed to mount root device");
+diff --git a/bsd/skywalk/mem/skmem.c b/bsd/skywalk/mem/skmem.c
+--- a/bsd/skywalk/mem/skmem.c
++++ b/bsd/skywalk/mem/skmem.c
+@@ -431,6 +431,13 @@
+ 
+ static int __skmem_inited = 0;
+ 
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++extern uint64_t sweet_boot_counter_ms(void);
++#define SWEET_SKMEM_LOG(step) kprintf("T%llums skmem: %s\n", sweet_boot_counter_ms(), step)
++#else
++#define SWEET_SKMEM_LOG(step) do { } while (0)
++#endif
++
+ void
+ skmem_init(void)
+ {
+@@ -439,15 +446,25 @@
+ 	/* get CPU cache line size */
+ 	(void) skmem_cpu_cache_line_size();
+ 
++	SWEET_SKMEM_LOG("skmem_cache_pre_init begin");
+ 	skmem_cache_pre_init();
++	SWEET_SKMEM_LOG("skmem_cache_pre_init returned");
++	SWEET_SKMEM_LOG("skmem_region_init begin");
+ 	skmem_region_init();
++	SWEET_SKMEM_LOG("skmem_region_init returned");
++	SWEET_SKMEM_LOG("skmem_cache_init begin");
+ 	skmem_cache_init();
++	SWEET_SKMEM_LOG("skmem_cache_init returned");
++	SWEET_SKMEM_LOG("pp_init begin");
+ 	pp_init();
++	SWEET_SKMEM_LOG("pp_init returned");
+ 
+ 	__skmem_inited = 1;
+ 
+ 	/* set up system-wide region for sysctls */
++	SWEET_SKMEM_LOG("skmem_sys_region_init begin");
+ 	skmem_sys_region_init();
++	SWEET_SKMEM_LOG("skmem_sys_region_init returned");
+ }
+ 
+ void

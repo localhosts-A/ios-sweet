@@ -134,6 +134,10 @@ jobs:
           grep -Fq "'IONameMatch'     = 'mediatek,mt6685-rtc'" xnu/iokit/KernelConfigTables.cpp
           grep -Fq 'dali_rtc_get_utc(secs, nsecs)' xnu/iokit/Kernel/arm/SweetPlatformExpert.cpp
           grep -Fq 'SWEET time: calendar initialize returned' xnu/iokit/Kernel/IOStartIOKit.cpp
+          grep -Fq 'sweet_boot_counter_ms(void)' xnu/osfmk/kern/startup.c
+          grep -Fq 'T%llums bsd_init:' xnu/bsd/kern/bsd_init.c
+          grep -Fq 'IOFindBSDRoot entry; IOBSD wait begin' xnu/iokit/bsddev/IOKitBSDInit.cpp
+          grep -Fq 'skmem_region_init returned' xnu/bsd/skywalk/mem/skmem.c
 
       - name: Package build tree for local compiles
         if: always()
