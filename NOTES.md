@@ -2,9 +2,11 @@
 
 ### >>> UPDATE 2026-10-20 (Dali / MT6991 bring-up; read first) <<<
 
-**STATE:** a separate local branch, `port/dali-mt6991`, is being prepared for
-Redmi K80 Ultra (`dali`, MT6991). This is not a bootable iOS port yet; the
-first XNU image test only showed the handset boot logo and did not confirm PID 1.
+**STATE:** the Dali branch `port/dali-mt6991` is pushed to the user's fork,
+and the patched XNU build plus paired kernel-only `boot` / `init_boot` images
+are ready locally. This is not a confirmed bootable iOS port: the earlier
+image test showed only the handset boot logo, and the new image pair has not
+been flashed.
 
 - Fastboot reports current slot `b`, `unlocked: yes`, and does not implement
   `fastboot boot`. Per the user's instruction, both 64 MiB boot slots were
@@ -68,25 +70,33 @@ first XNU image test only showed the handset boot logo and did not confirm PID 1
   ramdisk size. `xnu/patches/0082-dali-dynamic-framebuffer.patch` makes XNU's
   early diagnostics use `boot_args.Video`; it applies cleanly to the latest
   successful build tree and the four affected C/assembly units pass local
-  syntax checks. A new XNU binary has not yet been built from this patch.
+  syntax checks. GitHub Actions run `39425210357` built the patched
+  `kernel.development.sweet` successfully (17,206,368 bytes; SHA-256
+  `5a5dbfb4c72fc71f49b24ec92de6005cb407fcfdd7acdc097b4147c25cce2a42`).
+- Packaged the new XNU with the Dali ADT into
+  `shim/out-dali/gh-39425210357/dali-payload.bin`, then generated the
+  kernel-only boot-v4 shim image and an 8 MiB init_boot-v4 image. The init_boot
+  has a 7,467,394-byte LZ4 CPIO ramdisk and an AVB hash footer (`Algorithm:
+  NONE`); header/footer parsing and byte-for-byte CPIO payload comparison
+  passed. Neither new image has been flashed.
 - The AVB footer did not resolve the logo-only result. No valid OEM signature
   can be produced without Xiaomi's private key; the local test key is not
   trusted by the OEM chain.
 - Live Linux maps the device's UFS disk as `target0:0:0:2`; its `userdata`
   block device is on UFS LUN 2. The current SWEET XNU UFS driver hard-codes LUN
   0. `tools/mkadt.py` now emits `lun=2` for Dali (and `lun=0` for Sweet), and
-  patch `0028` reads that ADT property. This change needs an XNU rebuild before
-  a full-root boot test.
+  patch `0028` reads that ADT property. The remote XNU build includes the
+  patch, but UFS takeover and a full-root boot remain untested.
 - The D22AP `/product` node has now been extracted from the iPhone X IPSW and
   is included in the generated Dali ADT.
 - Live facts used so far: candidate XNU RAM `0x200000000 + 0x13fe00000`, GICD
   `0x0c400000/0x40000`, GICR `0x0c440000/0x200000`, 13 MHz generic timer
   (virtual timer PPI 11 = INTID 27), UFSHCI `0x16810000/0x2a00`, framebuffer
   `0xfc990000/0x3660000`, 1280×2772 (stride assumed 5120).
-- Next: rebuild XNU with the ADT-selected UFS LUN and dynamic Dali framebuffer
-  diagnostics. Then use paired `boot`/`init_boot` images to distinguish kernel
-  entry, console setup and PID 1. Do not create the proposed userdata partition
-  until the XNU path is demonstrated.
+- Next: with user authorization, test the paired `boot`/`init_boot` images to
+  distinguish kernel entry, console setup and PID 1. Back up and restore both
+  active-slot partitions and verify their hashes. Do not create the proposed
+  userdata partition until the XNU path is demonstrated.
 
 ## Agent handoff / active work (2026-10-15, latest)
 

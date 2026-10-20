@@ -70,11 +70,23 @@ footer. `shim/loader.c` removes an optional Android bootconfig trailer,
 finds the final LZ4 frame from the bootloader's concatenated initrd, extracts
 the CPIO entry, and streams XNU segments into their final memory addresses.
 
-The current local payload still uses the existing Sweet XNU binary with the
-Dali ADT. Patch `0082-dali-dynamic-framebuffer.patch` makes the early XNU
-diagnostics use the framebuffer geometry from `boot_args.Video`; it has been
-syntax-checked, but no kernel has yet been rebuilt from that patch. Do not
-treat the current package as a bootable Dali XNU image.
+The XNU build completed successfully in GitHub Actions run
+[39425210357](https://github.com/localhosts-A/ios-sweet/actions/runs/39425210357)
+from commit `e811978` using macOS 13.5, DEVELOPMENT, and SWEET. The resulting
+`kernel.development.sweet` is 17,206,368 bytes with SHA-256
+`5a5dbfb4c72fc71f49b24ec92de6005cb407fcfdd7acdc097b4147c25cce2a42`.
+The workflow applies all patches, including
+`0082-dali-dynamic-framebuffer.patch`, and the XNU build step succeeded.
+This is a Dali-configured XNU build, not proof that the kernel boots on the
+phone; UFS takeover, framebuffer handoff, and memory-map assumptions still
+need an on-device boot test.
+
+The new kernel was packaged with the Dali ADT as a 16,608,064-byte
+`sweet.payload`. The paired `boot` image is kernel-only Android boot v4, and
+the `init_boot` image is exactly 8 MiB with a 7,467,394-byte LZ4 CPIO ramdisk
+and AVB v1 hash footer using algorithm `NONE`. The CPIO's `sweet.payload`
+entry was extracted and compared byte-for-byte with the payload source. The
+images have not been flashed.
 
 The host build uses Clang/LLD. Sweet remains the default target and keeps its
 boot v2 packaging. `shim/out-dali/` and `shim/out/` are ignored build output.
@@ -123,9 +135,8 @@ image also remained logo-only.
 
 ## Work still needed for an iOS boot
 
-- Rebuild XNU from the current patch series, including dynamic early framebuffer
-  diagnostics and the Dali UFS LUN property. No Dali-specific XNU build exists
-  yet; the local init_boot package uses the existing Sweet kernel artifact.
+- Test the newly built kernel-only `boot` and `init_boot` pair on the device.
+  Back up and restore both active-slot partitions; this test has not been run.
 - Validate the MTK UFSHCI takeover and DMA behavior. The existing XNU block
   driver assumes the standard UFSHCI register interface; the ADT address alone
   does not prove that it works on MT6991. Dali's user LUN is 2, so the ADT now
@@ -136,5 +147,5 @@ image also remained logo-only.
   Dali uses a MediaTek SPI touchscreen and a different panel pipeline.
 - Confirm the Dali framebuffer text path; only the handset logo was observed
   during the XNU RAM-disk test.
-- Rebuild XNU with the Dali UFS LUN property, and distinguish kernel entry from
-  root mount and PID 1 before creating any userdata partition.
+- Distinguish kernel entry from root mount and PID 1 before creating any
+  userdata partition.
