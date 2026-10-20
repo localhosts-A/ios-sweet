@@ -2,13 +2,33 @@
 
 ### >>> UPDATE 2026-10-20 (Dali / MT6991 bring-up; read first) <<<
 
-**STATE:** the Dali branch `port/dali-mt6991` is pushed to the user's fork,
-and the patched XNU build plus paired kernel-only `boot` / `init_boot` images
-are ready locally. This is not a confirmed bootable iOS port: the first paired
-test failed LK's kernel decompression check, while the corrected legacy-LZ4
-pair reached LK's Linux jump but showed only the handset logo. A compressed
-early probe also showed only the logo; XNU entry and framebuffer text remain
-unconfirmed. Stock `boot_b` and `init_boot_b` are restored and hash-verified.
+**STATE (2026-10-21):** Dali is not confirmed to enter XNU. Legacy-LZ4
+packaging reaches LK's kernel jump; a minimal shim probe powers off after
+about 20 seconds although the panel retains its logo. The corrected parse-only
+probe (`c33c47b6cd223c640eea89f688b59ad57ee8bde890f4769b2d5c70c6ae851ce2`)
+powered off after approximately **60 seconds**, as reported by the user.
+Its absolute deadline maps to stage 5: SWEETXNU base header accepted, but
+`payload_validate()` returned false before stage 6. The exception deadline is
+110 seconds and full parsing is 90 seconds. No XNU destination writes are
+enabled in this probe. Earlier 40/50-second inferences were confounded by a
+shared exception delay and processing time and should not be relied upon.
+
+The same ARM64 binary parses the reconstructed 73,915,162-byte initrd under
+QEMU at EL2; normal and deliberately faulted runs reach the distinct
+90/110-second paths. The target-only validation failure remains unexplained.
+**Both stock boot partitions have now been restored** and Android root-side
+hashes exactly match the saved full-partition backups: `boot_b` =
+`6dc40de74fa7de4f435c513047c51fe10634c1891666031039c52a08b27a3cd5`,
+`init_boot_b` = `08794a432befcf0504ee4933a51260cb6ccc4785b69f345c4b5968e8e6053d2d`.
+A validation-reason parse-only image is now built (SHA-256
+`fbb4d92939ee82a4b9949e31eed3b9641b79d656f8c2543f9445c7219c0ad3e2`).
+Host replay returns `payload verified`; actual ARM64 QEMU execution at EL2
+reaches stage 8 with validation reason 0 and requests the 90-second deadline.
+The new failure deadlines are listed in `docs/dali-bringup.md` (10–70 seconds
+for validation groups; 80 other loader errors; 90 success; 110 exceptions).
+It has not yet been flashed. Next: run this authorized temporary test, restore
+both original partitions, then verify device-side hashes.
+No userdata, super, or GPT writes have occurred.
 
 - Fastboot reports current slot `b`, `unlocked: yes`, and does not implement
   `fastboot boot`. Per the user's instruction, `boot_b` (64 MiB) and
@@ -102,6 +122,31 @@ unconfirmed. Stock `boot_b` and `init_boot_b` are restored and hash-verified.
 - The AVB footer did not resolve the logo-only result. No valid OEM signature
   can be produced without Xiaomi's private key; the local test key is not
   trusted by the OEM chain.
+- The latest full payload probe used active slot `b` with the new kernel-only
+  boot v4 image and Dali `init_boot`. The user saw the logo and confirmed no
+  automatic shutdown after more than 40 seconds. `expdb` records a 12,529-byte
+  kernel (`kernel_sz=0x000030f1`), successful LZ4 decompression, and LK's jump
+  to the Linux kernel entry. This proves the bootloader handoff, not XNU entry.
+- Reconstructed the exact 73,915,162-byte initrd from both vendor ramdisk
+  fragments and the custom 7,467,394-byte `init_boot` frame. A host harness
+  running the same `loader.c` returned `payload verified` and performed the
+  10 segment and ADT writes in mapped test memory. The device's missing timed
+  shutdown still needs a target-side diagnosis.
+- Restored `boot_b` and `init_boot_b` from saved backups. Root ADB readback
+  matches SHA-256 `6dc40de74fa7de4f435c513047c51fe10634c1891666031039c52a08b27a3cd5`
+  and `08794a432befcf0504ee4933a51260cb6ccc4785b69f345c4b5968e8e6053d2d`.
+  Android booted normally; `userdata`, `super`, and GPT were not written.
+- Diagnostic correction (2026-10-21): automatic shutdown at about 40/50 seconds
+  is observed, but the previous interpretation as a specific returned loader
+  error is unproven. `exc_handler()` also used a 40-second delay and the old
+  code did not subtract console/loader runtime. Do not use those observations
+  to rule out exceptions or physical-memory access problems.
+- The corrected parse-only probe has absolute deadlines measured from
+  `shim_main()` entry. Error stage 0..7 uses 10..80 seconds; complete payload
+  parsing uses 90 seconds; exceptions use 110 seconds. It also selects EL1/EL2
+  exception registers according to `CurrentEL`. In QEMU, the exact ARM64 image
+  returns `payload verified`, stage 8, without an exception. An injected BRK
+  reaches the separate 110-second exception path. Hardware diagnosis is next.
 - Live Linux maps the device's UFS disk as `target0:0:0:2`; its `userdata`
   block device is on UFS LUN 2. The current SWEET XNU UFS driver hard-codes LUN
   0. `tools/mkadt.py` now emits `lun=2` for Dali (and `lun=0` for Sweet), and

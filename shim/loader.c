@@ -81,6 +81,20 @@ static uint8_t payload_meta_bytes[PAYLOAD_HEADER_SIZE + MAX_PAYLOAD_SEGS * sizeo
 	__attribute__((aligned(16)));
 static uint8_t lz4_block_out[LZ4_BLOCK_SIZE] __attribute__((aligned(16)));
 
+#if defined(DALI_PAYLOAD_PROBE_STAGED)
+volatile uint32_t loader_probe_stage;
+#define PROBE_STAGE(n) (loader_probe_stage = (n))
+#else
+#define PROBE_STAGE(n) ((void)0)
+#endif
+
+#if defined(DALI_PAYLOAD_PROBE_VALIDATE)
+volatile uint32_t loader_probe_validation;
+#define VALIDATION_REJECT(n) (loader_probe_validation = (n), 0)
+#else
+#define VALIDATION_REJECT(n) 0
+#endif
+
 static uint32_t read_le32(uint64_t p)
 {
 	const volatile uint8_t *b = (const volatile uint8_t *)p;
@@ -93,6 +107,7 @@ static uint64_t read_le64(uint64_t p)
 	return (uint64_t)read_le32(p) | ((uint64_t)read_le32(p + 4) << 32);
 }
 
+#if !defined(DALI_PAYLOAD_PROBE_PARSE_ONLY)
 static void copy_bytes(uint64_t dst, const uint8_t *src, uint64_t n)
 {
 	volatile uint8_t *d = (volatile uint8_t *)dst;
@@ -106,6 +121,7 @@ static void zero_bytes(uint64_t dst, uint64_t n)
 	for (uint64_t i = 0; i < n; i++)
 		d[i] = 0;
 }
+#endif
 
 static int add_overflow_u64(uint64_t a, uint64_t b, uint64_t *out)
 {
@@ -142,45 +158,50 @@ static int payload_validate(const struct payload *p, uint64_t payload_size,
 	    p->entry_va >= p->kernel_end || p->adt_size == 0 ||
 	    p->adt_off < PAYLOAD_HEADER_SIZE + p->nsegs * sizeof(struct payload_seg) ||
 	    add_overflow_u64(p->phys_base, p->mem_size, &phys_end))
-		return 0;
+		return VALIDATION_REJECT(1);
 	kernel_span = p->kernel_end - p->virt_base;
 	if (kernel_span >= p->mem_size || p->adt_size > (4ULL << 20) ||
-	    p->adt_off > payload_size || p->adt_size > payload_size - p->adt_off ||
-	    (rd_end > p->phys_base && rd_start < phys_end))
-		return 0;
+	    p->adt_off > payload_size || p->adt_size > payload_size - p->adt_off)
+		return VALIDATION_REJECT(2);
+	if (rd_end > p->phys_base && rd_start < phys_end)
+		return VALIDATION_REJECT(3);
 	if (add_overflow_u64(kernel_span, p->adt_size, &ba_offset) ||
 	    add_overflow_u64(ba_offset, PAGE_16K - 1, &ba_offset))
-		return 0;
+		return VALIDATION_REJECT(4);
 	ba_offset &= ~(PAGE_16K - 1);
 	if (ba_offset > p->mem_size || PAGE_16K > p->mem_size - ba_offset)
-		return 0;
+		return VALIDATION_REJECT(4);
 	for (uint32_t i = 0; i < p->nsegs; i++) {
 		const struct payload_seg *s = &p->segs[i];
 		uint64_t va_end, file_end, off;
 		if (s->vmaddr < p->virt_base || s->vmsize < s->file_size ||
 		    add_overflow_u64(s->vmaddr, s->vmsize, &va_end) ||
-		    va_end > p->kernel_end ||
-		    add_overflow_u64(s->file_off, s->file_size, &file_end) ||
+		    va_end > p->kernel_end)
+			return VALIDATION_REJECT(5);
+		if (add_overflow_u64(s->file_off, s->file_size, &file_end) ||
 		    s->file_off < PAYLOAD_HEADER_SIZE + p->nsegs * sizeof(struct payload_seg) ||
 		    file_end > payload_size)
-			return 0;
+			return VALIDATION_REJECT(6);
 		off = s->vmaddr - p->virt_base;
 		if (off > p->mem_size || s->vmsize > p->mem_size - off)
-			return 0;
+			return VALIDATION_REJECT(7);
 	}
 	return 1;
 }
 
+#if !defined(DALI_PAYLOAD_PROBE)
 static uintptr_t payload_phys_base(const struct payload *p)
 {
 	return (uintptr_t)(p->phys_base - p->virt_base);
 }
+#endif
 
 static uintptr_t payload_adt_pa(const struct payload *p)
 {
 	return (uintptr_t)(p->phys_base + (p->kernel_end - p->virt_base));
 }
 
+#if !defined(DALI_PAYLOAD_PROBE)
 static void launch_xnu(const struct payload *p, uintptr_t adt_pa)
 {
 	uint64_t pa_of_va_base = payload_phys_base(p);
@@ -214,6 +235,7 @@ static void launch_xnu(const struct payload *p, uintptr_t adt_pa)
 	__asm__ volatile("dsb sy; ic iallu; dsb sy; isb" ::: "memory");
 	((xnu_entry_t)entry_pa)(ba_pa);
 }
+#endif
 
 #if defined(BOARD_DALI)
 struct payload_stream {
@@ -230,6 +252,7 @@ static const char *payload_metadata_ready(struct payload_stream *s,
 	const struct payload *p = (const struct payload *)payload_meta_bytes;
 	if (!payload_validate(p, s->size, rd_start, rd_end))
 		return "invalid SWEETXNU metadata";
+	PROBE_STAGE(6);
 	s->p = p;
 	s->adt_pa = payload_adt_pa(p);
 	uint64_t adt_end;
@@ -237,12 +260,15 @@ static const char *payload_metadata_ready(struct payload_stream *s,
 	    adt_end > p->phys_base + p->mem_size ||
 	    (rd_end > s->adt_pa && rd_start < adt_end))
 		return "ADT destination outside kernel memory";
+	PROBE_STAGE(7);
+#if !defined(DALI_PAYLOAD_PROBE_PARSE_ONLY)
 	for (uint32_t i = 0; i < p->nsegs; i++) {
 		const struct payload_seg *seg = &p->segs[i];
 		uint64_t dst = p->phys_base + (seg->vmaddr - p->virt_base);
 		if (seg->vmsize > seg->file_size)
 			zero_bytes(dst + seg->file_size, seg->vmsize - seg->file_size);
 	}
+#endif
 	s->ready = 1;
 	return 0;
 }
@@ -265,6 +291,7 @@ static const char *payload_stream_bytes(struct payload_stream *s,
 				if (!magic_ok(p->magic) || p->version != 1 || !p->nsegs ||
 				    p->nsegs > MAX_PAYLOAD_SEGS)
 					return "bad SWEETXNU header";
+				PROBE_STAGE(5);
 				s->meta_target = PAYLOAD_HEADER_SIZE + p->nsegs * sizeof(struct payload_seg);
 			}
 			if (s->pos == s->meta_target) {
@@ -278,6 +305,7 @@ static const char *payload_stream_bytes(struct payload_stream *s,
 		uint64_t begin = s->pos;
 		uint64_t end = begin + len;
 		const struct payload *p = s->p;
+#if !defined(DALI_PAYLOAD_PROBE_PARSE_ONLY)
 		for (uint32_t i = 0; i < p->nsegs; i++) {
 			const struct payload_seg *seg = &p->segs[i];
 			uint64_t seg_end = seg->file_off + seg->file_size;
@@ -288,11 +316,14 @@ static const char *payload_stream_bytes(struct payload_stream *s,
 				copy_bytes(dst, data + (lo - begin), hi - lo);
 			}
 		}
+#endif
 		uint64_t adt_end = p->adt_off + p->adt_size;
 		uint64_t lo = begin > p->adt_off ? begin : p->adt_off;
 		uint64_t hi = end < adt_end ? end : adt_end;
 		if (hi > lo) {
+#if !defined(DALI_PAYLOAD_PROBE_PARSE_ONLY)
 			copy_bytes(s->adt_pa + (lo - p->adt_off), data + (lo - begin), hi - lo);
+#endif
 			s->adt_bytes += hi - lo;
 		}
 		s->pos = end;
@@ -354,6 +385,7 @@ static const char *cpio_feed(struct cpio_stream *c, const uint8_t *data, uint32_
 				c->payload.size = c->file_size;
 				c->payload.meta_target = PAYLOAD_HEADER_SIZE;
 				c->state = 2;
+				PROBE_STAGE(4);
 			}
 		} else {
 			uint64_t remaining = c->file_size - c->file_have;
@@ -575,28 +607,38 @@ static const char *decode_initboot(uint64_t start, uint64_t end, uint64_t conten
 static const char *loader_boot_dali(uintptr_t dtb)
 {
 	uint64_t rd_start, rd_end, ramdisk_end, frame_start, frame_end, content_size;
+	PROBE_STAGE(0);
 	if (!fdt_chosen_u64(dtb, "linux,initrd-start", &rd_start) ||
 	    !fdt_chosen_u64(dtb, "linux,initrd-end", &rd_end))
 		return "no initrd in /chosen";
 	if (rd_end <= rd_start)
 		return "invalid initrd range";
+	PROBE_STAGE(1);
 	con_hex2("INITRD", "lo=", rd_start, "hi=", rd_end);
 	const char *err = strip_bootconfig(rd_start, rd_end, &ramdisk_end);
 	if (err)
 		return err;
+	PROBE_STAGE(2);
 	if (!find_initboot_frame(rd_start, ramdisk_end, &frame_start, &frame_end, &content_size))
 		return "no final LZ4 init_boot frame";
+	PROBE_STAGE(3);
 	con_hex2("INITBOOT", "frame=", frame_start, "size=", content_size);
 	static struct cpio_stream cpio;
 	err = decode_initboot(frame_start, frame_end, content_size,
 	    &cpio, rd_start, rd_end);
 	if (err)
 		return err;
+	PROBE_STAGE(8);
 	con_hex2("PAYLOAD", "bytes=", cpio.payload.size, "segs=", cpio.payload.p->nsegs);
 	con_hex("PHYS", cpio.payload.p->phys_base);
 	con_hex("ADT", cpio.payload.adt_pa);
+#if defined(DALI_PAYLOAD_PROBE)
+	/* Verify extraction and destination copies without transferring to XNU. */
+	return "payload verified";
+#else
 	launch_xnu(cpio.payload.p, cpio.payload.adt_pa);
 	return "xnu returned";
+#endif
 }
 #endif
 

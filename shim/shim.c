@@ -53,6 +53,14 @@ static inline void wr32(uintptr_t a, uint32_t v) { *(volatile uint32_t *)a = v; 
 static inline void wr8(uintptr_t a, uint8_t v) { *(volatile uint8_t *)a = v; }
 
 extern char secondary_entry[];
+#if defined(DALI_PAYLOAD_PROBE_STAGED)
+extern volatile uint32_t loader_probe_stage;
+#if defined(DALI_PAYLOAD_PROBE_VALIDATE)
+extern volatile uint32_t loader_probe_validation;
+#endif
+static uint64_t probe_started_ticks;
+static int probe_clock_ready;
+#endif
 
 static const char *stage;	/* set at runtime: no absolute pointers in data */
 static volatile uint64_t sec_mpidr[NR_CPUS];
@@ -102,8 +110,16 @@ static void delay_ms(unsigned ms)
 static void __attribute__((noreturn)) reset(unsigned after_s)
 {
 	con_skip();
-	con_str("RESET", after_s > 20 ? "in 40s" : "in 20s");
+	con_hex("OFF SECONDS", after_s);
+#if defined(DALI_PAYLOAD_PROBE_STAGED)
+	/* Keep parsing time out of the externally observed diagnostic code. */
+	uint64_t start = probe_clock_ready ? probe_started_ticks : now();
+	uint64_t deadline = start + rsr("cntfrq_el0") * after_s;
+	while (now() < deadline)
+		;
+#else
 	delay_ms(after_s * 1000);
+#endif
 #if defined(BOARD_DALI)
 	smc(PSCI_SYSTEM_OFF, 0, 0, 0);
 #else
@@ -153,14 +169,26 @@ void exc_handler(uint64_t slot, uint64_t *regs)
 	}
 	con_hex2("SLOT", "n=", slot, "cpu=", rsr("mpidr_el1"));
 	con_str("STAGE", stage);
-	con_hex("ESR", rsr("esr_el1"));
-	con_hex("ELR", rsr("elr_el1"));
-	con_hex("FAR", rsr("far_el1"));
-	con_hex("SPSR", rsr("spsr_el1"));
+	if (rsr("CurrentEL") == 8) {
+		con_hex("ESR", rsr("esr_el2"));
+		con_hex("ELR", rsr("elr_el2"));
+		con_hex("FAR", rsr("far_el2"));
+		con_hex("SPSR", rsr("spsr_el2"));
+	} else {
+		con_hex("ESR", rsr("esr_el1"));
+		con_hex("ELR", rsr("elr_el1"));
+		con_hex("FAR", rsr("far_el1"));
+		con_hex("SPSR", rsr("spsr_el1"));
+	}
 	con_hex("X0", regs[0]);
 	con_hex("X1", regs[1]);
 	con_hex("X30", regs[29]);	/* stashed lr is just above the frame */
+#if defined(DALI_PAYLOAD_PROBE_STAGED)
+	/* Distinct from all loader-return deadlines (10..90 seconds). */
+	reset(110);
+#else
 	reset(40);
+#endif
 }
 
 /* ---- SMP ---- */
@@ -378,6 +406,10 @@ static uint32_t to_us(uint64_t ticks)
 
 void shim_main(uint64_t dtb)
 {
+#if defined(DALI_PAYLOAD_PROBE_STAGED)
+	probe_started_ticks = now();
+	probe_clock_ready = 1;
+#endif
 #if !defined(BOARD_DALI)
 	struct mmu_info mi;
 #endif
@@ -394,8 +426,23 @@ void shim_main(uint64_t dtb)
 #if defined(BOARD_DALI)
 	/* A missing payload must not enter the Qualcomm UFS/MMU diagnostic path. */
 	stage = "no payload";
+	#if defined(DALI_PAYLOAD_PROBE)
+	con_str("DALI", "payload probe done");
+	/* The probe uses power-off time as a screen-independent pass/fail signal. */
+	#if defined(DALI_PAYLOAD_PROBE_STAGED)
+	#if defined(DALI_PAYLOAD_PROBE_VALIDATE)
+	reset(why[0] == 'p' ? 90 : loader_probe_validation ?
+	    loader_probe_validation * 10 : 80);
+	#else
+	reset(why[0] == 'p' ? 90 : 10 + loader_probe_stage * 10);
+	#endif
+	#else
+	reset(why[0] == 'p' ? 10 : 40);
+	#endif
+	#else
 	con_str("DALI", "no XNU payload; power off in 20s");
 	reset(20);
+	#endif
 #else
 	/* No payload: probe the internal UFS while the MMU is still off. */
 	stage = "ufs";

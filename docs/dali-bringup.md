@@ -147,11 +147,60 @@ but the same message appears in older records too. A later build corrected the
 GKI boot-v4 OS version and patch-level fields to zero, matching stock; that
 image also remained logo-only.
 
+## Parse-only diagnostics (2026-10-21)
+
+The simple legacy-LZ4 probe powers off after about 20 seconds even though the
+panel retains the handset logo. This confirms early shim execution, timer
+access and PSCI system-off; visible framebuffer updates remain unconfirmed.
+The active panel is a DSC command-mode panel in the runtime FDT. Missing
+refresh is a possible cause of the retained logo, not an established diagnosis.
+
+A parse-only build reads the concatenated initrd and validates the payload but
+skips all writes to XNU segment/ADT destinations and never enters XNU. It also
+installs exception vectors for EL1 or EL2 and reads exception registers for
+the current EL. Linux permits either entry EL; this does not establish that
+XNU's entry code can accept EL2.
+
+```sh
+# Original checkpoints: errors 10–80s, success 90s, exception 110s.
+PROBE_MODE=stages bash shim/build-dali-payload-probe.sh
+# Validation reason codes below (default mode).
+bash shim/build-dali-payload-probe.sh
+```
+
+Deadlines are measured from shim_main entry, excluding bootloader time. Earlier
+40/50-second results used a shared exception delay and included processing
+time, so they did not identify a specific returned loader error. The corrected
+checkpoint image (`c33c47b6…e851ce2`) powered off at about 60 seconds: the base
+SWEETXNU header passed but payload_validate() rejected metadata/ranges.
+The same actual ARM64 binary passes under QEMU at EL2 with the reconstructed
+73,915,162-byte initrd. An injected BRK reaches the distinct 110-second
+exception path. The target-only difference is not yet understood.
+
+The validation-reason probe retains every validation condition:
+
+| Shutdown deadline | Result |
+| --- | --- |
+| 10 seconds | Header fields, entry bounds, ADT offset or physical-range overflow |
+| 20 seconds | Kernel span, ADT size or ADT file bounds |
+| 30 seconds | Source initrd overlaps the proposed XNU RAM interval |
+| 40 seconds | Boot-arguments alignment/space checks |
+| 50 seconds | A segment's virtual range or memory/file size relation |
+| 60 seconds | A segment's file offset or file range |
+| 70 seconds | A segment's destination memory bounds |
+| 80 seconds | Another loader error outside payload_validate() |
+| 90 seconds | Complete parse succeeds |
+| 110 seconds | Exception handler |
+
+After the corrected checkpoint test, both stock partitions were restored and
+root-side hashes matched their saved full-partition backups exactly. No
+userdata, super or GPT changes occurred. Never infer XNU entry from a timed
+parse-only success.
+
 ## Work still needed for an iOS boot
 
-- Trace the shim's first instructions and framebuffer initialization. LK
-  decompresses and jumps to the corrected kernel, but neither the full image
-  nor the minimal early probe displayed its diagnostic text.
+- Diagnose the target-only payload validation failure. Shim execution is
+  confirmed by automatic shutdown, while XNU entry remains unconfirmed.
 - Validate the MTK UFSHCI takeover and DMA behavior. The existing XNU block
   driver assumes the standard UFSHCI register interface; the ADT address alone
   does not prove that it works on MT6991. Dali's user LUN is 2, so the ADT now

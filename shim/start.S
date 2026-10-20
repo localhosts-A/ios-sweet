@@ -1,6 +1,7 @@
 /*
- * ARM64 Linux Image entry used by the Android bootloader. It enters at EL1
- * with the MMU and D-cache off, and x0 holds the live device-tree pointer.
+ * ARM64 Linux Image entry used by the Android bootloader. The Dali bootloader
+ * may enter at EL1 or EL2; the MMU and D-cache are off, and x0 holds the live
+ * device-tree pointer.
  */
 	.section .text.head, "ax"
 	.globl _head
@@ -25,6 +26,13 @@ _start:
 	adr	x1, _stack_top
 	mov	sp, x1
 	adr	x1, vectors
+	#ifdef BOARD_DALI
+	mrs	x2, CurrentEL
+	cmp	x2, #0x8
+	b.ne	1f
+	msr	vbar_el2, x1
+1:
+	#endif
 	msr	vbar_el1, x1
 	isb
 	/* zero .bss */
@@ -49,6 +57,13 @@ secondary_entry:
 	add	x1, x1, #0x1000
 	mov	sp, x1
 	adr	x1, vectors
+	#ifdef BOARD_DALI
+	mrs	x2, CurrentEL
+	cmp	x2, #0x8
+	b.ne	5f
+	msr	vbar_el2, x1
+5:
+	#endif
 	msr	vbar_el1, x1
 	isb
 	bl	secondary_main
