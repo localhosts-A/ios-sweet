@@ -1,3 +1,10 @@
+## Current handoff: XNU reaches kprintf startup on Dali (2026-10-21)
+
+- User observed the screen text `sweet early 28:kprintf startup complete` during the paired-image attempt. In the built source, the exact text `kprintf startup complete` is emitted only by `sweet_early_mark(20, ...)`; the digit appears to have been read/transcribed as 28. This confirms XNU reached `STARTUP_SUB_KPRINTF` after `arm_vm_init`, though it does not confirm a complete boot.
+- The stock pair has been restored and read back from Android. `boot_b` SHA-256 `6dc40de74fa7de4f435c513047c51fe10634c1891666031039c52a08b27a3cd5`; `init_boot_b` SHA-256 `08794a432befcf0504ee4933a51260cb6ccc4785b69f345c4b5968e8e6053d2d`. No userdata, super, or GPT writes.
+- Diagnosis from source: Dali's regular `sweet-fbcon` writes pixels into the framebuffer but does not trigger the MTK command-mode DSI refresh. At stage20, `serial_init()` has registered fbcon and XNU disables the earlier display writer; the panel therefore remains on the last marker. The payload also omitted `-enable_kprintf_spam`, so DEVELOPMENT kprintf was suppressed.
+- Proposed next change: expose a Dali-only display-refresh wrapper and call it from fbcon on newline, keeping text rendering in the existing fbcon and avoiding duplicate glyph writes. The next payload will add `-enable_kprintf_spam`. Awaiting user approval for this bounded code change before implementation.
+
 ## Current handoff: dynamic Dali display mapping patch (2026-10-21)
 
 - Updated patch `0083-sweet-dali-command-refresh.patch` to place the Dali MMIO alias immediately after the actual framebuffer span, instead of at a fixed VA. The payload reports `virt_base=0xfffffe0006000000`, which is `VM_MIN_KERNEL_ADDRESS + 96 MiB`. With the captured Dali framebuffer mapping occupying one 32 MiB L2 block, MMIO begins at `VM_MIN + 64 MiB`; its bounded 16 MiB aperture ends at `+80 MiB`, below the kernel base.
