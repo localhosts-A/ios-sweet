@@ -71,8 +71,10 @@ extern volatile uint32_t loader_probe_file_check;
 #if defined(DALI_PAYLOAD_PROBE_METADATA)
 extern volatile uint32_t loader_probe_metadata;
 #endif
+#if !defined(DALI_DISPLAY)
 static uint64_t probe_started_ticks;
 static int probe_clock_ready;
+#endif
 #endif
 
 static const char *stage;	/* set at runtime: no absolute pointers in data */
@@ -439,7 +441,7 @@ void shim_main(uint64_t dtb)
 	con_hex("DTB", dtb);
 	con_hex("CNTFRQ", rsr("cntfrq_el0"));
 #endif
-#if defined(DALI_PAYLOAD_PROBE_STAGED)
+#if defined(DALI_PAYLOAD_PROBE_STAGED) && !defined(DALI_DISPLAY)
 	probe_started_ticks = now();
 	probe_clock_ready = 1;
 #endif

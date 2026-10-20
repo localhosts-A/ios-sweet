@@ -2,7 +2,7 @@
 
 - Previous visible trial only captured OFF SECONDS0x78, not loader outcome. Stock original pair restored and both hashes verified in Android.
 - Corrected capture timeout: display builds now wait a full120s after result rendering, rather than counting slow parsing time toward an absolute entry deadline. Added a dedicated compact result page containing the real result/reason/check, decoded payload size, ADT bounds, and failing segment file/VM fields. It starts on a clean page, so OFF/next text cannot page out the error.
-- Validation-only build passes, SHA-256 `e8f3cf84a2262c3d08c6a877841cc0471b80e1d134f21d8bf0258c4fdf0ac505`. Not flashed at this checkpoint. Pair with matching GH39425210357 init_boot; restore both full stock originals after reading the result. No XNU destination writes enabled.
+- Validation-only build passes without warnings (unused timing state removed), SHA-256 `2fe04ec782f46dd5da4fb5e6d1b96929df20d24d0a69b01bb67786ecaa2bb050`. Not flashed at this checkpoint. Pair with matching GH39425210357 init_boot; restore both full stock originals after reading the result. No XNU destination writes enabled.
 
 ## Visible loader trial preparation (2026-10-21)
 
