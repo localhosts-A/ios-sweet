@@ -1,6 +1,6 @@
 ## Current handoff: compact startup diagnostics build queued; stock pair restored (2026-10-21)
 
-- **Next build:** commit `dc390d2` with patch0086 is pushed; DEVELOPMENT/SWEET workflow `39485789960` was dispatched and is queued. Check build success and the actual patched startup sources before packaging. No new candidate has been flashed; Android stays on the verified stock pair.
+- **Next build:** commit `dc390d2` with patch0086 is pushed; DEVELOPMENT/SWEET workflow `39485789960` was dispatched and is now in progress. Check build success and the actual patched startup sources before packaging. No new candidate has been flashed; Android stays on the verified stock pair.
 - DEVELOPMENT/SWEET workflow `39477972999` completed successfully for commit `02968cc`; its matching kernel and paired `boot`/`init_boot` images were hash/header/payload verified before the handset trial. Payload args were `debug=0xc keepsyms=1 -enable_kprintf_spam`.
 - **Observed on the phone:** after the stage20 `kprintf startup complete` marker, multiple XNU lines refreshed on screen, then the user confirmed the display remained at the supplied photo's final lines. The photo reaches `SWEET pthread: libpthread-514.100.2 registered`; it also shows `pe_arm_map_interrupt_controller: failed to find the interrupt-controller` and `pe_arm_init_debug: failed to find cpu-debug-interface`. Execution continued afterward at least through the GIC virtual-timer message, scheduler, IPC, KDP, ulock initialization and pthread-provider registration. No panic/oops is visible.
 - Source check: that pthread message is emitted by `sweet_pthread_register` at `STARTUP(EARLY_BOOT, STARTUP_RANK_SECOND, ...)`. Actual `pthread_init()` occurs later in `bsd_init`; its existing progress lines are compiled out because `DEBUG_BSDINIT` is hardcoded to 0.
@@ -13,6 +13,8 @@
 
 - **Latest clarification:** the phone automatically restarted, then the user manually entered fastboot; elapsed time is unknown. Current Android bootreason/reboot properties refer to the recovery boot and do not establish the XNU reset cause.
 - **Diagnostic overhead hypothesis:** ZALLOC is phase 7, earlier than the prior trial's EARLY_BOOT/pthread marker (16). The kernel has 746 __zone_site_register startup entries; synchronous DSI refresh for each long line may significantly slow boot. This has not proven watchdog involvement. Patch0086 now separates compact phase/function logging (startup_debug=1 on DEVELOPMENT SWEET) from per-callback logging (startup_debug=3). Patch application and local logging-behavior validation pass: the actual modified function executes 749 simulated callbacks in the same order, producing 3 summary lines with startup_debug=1 versus 752 with startup_debug=3. Non-SWEET and non-DEVELOPMENT detailed behavior is preserved. Repository validation passes (86 patches). Full kernel build pending; no handset writes this turn.
+
+- OTG question: direct U-disk boot is unverified in the stock Dali bootloader. The current USB code is original-Sweet device-mode/ECM, with no Dali USB-host/mass-storage root path. Internal boot plus external root is a future option requiring new drivers; it does not solve the early ZALLOC restart. Feasibility inquiry only; no USB drive was selected or written.
 
 ## Previous handoff: XNU reaches kprintf startup on Dali (2026-10-21)
 
