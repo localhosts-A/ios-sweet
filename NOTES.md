@@ -2,6 +2,17 @@
 
 ### >>> UPDATE 2026-10-20 (Dali / MT6991 bring-up; read first) <<<
 
+**TEMPORARY TEST IN PROGRESS (2026-10-21):** the validation-reason probe
+`fbb4d92939ee82a4b9949e31eed3b9641b79d656f8c2543f9445c7219c0ad3e2`
+is installed in active `boot_b`, paired with candidate `init_boot_b`
+`f6d2c91e8e5db820303cff4b8c73e83b69c21461f0efbc81705b7293f39e308e`.
+Fastboot confirmed dali, slot b and unlocked; both writes and reboot succeeded.
+Await shutdown timing and manual fastboot return, then restore original
+`init_boot_b.img` and `boot_b.img` from
+`backup/dali-25060RK16C-pairtest-20261020/`, reboot Android and verify hashes.
+Do not start another experiment before recovery. The restored descriptions
+below refer to the state before this test. No userdata/super/GPT writes.
+
 **STATE (2026-10-21):** Dali is not confirmed to enter XNU. Legacy-LZ4
 packaging reaches LK's kernel jump; a minimal shim probe powers off after
 about 20 seconds although the panel retains its logo. The corrected parse-only
@@ -26,8 +37,8 @@ Host replay returns `payload verified`; actual ARM64 QEMU execution at EL2
 reaches stage 8 with validation reason 0 and requests the 90-second deadline.
 The new failure deadlines are listed in `docs/dali-bringup.md` (10–70 seconds
 for validation groups; 80 other loader errors; 90 success; 110 exceptions).
-It has not yet been flashed. Next: run this authorized temporary test, restore
-both original partitions, then verify device-side hashes.
+It is now installed for the temporary test described above. Restore both
+original partitions after observation, then verify device-side hashes.
 No userdata, super, or GPT writes have occurred.
 
 - Fastboot reports current slot `b`, `unlocked: yes`, and does not implement
