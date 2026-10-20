@@ -1,3 +1,8 @@
+## ACTIVE RTC TRIAL (2026-10-21)
+
+- User reconnected phone and resumed previously authorized temporary trial. Fresh Android preflight confirms dali/25060RK16C/_b/boot_completed1/root and64/8MiB sizes; both physical partition hashes match original backups exactly. Host originals/candidates rehashed. Fastboot confirms dali,slot_b,unlockedyes,boot_b0x4000000/init_boot_b0x800000. Trial pair `shim/out-dali/gh-39496962026/`, CI39496962026. Candidate init_boot_b then boot_b writes returned OKAY; reboot returned OKAY. Durable trial-state.json is trial_rebooted. Await screen observation and manual fastboot. No recovery yet.
+- **RESTORE PENDING once flashing starts.** Await RTC hardware UTC/IORTC/calendar/BSD screen result and manual fastboot. Immediately restore full original init_boot_b then boot_b from backup/dali-25060RK16C-pairtest-20261020/, boot Android and root-hash verify both originals. No userdata/super/GPT changes. ADB/fastboot are unavailable during XNU boot; user must return to fastboot manually.
+
 ## Current handoff: native RTC images READY; handset deferred (2026-10-21)
 
 - User explicitly chose “稍后连接，先完成镜像”. **Completed images only; no active trial or device writes.** Last physical state remains original Android with both original partition hashes verified after the previous CPU trial. Phone disconnected; fresh identity/slot/partition/original readback preflight required when reconnected.
