@@ -291,6 +291,13 @@ exact stock kernel/generic-ramdisk copies, bootconfig preservation, chosen
 end correction and x0=FDT/x1..x3=0 at the original kernel entry. This confirms
 the handoff mechanics in emulation, not Android booting on Dali hardware.
 
+The first handset test of chain image `b436ec29…be01098` did not return to
+Android. User observed reboot at roughly 50 seconds, then another after
+about 10+ seconds. Manual fastboot recovery restored both full originals,
+and root-side hashes matched. Pstore was empty after recovery, so no actual
+shim error string or metadata was collected. Do not classify this as an XNU
+boot or a successful retained-log path.
+
 ## Work still needed for an iOS boot
 
 - Diagnose the target-only payload validation failure. Shim execution is

@@ -2,20 +2,6 @@
 
 ### >>> UPDATE 2026-10-20 (Dali / MT6991 bring-up; read first) <<<
 
-**TEMPORARY STOCK-CHAIN TEST IN PROGRESS (2026-10-21):** active boot_b is
-`shim/out-dali/chain/dali-chain-probe-boot.img`
-(`b436ec2974afb0275b75e2f3486e9eb47b7b2fb4769850560732ea247be01098`),
-init_boot_b is candidate `f6d2c91e8e5db820303cff4b8c73e83b69c21461f0efbc81705b7293f39e308e`.
-Both flashes and reboot succeeded after checking dali / slot b / unlocked.
-Expect direct stock Android handoff. If ADB returns: immediately save pstore
-logs before any reboot, then restore init_boot_b and boot_b using verified
-full originals in /data/local/tmp/ios-sweet-stock-20261021/ and root DD,
-sync, verify physical partition hashes. If Android does not return after about
-120 seconds, request manual fastboot and restore host full backups from
-backup/dali-25060RK16C-pairtest-20261020/. Fastboot clears RAM logs, so capture
-ADB/pstore first whenever possible. Do not start another test before restore.
-Restored descriptions below refer to immediately before this trial.
-
 **STATE (2026-10-21):** stock Android is online and both original boot
 partitions are restored. Root-side hashes exactly match the full backups:
 boot_b `6dc40de74fa7de4f435c513047c51fe10634c1891666031039c52a08b27a3cd5`,
@@ -37,26 +23,29 @@ firmware-reset image cannot retrieve logs through the existing rescue path.
 Both original pstore files were saved under /tmp locally. Kexec is disabled
 in the stock kernel and /dev/mem is absent.
 
-Prepared **no-reset stock-kernel chainload diagnostic**, now installed for the temporary trial above:
-`shim/out-dali/chain/dali-chain-probe-boot.img`, SHA-256
-`b436ec2974afb0275b75e2f3486e9eb47b7b2fb4769850560732ea247be01098`.
-It relocates its 40,742,912-byte bundle to 0x200000000, records text in
-FDT-verified reserved ramoops console RAM, parses the candidate payload with
-no XNU destination writes, restores the original generic ramdisk in RAM,
-preserves LK bootconfig, copies the original 36,866,560-byte kernel back to
-0x80000000 and jumps with the Linux register contract. Original boot cmdline
-is preserved. Bundle ends below DTB 0x87c80000; high relocation ends at
-0x2026db000, inside the previously verified usable RAM interval.
+**Stock-chain device result:** candidate boot image
+`b436ec2974afb0275b75e2f3486e9eb47b7b2fb4769850560732ea247be01098`
+was temporarily paired with init_boot `f6d2c91e…39e308e`. User observed the first
+reboot at about 50 seconds and a second after roughly 10+ seconds; Android
+never returned over ADB. User entered fastboot. Restored full original
+init_boot_b then boot_b, rebooted Android, and verified both root-side hashes
+exactly match the originals above. **No diagnostic pair is installed.**
+Pstore is empty after that fastboot recovery; no actual shim log was retrieved.
 
-Actual ARM64 QEMU verifies exact copied kernel and generic ramdisk bytes,
-unchanged 1,044-byte bootconfig trailer, correct initrd-end (0xab1d213d), and
-x0=FDT/x1..x3=0 at the original kernel entry. Valid and deliberately invalid
-payloads both reach the stock handoff with an explicit log; initially cleared
-ramoops headers are initialized only after the live FDT confirms the exact
-reserved region. This is not proof stock Android boots on hardware through
-the chain. Next: temporary paired test; if Android returns, collect pstore
-and restore both originals through root ADB. Otherwise use manual fastboot
-recovery, accepting that the diagnostic RAM log is lost in that fallback.
+The no-reset handoff implementation is committed as 489ef5a (active-test note
+771d0b4). Actual ARM64 QEMU passes at EL1 and EL2, verifies exact original
+kernel/generic ramdisk copies, bootconfig preservation and Linux entry
+registers, including an invalid-payload error and cleared ramoops header.
+This emulation result did not translate to Android return on hardware. Do
+not repeat the same trial or claim captured metadata/exception evidence.
+
+Current read-only evidence: /tmp/dali-expdb-chain-20261021.bin (128MiB),
+/tmp/dali-pllk-after-chain-20261021.bin (subsequent stock boot), local display
+and log-store vendor sources in /tmp/dali-display-source. Latest expdb has no
+raw matching chain kernel-size record or SWEET/RAMLOG string. Look for AEE
+record structure/retained firmware diagnostics, or develop an independently
+observable panel/UART path before more payload trials. No unverified display
+or SRAM register writes have been attempted.
 
 No userdata formatting, super or GPT writes have occurred.
 
