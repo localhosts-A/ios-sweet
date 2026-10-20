@@ -21,7 +21,7 @@ diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
 +	if ((va & ~ARM_TT_L1_OFFMASK) !=
 +	    (SWEET_EARLY_FB_VA & ~ARM_TT_L1_OFFMASK) ||
 +	    va < SWEET_EARLY_FB_VA + 2 * ARM_TT_L2_SIZE ||
-+	    va + ARM_TT_L2_SIZE < va || va + ARM_TT_L2_SIZE > gVirtBase) {
++	    va + 0x01000000ULL < va || va + 0x01000000ULL > gVirtBase) {
 +		return 0;
 +	}
 +	tt_entry_t *l2_entry = arm_kva_to_tte(va);
