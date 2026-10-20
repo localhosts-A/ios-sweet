@@ -2,6 +2,16 @@
 
 ### >>> UPDATE 2026-10-20 (Dali / MT6991 bring-up; read first) <<<
 
+**TEMPORARY TEST IN PROGRESS (2026-10-21):** active boot_b contains metadata
+comparison probe `15bdc94955c7c0e707eb386e4b05b28a428b8615f56ecf8c43f22c0e907d555b`;
+init_boot_b contains candidate `f6d2c91e8e5db820303cff4b8c73e83b69c21461f0efbc81705b7293f39e308e`.
+Both writes and reboot OKAY after dali / slot b / unlocked confirmed. Await
+shutdown time and manual fastboot return. Then restore full original
+init_boot_b.img and boot_b.img from backup/dali-25060RK16C-pairtest-20261020/,
+reboot Android and verify root-side hashes before another test. Restored
+state descriptions below refer to immediately before this trial.
+No userdata/super/GPT writes.
+
 **STATE (2026-10-21):** Dali is not confirmed to enter XNU. Legacy-LZ4
 packaging reaches LK's kernel jump; a minimal shim probe powers off after
 about 20 seconds although the panel retains its logo. The corrected parse-only
@@ -45,7 +55,7 @@ bounds check precedes them. Thus a target file-end rejection would require a
 different runtime metadata/size input or corruption. Next compare target
 metadata fingerprints against the exact packaged payload without destination
 writes, rather than bypassing validation. Restoration hashes exactly match both full backups. A source-comparison
-probe is built but not flashed: `15bdc94955c7c0e707eb386e4b05b28a428b8615f56ecf8c43f22c0e907d555b`.
+probe is currently installed for the temporary test above: `15bdc94955c7c0e707eb386e4b05b28a428b8615f56ecf8c43f22c0e907d555b`.
 Build using `PROBE_MODE=metadata PAYLOAD_REFERENCE=out-dali/gh-39425210357/dali-payload.bin`.
 It stops at metadata readiness and compares actual size/header/segment bytes:
 10s size differs; 30s header differs; 50s segment table differs; 70s exact
