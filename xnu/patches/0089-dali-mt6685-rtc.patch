@@ -1,0 +1,398 @@
+diff --git a/iokit/Kernel/arm/DaliRTC.cpp b/iokit/Kernel/arm/DaliRTC.cpp
+--- /dev/null
++++ b/iokit/Kernel/arm/DaliRTC.cpp
+@@ -0,0 +1,296 @@
++/*
++ * MT6685 calendar on Dali's MT6991 PMIF/SPMI main bus, AP software channel 2.
++ * Register protocol: MiCode/mtk_kernel_device_modules, commit
++ * e45c3199537fbba9aae5fb06c31fc8dbd3c1dcee, drivers/rtc/rtc-mt6685.c,
++ * drivers/spmi/spmi-mtk-pmif-core.c and include/linux/mfd/mt6685/rtc.h.
++ * Adopts firmware bus/oscillator configuration. Alarm and power-on state
++ * are never programmed by this driver. Calendar writes occur only on set-time.
++ */
++#include <pexpert/arm64/board_config.h>
++#if defined(SWEET)
++#include <IOKit/IOService.h>
++#include <IOKit/IOLib.h>
++#include <IOKit/IOPlatformExpert.h>
++#include <IOKit/IOMemoryDescriptor.h>
++#include <libkern/c++/OSData.h>
++#include <machine/machine_routines.h>
++#include <kern/clock.h>
++#include <arm64/proc_reg.h>
++
++static constexpr uint32_t kAcc = 0x880, kWData = 0x884, kRData = 0x894;
++static constexpr uint32_t kValidClear = 0x8a4, kStatus = 0x8a8;
++static constexpr uint16_t kClockGate = 0x514, kClockSet = 0x515, kClockClear = 0x516;
++static constexpr uint8_t kClockMask = 0x30;
++static constexpr uint16_t kRTC = 0x580, kBBPU = kRTC + 8, kTrigger = kRTC + 0x42;
++static constexpr uint16_t kTime = kRTC + 0x12;
++
++static bool leap(unsigned year)
++{
++    return year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
++}
++
++static unsigned monthDays(unsigned year, unsigned month)
++{
++    static const uint8_t days[] = {31,28,31,30,31,30,31,31,30,31,30,31};
++    return days[month - 1] + (month == 2 && leap(year));
++}
++
++/* Hardware year is binary 0..127, with the vendor's 1968 epoch. */
++static bool calendarToUTC(const uint16_t *v, uint64_t *seconds)
++{
++    const unsigned sec = v[0] & 0x3f, min = v[1] & 0x3f, hour = v[2] & 0x1f;
++    const unsigned day = v[3] & 0x1f, month = v[5] & 0xf, year = 1968 + (v[6] & 0x7f);
++    if (year < 1970 || year > 2095 || month < 1 || month > 12 ||
++        day < 1 || day > monthDays(year, month) || hour > 23 || min > 59 || sec > 59) {
++        return false;
++    }
++    uint64_t days = 0;
++    for (unsigned y = 1970; y < year; ++y) { days += leap(y) ? 366 : 365; }
++    for (unsigned m = 1; m < month; ++m) { days += monthDays(year, m); }
++    *seconds = ((days + day - 1) * 24 + hour) * 3600 + min * 60 + sec;
++    return true;
++}
++
++static bool utcToCalendar(uint64_t seconds, uint16_t *v)
++{
++    uint64_t days = seconds / 86400;
++    const unsigned dow = (days + 4) % 7;
++    unsigned year = 1970, month = 1;
++    while (year <= 2095 && days >= (leap(year) ? 366U : 365U)) {
++        days -= leap(year) ? 366 : 365;
++        ++year;
++    }
++    if (year > 2095) { return false; }
++    while (month < 12 && days >= monthDays(year, month)) {
++        days -= monthDays(year, month);
++        ++month;
++    }
++    v[0] = seconds % 60;
++    v[1] = (seconds / 60) % 60;
++    v[2] = (seconds / 3600) % 24;
++    v[3] = days + 1;
++    v[4] = dow;
++    v[5] = month;
++    v[6] = year - 1968;
++    return true;
++}
++
++class DaliRTC : public IOService {
++    OSDeclareDefaultStructors(DaliRTC);
++    vm_offset_t io = 0;
++    IOMemoryDescriptor *memory = nullptr;
++    IOMemoryMap *memoryMap = nullptr;
++    IOLock *lock = nullptr;
++    uint64_t utcOffsetNS = 0; /* One atomic hardware-derived UTC/uptime anchor. */
++    uint32_t lastStatus = 0;
++    uint16_t lastAddress = 0;
++    bool busFault = false;
++
++    uint32_t load(uint32_t off) { return *(volatile uint32_t *)(io + off); }
++    void store(uint32_t off, uint32_t value) {
++        *(volatile uint32_t *)(io + off) = value;
++        __asm__ volatile("dsb sy" ::: "memory");
++    }
++    bool waitState(unsigned state) {
++        for (unsigned i = 0; i < 10000; ++i) {
++            lastStatus = load(kStatus);
++            if (((lastStatus >> 1) & 7) == state) { return true; }
++            IODelay(10);
++        }
++        return false;
++    }
++    bool transfer(uint16_t address, uint8_t *byte, bool write) {
++        if (busFault) { return false; }
++        lastAddress = address;
++        if (!waitState(0)) { busFault = true; return false; }
++        if (write) { store(kWData, *byte); }
++        /* EXT_REG_LONG, SID9, exactly one byte (MT6685 single-byte regmap). */
++        store(kAcc, (3U << 30) | (write ? 1U << 29 : 0) | (9U << 24) | address);
++        IODelay(1);
++        if (!waitState(write ? 0 : 6)) { busFault = true; return false; }
++        bool ok = !(lastStatus & (1U << 18));
++        if (!write) {
++            *byte = load(kRData) & 0xff;
++            store(kValidClear, 1);
++            ok = waitState(0) && ok;
++        }
++        if (!ok) { busFault = true; }
++        return ok;
++    }
++    bool read8(uint16_t address, uint8_t *v) { return transfer(address, v, false); }
++    bool write8(uint16_t address, uint8_t v) { return transfer(address, &v, true); }
++    bool read16(uint16_t address, uint16_t *v) {
++        uint8_t lo, hi;
++        if (!read8(address, &lo) || !read8(address + 1, &hi)) { return false; }
++        *v = lo | ((uint16_t)hi << 8);
++        return true;
++    }
++    bool write16(uint16_t address, uint16_t v) {
++        return write8(address, v & 0xff) && write8(address + 1, v >> 8);
++    }
++    bool trigger() {
++        if (!write16(kTrigger, 1)) { return false; }
++        for (unsigned i = 0; i < 10000; ++i) {
++            uint16_t bbpu;
++            if (!read16(kBBPU, &bbpu)) { return false; }
++            if (!(bbpu & 0x40)) { return true; }
++            IODelay(10);
++        }
++        return false;
++    }
++    bool enableClock(uint8_t *restore) {
++        uint8_t old;
++        if (!read8(kClockGate, &old)) { return false; }
++        *restore = old & kClockMask;
++        if (!write8(kClockClear, kClockMask)) { return false; }
++        IODelay(1000);
++        return true;
++    }
++    bool restoreClock(uint8_t restore) {
++        return !restore || write8(kClockSet, restore);
++    }
++    bool readHardware(uint64_t *seconds) {
++        for (unsigned attempt = 0; attempt < 3; ++attempt) {
++            uint8_t restore = 0;
++            if (!enableClock(&restore)) { return false; }
++            uint16_t bbpu = 0;
++            bool ok = read16(kBBPU, &bbpu) &&
++                write16(kBBPU, bbpu | 0x4300 | 0x20) && trigger();
++            bool restored = restoreClock(restore);
++            if (!ok || !restored) { return false; }
++            uint16_t v[7] = {}, secAfter;
++            for (unsigned i = 0; i < 7; ++i) {
++                if (!read16(kTime + 2 * i, &v[i])) { return false; }
++            }
++            if (!read16(kTime, &secAfter)) { return false; }
++            if ((secAfter & 0x3f) < (v[0] & 0x3f)) { continue; }
++            return calendarToUTC(v, seconds);
++        }
++        return false;
++    }
++    void anchor(uint64_t seconds) {
++        uint64_t ns;
++        absolutetime_to_nanoseconds(mach_absolute_time(), &ns);
++        __atomic_store_n(&utcOffsetNS, seconds * NSEC_PER_SEC - ns, __ATOMIC_RELEASE);
++    }
++public:
++    bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
++    void free() APPLE_KEXT_OVERRIDE;
++    bool getUTC(clock_sec_t *seconds, clock_nsec_t *nsecs);
++    bool setUTC(clock_sec_t seconds, clock_nsec_t nsecs);
++};
++
++OSDefineMetaClassAndStructors(DaliRTC, IOService);
++static DaliRTC *rtcInstance;
++
++bool DaliRTC::start(IOService *provider)
++{
++    OSData *reg = OSDynamicCast(OSData, provider->getProperty("reg"));
++    uint64_t range[2] = {};
++    if (!reg || reg->getLength() != sizeof(range)) { return false; }
++    memcpy(range, reg->getBytesNoCopy(), sizeof(range));
++    if (range[0] != 0x1c01a000 || range[1] != 0x900 || !IOService::start(provider)) {
++        return false;
++    }
++    lock = IOLockAlloc();
++    if (!lock) { return false; }
++    memory = IOMemoryDescriptor::withPhysicalAddress(range[0], range[1], kIODirectionInOut);
++    if (!memory) { return false; }
++    memoryMap = memory->map(kIOMapInhibitCache);
++    if (!memoryMap) { return false; }
++    io = memoryMap->getVirtualAddress();
++    kprintf("DALI RTC: PMIF mapped SID9 channel2\n");
++    /* Firmware must have initialized the bus; never rewrite its arbitration. */
++    if (!(load(0) & 1)) {
++        kprintf("DALI RTC: PMIF firmware initialization missing\n");
++        return false;
++    }
++    IOLockLock(lock);
++    uint64_t seconds = 0;
++    bool ok = readHardware(&seconds);
++    if (ok) { anchor(seconds); }
++    IOLockUnlock(lock);
++    if (!ok) {
++        kprintf("DALI RTC: hardware read failed reg=0x%x PMIF=0x%x\n", lastAddress, lastStatus);
++        return false;
++    }
++    uint16_t date[7] = {};
++    utcToCalendar(seconds, date);
++    kprintf("DALI RTC: hardware UTC %04u-%02u-%02u %02u:%02u:%02u epoch=%llu\n",
++        1968 + date[6], date[5], date[3], date[2], date[1], date[0], seconds);
++    setProperty("hardware-time-source", "MT6685 PMIF/SPMI");
++    setProperty("alarm-supported", false);
++    /* Permanent platform device: the clock callbacks may run after boot. */
++    retain();
++    __atomic_store_n(&rtcInstance, this, __ATOMIC_RELEASE);
++    registerService();
++    publishResource("IORTC", this);
++    kprintf("DALI RTC: IORTC published from hardware\n");
++    return true;
++}
++
++void DaliRTC::free()
++{
++    OSSafeReleaseNULL(memoryMap);
++    OSSafeReleaseNULL(memory);
++    if (lock) { IOLockFree(lock); }
++    IOService::free();
++}
++
++bool DaliRTC::getUTC(clock_sec_t *seconds, clock_nsec_t *nsecs)
++{
++    /* Sleep/wake paths can ask with IRQs disabled. Use the hardware anchor there. */
++    if (ml_get_interrupts_enabled() && !ml_at_interrupt_context()) {
++        IOLockLock(lock);
++        uint64_t value;
++        bool ok = readHardware(&value);
++        if (ok) { anchor(value); }
++        IOLockUnlock(lock);
++        if (ok) { *seconds = value; *nsecs = 0; return true; }
++        kprintf("DALI RTC: read failed; using hardware-derived uptime anchor\n");
++    }
++    uint64_t offset = __atomic_load_n(&utcOffsetNS, __ATOMIC_ACQUIRE), ns;
++    if (!offset) { return false; }
++    absolutetime_to_nanoseconds(mach_absolute_time(), &ns);
++    ns += offset;
++    *seconds = ns / NSEC_PER_SEC;
++    *nsecs = ns % NSEC_PER_SEC;
++    return true;
++}
++
++bool DaliRTC::setUTC(clock_sec_t seconds, clock_nsec_t nsecs)
++{
++    uint16_t date[7] = {};
++    if ((uint64_t)nsecs >= NSEC_PER_SEC || !utcToCalendar(seconds, date) ||
++        !ml_get_interrupts_enabled() || ml_at_interrupt_context()) { return false; }
++    IOLockLock(lock);
++    uint8_t restore = 0;
++    bool enabled = enableClock(&restore), ok = enabled;
++    if (enabled) {
++        for (unsigned i = 0; ok && i < 7; ++i) { ok = write16(kTime + 2 * i, date[i]); }
++        if (ok) { ok = trigger(); }
++        bool restored = restoreClock(restore);
++        ok = restored && ok;
++    }
++    uint64_t actual = 0;
++    if (ok) {
++        ok = readHardware(&actual) && actual >= seconds && actual - seconds <= 1;
++        if (ok) { anchor(actual); }
++    }
++    IOLockUnlock(lock);
++    kprintf("DALI RTC: hardware set-time %s\n", ok ? "verified" : "failed");
++    return ok;
++}
++
++extern "C" bool dali_rtc_get_utc(clock_sec_t *seconds, clock_nsec_t *nsecs)
++{
++    DaliRTC *rtc = __atomic_load_n(&rtcInstance, __ATOMIC_ACQUIRE);
++    return rtc && rtc->getUTC(seconds, nsecs);
++}
++
++extern "C" bool dali_rtc_set_utc(clock_sec_t seconds, clock_nsec_t nsecs)
++{
++    DaliRTC *rtc = __atomic_load_n(&rtcInstance, __ATOMIC_ACQUIRE);
++    return rtc && rtc->setUTC(seconds, nsecs);
++}
++#endif /* SWEET */
+diff --git a/iokit/Kernel/arm/SweetPlatformExpert.cpp b/iokit/Kernel/arm/SweetPlatformExpert.cpp
+--- a/iokit/Kernel/arm/SweetPlatformExpert.cpp
++++ b/iokit/Kernel/arm/SweetPlatformExpert.cpp
+@@ -10,6 +10,9 @@
+ #include <IOKit/IODeviceTreeSupport.h>
+ #include <IOKit/IOLib.h>
+ 
++extern "C" bool dali_rtc_get_utc(clock_sec_t *, clock_nsec_t *);
++extern "C" bool dali_rtc_set_utc(clock_sec_t, clock_nsec_t);
++
+ class SweetPlatformExpert : public IODTPlatformExpert {
+ 	OSDeclareDefaultStructors(SweetPlatformExpert);
+ 
+@@ -18,9 +21,27 @@
+ 	void processTopLevel(IORegistryEntry *root) APPLE_KEXT_OVERRIDE;
+ 	const char *deleteList(void) APPLE_KEXT_OVERRIDE;
+ 	const char *excludeList(void) APPLE_KEXT_OVERRIDE;
++	void getUTCTimeOfDay(clock_sec_t *secs, clock_nsec_t *nsecs) APPLE_KEXT_OVERRIDE;
++	void setUTCTimeOfDay(clock_sec_t secs, clock_nsec_t nsecs) APPLE_KEXT_OVERRIDE;
+ };
+ 
+ OSDefineMetaClassAndStructors(SweetPlatformExpert, IODTPlatformExpert);
++
++void
++SweetPlatformExpert::getUTCTimeOfDay(clock_sec_t *secs, clock_nsec_t *nsecs)
++{
++	if (!dali_rtc_get_utc(secs, nsecs)) {
++		IODTPlatformExpert::getUTCTimeOfDay(secs, nsecs);
++	}
++}
++
++void
++SweetPlatformExpert::setUTCTimeOfDay(clock_sec_t secs, clock_nsec_t nsecs)
++{
++	if (!dali_rtc_set_utc(secs, nsecs)) {
++		IODTPlatformExpert::setUTCTimeOfDay(secs, nsecs);
++	}
++}
+ 
+ bool
+ SweetPlatformExpert::start(IOService *provider)
+diff --git a/iokit/KernelConfigTables.cpp b/iokit/KernelConfigTables.cpp
+--- a/iokit/KernelConfigTables.cpp
++++ b/iokit/KernelConfigTables.cpp
+@@ -45,6 +45,12 @@
+     "     'IOClass'         = SweetCPU;"
+     "     'IOProviderClass' = IOPlatformDevice;"
+     "     'IONameMatch'     = 'qcom,kryo470';"
++    "     'IOProbeScore'    = 10000:32;"
++    "   },"
++    "   {"
++    "     'IOClass'         = DaliRTC;"
++    "     'IOProviderClass' = IOPlatformDevice;"
++    "     'IONameMatch'     = 'mediatek,mt6685-rtc';"
+     "     'IOProbeScore'    = 10000:32;"
+     "   },"
+     "   {"
+diff --git a/iokit/conf/files.arm64 b/iokit/conf/files.arm64
+--- a/iokit/conf/files.arm64
++++ b/iokit/conf/files.arm64
+@@ -20,3 +20,5 @@
+ iokit/Kernel/arm/hid/IOHIDEvent.cpp                              optional iokitcpp
+ iokit/Kernel/arm/hid/IOHIDEventServiceQueue.cpp                  optional iokitcpp
+ iokit/Kernel/arm/hid/IOHIDEventServiceUserClient.cpp             optional iokitcpp
++
++iokit/Kernel/arm/DaliRTC.cpp                                     optional iokitcpp
+diff --git a/iokit/Kernel/IOStartIOKit.cpp b/iokit/Kernel/IOStartIOKit.cpp
+--- a/iokit/Kernel/IOStartIOKit.cpp
++++ b/iokit/Kernel/IOStartIOKit.cpp
+@@ -79,15 +79,28 @@
+ 
+ // RTC is not present on this target
+ #ifndef BCM2837
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++	kprintf("SWEET time: IORTC wait begin (30s maximum)\n");
++	IOService *rtc = IOService::waitForService(
++		IOService::resourceMatching("IORTC"), &t );
++	kprintf("SWEET time: IORTC wait %s\n", rtc ? "matched" : "timed out");
++#else
+ 	IOService::waitForService(
+ 		IOService::resourceMatching("IORTC"), &t );
++#endif
+ #endif
+ #if defined(__i386__) || defined(__x86_64__)
+ 	IOService::waitForService(
+ 		IOService::resourceMatching("IONVRAM"), &t );
+ #endif
+ 
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++	kprintf("SWEET time: calendar initialize begin\n");
++#endif
+ 	clock_initialize_calendar();
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++	kprintf("SWEET time: calendar initialize returned\n");
++#endif
+ }
+ 
+ void

@@ -88,6 +88,10 @@ jobs:
           grep -Fq "'dali-boot-cpu' = <01000000>" xnu/iokit/KernelConfigTables.cpp
           grep -Fq 'DALI CPU: boot-only match validated' xnu/iokit/Kernel/arm/SweetCPU.cpp
           grep -Fq 'DALI CPU: CPU completion published' xnu/iokit/Kernel/arm/SweetCPU.cpp
+          grep -Fq 'DALI RTC: IORTC published from hardware' xnu/iokit/Kernel/arm/DaliRTC.cpp
+          grep -Fq "'IONameMatch'     = 'mediatek,mt6685-rtc'" xnu/iokit/KernelConfigTables.cpp
+          grep -Fq 'dali_rtc_get_utc(secs, nsecs)' xnu/iokit/Kernel/arm/SweetPlatformExpert.cpp
+          grep -Fq 'SWEET time: calendar initialize returned' xnu/iokit/Kernel/IOStartIOKit.cpp
 
       - name: Package build tree for local compiles
         if: always()

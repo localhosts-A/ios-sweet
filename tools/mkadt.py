@@ -260,6 +260,13 @@ def build(seed=None, qemu=False, highmem=False, dali=False):
     # Identity of the iPhone X whose userland runs here: compatible[0] is
     # hw.model/hw.target (D22AP), model is hw.machine/hw.product
     # (iPhone10,3). 'xiaomi,sweet' stays for SweetPlatformExpert matching.
+    dali_rtc = [node('dali-rtc', [
+        ph(),
+        ('compatible', cstr('mediatek,mt6685-rtc')),
+        # SID9 uses the main PMIF path (live spmi-dev-mask=0x85c0).
+        ('reg', u64(0x1c01a000, 0x900)),
+    ])] if dali else []
+
     return node('device-tree', [
         ph(),
         ('compatible', cstr('D22AP') + cstr('iPhone10,3') + board_compat + cstr('AppleARM')),
@@ -269,7 +276,7 @@ def build(seed=None, qemu=False, highmem=False, dali=False):
         ('manufacturer', cstr('Apple Inc.')),
         ('#address-cells', u32(2)),
         ('#size-cells', u32(2)),
-    ], [chosen, defaults, cpus, arm_io, fbcon, buttons] + product + ([] if qemu else [ufs]))
+    ], [chosen, defaults, cpus, arm_io, fbcon, buttons] + product + dali_rtc + ([] if qemu else [ufs]))
 
 
 if __name__ == '__main__':
