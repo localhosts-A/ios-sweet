@@ -190,7 +190,9 @@ def build(seed=None, qemu=False, highmem=False, dali=False):
     gic = node('gic', [
         ph(),
         ('compatible', cstr('arm,gic-v3')),
-        ('interrupt-controller', b''),
+        # XNU's pe_arm_map_interrupt_controller searches this string property
+        # for the master controller; an empty DT boolean is not equivalent.
+        ('interrupt-controller', cstr('master')),
         ('virtual-timer-intid', u32(vtimer_intid)),
         ('reg', u64(gicd - SOC_BASE, gicd_size, gicr - SOC_BASE, gicr_size)),
     ])
