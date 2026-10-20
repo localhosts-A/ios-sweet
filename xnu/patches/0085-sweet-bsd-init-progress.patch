@@ -1,0 +1,10 @@
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -493,1 +493,5 @@
+-#define DEBUG_BSDINIT 0
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++#define DEBUG_BSDINIT 1
++#else
++#define DEBUG_BSDINIT 0
++#endif
