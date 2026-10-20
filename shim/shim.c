@@ -124,7 +124,10 @@ static void __attribute__((noreturn)) reset(unsigned after_s)
 {
 	con_skip();
 	con_hex("OFF SECONDS", after_s);
-#if defined(DALI_PAYLOAD_PROBE_STAGED)
+#if defined(DALI_DISPLAY)
+	/* Give visible results a full capture window after rendering them. */
+	delay_ms(after_s * 1000);
+#elif defined(DALI_PAYLOAD_PROBE_STAGED)
 	/* Keep parsing time out of the externally observed diagnostic code. */
 	uint64_t start = probe_clock_ready ? probe_started_ticks : now();
 	uint64_t deadline = start + rsr("cntfrq_el0") * after_s;
@@ -454,7 +457,11 @@ void shim_main(uint64_t dtb)
 #endif
 	con_skip();
 	const char *why = loader_boot(dtb);
+#if defined(DALI_DISPLAY) && defined(DALI_PAYLOAD_PROBE)
+	loader_display_report(why);
+#else
 	con_str("LOADER", why);
+#endif
 	con_skip();
 #if defined(DALI_ANDROID_CHAIN)
 	con_str("RECOVERY", "restoring stock generic ramdisk in RAM");

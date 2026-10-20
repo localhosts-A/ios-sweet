@@ -86,6 +86,17 @@ static uint8_t payload_meta_bytes[PAYLOAD_HEADER_SIZE + MAX_PAYLOAD_SEGS * sizeo
 	__attribute__((aligned(16)));
 static uint8_t lz4_block_out[LZ4_BLOCK_SIZE] __attribute__((aligned(16)));
 
+#if defined(DALI_DISPLAY) && defined(DALI_PAYLOAD_PROBE)
+static int report_has_meta;
+static uint64_t report_payload_size;
+static uint32_t report_segment = UINT32_MAX, report_reason, report_file_check;
+#define REPORT_REJECT(n) (report_reason = (n))
+#define REPORT_FILE(n) (report_file_check = (n))
+#else
+#define REPORT_REJECT(n) ((void)0)
+#define REPORT_FILE(n) ((void)0)
+#endif
+
 #if defined(DALI_PAYLOAD_PROBE_STAGED)
 volatile uint32_t loader_probe_stage;
 #define PROBE_STAGE(n) (loader_probe_stage = (n))
@@ -95,16 +106,16 @@ volatile uint32_t loader_probe_stage;
 
 #if defined(DALI_PAYLOAD_PROBE_VALIDATE)
 volatile uint32_t loader_probe_validation;
-#define VALIDATION_REJECT(n) (loader_probe_validation = (n), 0)
+#define VALIDATION_REJECT(n) (REPORT_REJECT(n), loader_probe_validation = (n), 0)
 #else
-#define VALIDATION_REJECT(n) 0
+#define VALIDATION_REJECT(n) (REPORT_REJECT(n), 0)
 #endif
 
 #if defined(DALI_PAYLOAD_PROBE_FILES)
 volatile uint32_t loader_probe_file_check;
-#define FILE_REJECT(n) (loader_probe_file_check = (n), VALIDATION_REJECT(6))
+#define FILE_REJECT(n) (REPORT_FILE(n), loader_probe_file_check = (n), VALIDATION_REJECT(6))
 #else
-#define FILE_REJECT(n) VALIDATION_REJECT(6)
+#define FILE_REJECT(n) (REPORT_FILE(n), VALIDATION_REJECT(6))
 #endif
 
 static uint32_t read_le32(uint64_t p)
@@ -185,6 +196,9 @@ static int payload_validate(const struct payload *p, uint64_t payload_size,
 		return VALIDATION_REJECT(4);
 	for (uint32_t i = 0; i < p->nsegs; i++) {
 		const struct payload_seg *s = &p->segs[i];
+#if defined(DALI_DISPLAY) && defined(DALI_PAYLOAD_PROBE)
+		report_segment = i;
+#endif
 		uint64_t va_end, file_end, off;
 		if (s->vmaddr < p->virt_base || s->vmsize < s->file_size ||
 		    add_overflow_u64(s->vmaddr, s->vmsize, &va_end) ||
@@ -214,6 +228,48 @@ static uintptr_t payload_adt_pa(const struct payload *p)
 {
 	return (uintptr_t)(p->phys_base + (p->kernel_end - p->virt_base));
 }
+
+#if defined(DALI_DISPLAY) && defined(DALI_PAYLOAD_PROBE)
+void loader_display_report(const char *result)
+{
+	/* Keep the result together even if earlier console output filled a page. */
+	con_clear(0xff101820U);
+	con_str("RESULT", result);
+	con_hex("REASON", report_reason);
+	const char *check = "see RESULT above";
+	if (report_reason == 1) check = "header or physical range";
+	if (report_reason == 2) check = "kernel span or ADT file bounds";
+	if (report_reason == 3) check = "initrd overlaps destination RAM";
+	if (report_reason == 4) check = "boot args destination bounds";
+	if (report_reason == 5) check = "segment virtual range";
+	if (report_reason == 6) {
+		check = "segment file bounds";
+		if (report_file_check == 1) check = "file offset plus size overflows";
+		if (report_file_check == 2) check = "segment file starts in metadata";
+		if (report_file_check == 3) check = "segment file end exceeds payload";
+	}
+	if (report_reason == 7) check = "segment destination bounds";
+	con_str("CHECK", check);
+	if (report_has_meta) {
+		const struct payload *p = (const struct payload *)payload_meta_bytes;
+		con_hex("PAYLOAD", report_payload_size);
+		con_hex("NSEGS", p->nsegs);
+		con_hex("ADT_OFF", p->adt_off);
+		con_hex("ADT_SIZE", p->adt_size);
+		if (report_reason && report_segment < p->nsegs &&
+		    report_segment < MAX_PAYLOAD_SEGS) {
+			const struct payload_seg *seg = &p->segs[report_segment];
+			con_hex("SEGMENT", report_segment);
+			con_hex("FILE_OFF", seg->file_off);
+			con_hex("FILE_SIZE", seg->file_size);
+			con_hex("FILE_END", seg->file_off + seg->file_size);
+			con_hex("VMADDR", seg->vmaddr);
+			con_hex("VMSIZE", seg->vmsize);
+		}
+	}
+	con_str("PHOTO", "capture this result page");
+}
+#endif
 
 #if !defined(DALI_PAYLOAD_PROBE)
 static void launch_xnu(const struct payload *p, uintptr_t adt_pa)
@@ -282,6 +338,10 @@ static const char *payload_metadata_ready(struct payload_stream *s,
 	    uint64_t rd_start, uint64_t rd_end)
 {
 	const struct payload *p = (const struct payload *)payload_meta_bytes;
+#if defined(DALI_DISPLAY) && defined(DALI_PAYLOAD_PROBE)
+	report_has_meta = 1;
+	report_payload_size = s->size;
+#endif
 #if defined(DALI_RAMLOG_PROBE)
 	con_hex("PAYLOAD_SIZE", s->size);
 	con_hex("NSEGS", p->nsegs);

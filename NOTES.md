@@ -1,8 +1,14 @@
+## Loader result page ready (2026-10-21)
+
+- Previous visible trial only captured OFF SECONDS0x78, not loader outcome. Stock original pair restored and both hashes verified in Android.
+- Corrected capture timeout: display builds now wait a full120s after result rendering, rather than counting slow parsing time toward an absolute entry deadline. Added a dedicated compact result page containing the real result/reason/check, decoded payload size, ADT bounds, and failing segment file/VM fields. It starts on a clean page, so OFF/next text cannot page out the error.
+- Validation-only build passes, SHA-256 `e8f3cf84a2262c3d08c6a877841cc0471b80e1d134f21d8bf0258c4fdf0ac505`. Not flashed at this checkpoint. Pair with matching GH39425210357 init_boot; restore both full stock originals after reading the result. No XNU destination writes enabled.
+
 ## Visible loader trial preparation (2026-10-21)
 
 - User asked to continue. Stock Android online; both physical boot partitions and host backups again match original hashes.
 - Prepare validation-only display/log probe (no XNU destination writes) with the already packaged matching `shim/out-dali/gh-39425210357/dali-init_boot.img` (SHA-256 f6d2c91e8e5db820303cff4b8c73e83b69c21461f0efbc81705b7293f39e308e). Payload `dali-payload.bin` SHA-256 fad995c21929a90414ddae8ba8dca751980e336625b96f7a5829a9874ae7f82e.
-- Gave visible probe results a fixed 120-second photography window and fixed long-label overlap in console text. Probe SHA-256 `c51cabc5017a20ac3737caca1505fd9aa3f4f3f6ba10e1979e63f725ccf06442`. Build passes. Not yet flashed; temporary boot_b/init_boot_b pair will be restored from full originals immediately after the photo/result.
+- Gave visible probe results a fixed 120-second photography window and fixed long-label overlap in console text. Probe SHA-256 `c51cabc5017a20ac3737caca1505fd9aa3f4f3f6ba10e1979e63f725ccf06442`. **TRIAL OBSERVATION:** user read OFF SECONDS=0x78 and device powered off; this is the requested120s deadline, not a validation error. No actual loader result/photo captured. User entered fastboot; confirmed dali/slot b, restored full original init_boot_b then boot_b (OKAY) and rebooted. Android returned; both original root-side hashes verified exactly. No diagnostic pair installed.
 - Next: use actual visible LOADER/validation text to identify current failure; then continue XNU refresh integration. Do not infer failure stages from power-off timing.
 
 ## Current handoff: visible Dali boot console (2026-10-21)
