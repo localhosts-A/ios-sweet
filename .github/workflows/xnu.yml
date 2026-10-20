@@ -74,11 +74,14 @@ jobs:
           MAKEFLAGS: ${{ inputs.keep_going == 'false' && '' || '-k' }}
         run: bash build.sh
 
-      - name: Verify SWEET BSD init progress patch
+      - name: Verify SWEET init diagnostics
         working-directory: dxb
         run: |
           grep -Fq '#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)' xnu/bsd/kern/bsd_init.c
           grep -Fq '#define DEBUG_BSDINIT 1' xnu/bsd/kern/bsd_init.c
+          grep -Fq 'STARTUP_DEBUG_CALLBACKS = 0x00000002' xnu/osfmk/kern/startup.h
+          grep -Fq 'const startup_debug_t callback_mask = STARTUP_DEBUG_CALLBACKS;' xnu/osfmk/kern/startup.c
+          grep -Fq 'kernel_startup: phase %u begin' xnu/osfmk/kern/startup.c
 
       - name: Package build tree for local compiles
         if: always()

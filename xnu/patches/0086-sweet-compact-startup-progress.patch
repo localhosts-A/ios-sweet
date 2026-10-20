@@ -1,0 +1,50 @@
+diff --git a/osfmk/kern/startup.h b/osfmk/kern/startup.h
+--- a/osfmk/kern/startup.h
++++ b/osfmk/kern/startup.h
+@@ -91,10 +91,12 @@
+  * Flags set in the @c startup_debug global to configure startup debugging.
+  */
+ __options_decl(startup_debug_t, uint32_t, {
+ 	STARTUP_DEBUG_NONE    = 0x00000000,
+ 	STARTUP_DEBUG_VERBOSE = 0x00000001,
++	/* SWEET DEVELOPMENT: per-callback trace; use startup_debug=3 for all. */
++	STARTUP_DEBUG_CALLBACKS = 0x00000002,
+ });
+ 
+ extern startup_debug_t startup_debug;
+ 
+ /*!
+diff --git a/osfmk/kern/startup.c b/osfmk/kern/startup.c
+--- a/osfmk/kern/startup.c
++++ b/osfmk/kern/startup.c
+@@ -394,15 +394,30 @@
+ __startup_func
+ void
+ kernel_startup_initialize_upto(startup_subsystem_id_t upto)
+ {
+ 	struct startup_entry *cur = startup_entry_cur;
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++	const startup_debug_t callback_mask = STARTUP_DEBUG_CALLBACKS;
++	startup_subsystem_id_t logged_subsystem = STARTUP_SUB_NONE;
++#else
++	const startup_debug_t callback_mask = STARTUP_DEBUG_VERBOSE;
++#endif
+ 
+ 	assert(startup_phase < upto);
+ 
+ 	while (cur < startup_entries_end && cur->subsystem <= upto) {
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++		/* A command-mode panel refreshes synchronously on every log line. */
+ 		if ((startup_debug & STARTUP_DEBUG_VERBOSE) &&
++		    startup_phase >= STARTUP_SUB_KPRINTF &&
++		    cur->subsystem != logged_subsystem) {
++			kprintf("kernel_startup: phase %u begin\n", cur->subsystem);
++			logged_subsystem = cur->subsystem;
++		}
++#endif
++		if ((startup_debug & callback_mask) &&
+ 		    startup_phase >= STARTUP_SUB_KPRINTF) {
+ 			kprintf("%s[%d, rank %d]: %p(%p)\n", __func__,
+ 			    cur->subsystem, cur->rank, cur->func, cur->arg);
+ 		}
+ 		startup_phase = cur->subsystem - 1;
