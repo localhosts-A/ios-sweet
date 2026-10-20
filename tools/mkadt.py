@@ -175,7 +175,10 @@ def build(seed=None, qemu=False, highmem=False, dali=False):
             ('state', cstr('running' if core == 0 else 'stopped')),
             ('timebase-frequency', u32(timebase)),
         ]
-        if not dali:
+        if dali:
+            # Local driver routing marker; retain the real generic ARM identity.
+            cpu_props.append(('dali-boot-cpu', u32(1)))
+        else:
             cpu_props += [
                 ('clock-frequency', u32(2304000000 if core >= 6 else 1804800000)),
                 ('bus-frequency', u32(100000000)),

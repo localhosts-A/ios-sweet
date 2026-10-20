@@ -85,6 +85,9 @@ jobs:
           grep -Fq 'SWEET IOKit: matching returned' xnu/pexpert/arm/pe_init.c
           grep -Fq 'PE_lockdown_iokit returned; vm_set_restrictions begin' xnu/osfmk/kern/startup.c
           grep -Fq 'entry; throttle_init begin' xnu/bsd/kern/bsd_init.c
+          grep -Fq "'dali-boot-cpu' = <01000000>" xnu/iokit/KernelConfigTables.cpp
+          grep -Fq 'DALI CPU: boot-only match validated' xnu/iokit/Kernel/arm/SweetCPU.cpp
+          grep -Fq 'DALI CPU: CPU completion published' xnu/iokit/Kernel/arm/SweetCPU.cpp
 
       - name: Package build tree for local compiles
         if: always()
