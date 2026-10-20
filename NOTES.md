@@ -1,3 +1,8 @@
+## Current handoff: fixed counter images ready; device disconnected (2026-10-21)
+
+- New fixed-counter pair CI39505675608 fully verified/prepared (see below), but immediate physical preflight stopped: ADB device not found; subsequent ADB and fastboot inventories empty. **NO NEW CANDIDATE FLASH.** Authoritative fixed-pair manifest prepared_device_disconnected. User asked to reconnect USB/normal Android and reply; await connection.
+- Physical original pair restoration/readback was VERIFIED after previous timed trial; no active trial or pending restoration. On reconnect, repeat original/device/host/candidate preflight before authorized temporary trial. Counter diagnostic fault fixed and final linked opcodes verified; original automatic reboot cause/root/PID1 unconfirmed. No userdata/UFS/GPT/watchdog writes.
+
 ## Current handoff: fixed counter pair ready (2026-10-21)
 
 - CI39505675608 SUCCESS at78a6dd7; final installed Mach-O instruction gate and local downloaded-kernel inspection both pass: helper52bytes, ISB then CNTPCT_EL0 then CNTFRQ_EL0. Source5/5 exact-match (four timed files + native RTC). Compiler1379/1380hits99.93%,1miss. Kernel SHA59419a72ca051dfd32cf3103248c857999b9d5ce310c3e333e86785f94a9726c.
