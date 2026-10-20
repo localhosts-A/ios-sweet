@@ -1,3 +1,11 @@
+## Current handoff: payload validation passes (2026-10-21)
+
+- User photo shows RESULT `payload verified`, REASON0; exactly one LZ4 magic and one valid frame; payload size0xFD6B40, 10 segments, ADT offset0xFD5050, size0x1AEC. The frame lies in the initrd after vendor material and before the bootconfig tail; decoded CPIO extraction and payload validation succeeded.
+- Validation-only probe stopped before XNU destination writes. This confirms loader input discovery/extraction/metadata checks on hardware; it does not confirm XNU entry.
+- Fastboot dali/slot b confirmed. Restored full original init_boot_b then boot_b (OKAY), rebooted. Android online; root-side hashes exactly match host backups: boot_b `6dc40de74fa7de4f435c513047c51fe10634c1891666031039c52a08b27a3cd5`, init_boot_b `08794a432befcf0504ee4933a51260cb6ccc4785b69f345c4b5968e8e6053d2d`.
+- Validation fix committed `42aae0a`; handoff note `0dbec6d`. No diagnostic images remain, no userdata/super/GPT writes.
+- Next: integrate a bounded MT6991 retained-pipeline refresh into XNU early framebuffer output, with properly typed Device mappings for DSI0/mutex and only the necessary pages. Then run local compile/patch checks and CI before a paired actual XNU entry attempt.
+
 ## Current handoff: full-initrd frame discovery (2026-10-21)
 
 - ACTIVE TRIAL: commit42aae0a, boot47f87518…3d9be72 paired with matching GH39425210357 init_boot. Confirmed dali/slot b; init_boot_b then boot_b writes OKAY, reboot OKAY. Await actual result photo and manual fastboot; restore original full pair before further trial. Original host/physical hashes verified immediately beforehand.
@@ -46,14 +54,14 @@
 
 ### >>> UPDATE 2026-10-20 (Dali / MT6991 bring-up; read first) <<<
 
-**STATE (2026-10-21):** stock Android is online and both original boot
-partitions are restored. Root-side hashes exactly match the full backups:
+**STATE (2026-10-21):** stock Android is online; both original boot
+partitions are restored and hash-verified after payload validation. Root-side hashes exactly match the full backups:
 boot_b `6dc40de74fa7de4f435c513047c51fe10634c1891666031039c52a08b27a3cd5`,
 init_boot_b `08794a432befcf0504ee4933a51260cb6ccc4785b69f345c4b5968e8e6053d2d`.
-No XNU entry has been confirmed. Minimal shim execution is confirmed by its
-20-second automatic power-off; framebuffer text is not visible. Subsequent
-50–60-second observations are **provisional timing inferences**, not captured
-loader errors. The metadata-comparison probe gave 57 seconds, inconclusive.
+No XNU entry has been confirmed. The latest visible validation result is now
+`payload verified`, after the bounded full-initrd scan found the exact custom
+LZ4/CPIO frame and validated the 10-segment payload. No XNU destination writes
+were enabled for this probe. The metadata-comparison probe gave 57 seconds, inconclusive.
 
 **CURRENT PRIORITY:** user asks for better diagnostics and visible output.
 Exact panel/MT6991 display sources were found in MiCode/mtk_kernel_device_modules
