@@ -20,8 +20,9 @@ llvm-objcopy -O binary "$OUT/shim.elf" "$OUT/Image"
 end_hex=$(llvm-nm "$OUT/shim.elf" | awk '$3 == "_end" { print $1 }')
 test -n "$end_hex"
 truncate -s "$((16#$end_hex))" "$OUT/Image"
+lz4 -l -12 -f "$OUT/Image" "$OUT/Image.lz4"
 
-mkbootimg --header_version 4 --kernel "$OUT/Image" --pagesize 4096 \
+mkbootimg --header_version 4 --kernel "$OUT/Image.lz4" --pagesize 4096 \
 	--cmdline "console=null" -o "$OUT/dali-probe-boot.img"
 
 ls -lh "$OUT/Image" "$OUT/dali-probe-boot.img"

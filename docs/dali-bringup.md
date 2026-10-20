@@ -47,7 +47,9 @@ python3 tools/mkadt.py shim/out-dali/dali.adt --board dali
 
 Build the Dali shim as a kernel-only Android boot image v4. The generic
 ramdisk is separate in `init_boot`; the vendor DTB and vendor ramdisk remain
-in `vendor_boot`:
+in `vendor_boot`. MTK LK expects the Linux kernel compressed with the same
+legacy LZ4 format as the stock image, so the Dali build compresses `Image`
+before packaging:
 
 ```sh
 TARGET_BOARD=dali bash shim/build.sh
@@ -86,7 +88,8 @@ The new kernel was packaged with the Dali ADT as a 16,608,064-byte
 the `init_boot` image is exactly 8 MiB with a 7,467,394-byte LZ4 CPIO ramdisk
 and AVB v1 hash footer using algorithm `NONE`. The CPIO's `sweet.payload`
 entry was extracted and compared byte-for-byte with the payload source. The
-images have not been flashed.
+pair was tested temporarily on the device and then restored; it did not
+confirm an XNU boot.
 
 The host build uses Clang/LLD. Sweet remains the default target and keeps its
 boot v2 packaging. `shim/out-dali/` and `shim/out/` are ignored build output.
@@ -94,11 +97,12 @@ boot v2 packaging. `shim/out-dali/` and `shim/out/` are ignored build output.
 ## Boot test and recovery record
 
 This bootloader rejects `fastboot boot` with `unknown command`, but fastboot
-reports that flashing is allowed. Before testing, both 64 MiB boot slots were
-saved under `backup/dali-25060RK16C-20261020/` and verified against hashes read
-from the phone. The probe was written only to active `boot_b`; after the test,
-the saved `boot_b.img` was restored. Android booted afterward and the restored
-partition hash matched the backup. No other partition was written.
+reports that flashing is allowed. Before the paired test, `boot_b` (64 MiB)
+and `init_boot_b` (8 MiB) were saved under
+`backup/dali-25060RK16C-pairtest-20261020/` and verified against hashes read
+from the phone. The probe was written only to active `boot_b`; after each
+test, the saved `boot_b.img` was restored. Android booted afterward and the
+restored partition hashes matched the backups. No other partition was written.
 
 The probe's display was not observed, so the x0 FDT value has not yet been
 visually confirmed. The phone disconnected from USB about 22 seconds after the
@@ -113,10 +117,20 @@ hash again matched the saved image. The tests did not write `userdata`,
 
 The earlier XNU test put the custom payload in `boot`'s ramdisk, which does
 not match this phone's GKI layout: the generic ramdisk is loaded from
-`init_boot`. That mismatch is a plausible cause of the logo-only result, but
-it is not confirmed as the only cause. This turn built the corrected
-kernel-only `boot` and separate `init_boot` images locally; neither was
-flashed.
+`init_boot`. The corrected kernel-only `boot` and separate `init_boot` images
+were flashed together for a temporary test. The first attempt used an
+uncompressed Linux kernel; `expdb` recorded `No magic number of compression is
+found!` after LK began decompression. The Dali build scripts were then changed
+to use legacy LZ4, matching the stock kernel magic `02 21 4c 18`. The second
+paired attempt logged successful kernel decompression and
+`lk finished --> jump to linux kernel 64Bit`, but the handset still showed
+only its logo. No XNU entry or framebuffer text was confirmed.
+
+A separate 3,716-byte compressed early probe also showed only the handset
+logo. The stock `boot_b` and `init_boot_b` are currently restored and were
+read back through root ADB. Their hashes match the saved backups:
+`boot_b` is `6dc40de74fa7de4f435c513047c51fe10634c1891666031039c52a08b27a3cd5`;
+`init_boot_b` is `08794a432befcf0504ee4933a51260cb6ccc4785b69f345c4b5968e8e6053d2d`.
 
 The stock `boot_b` contains an AVB footer v1 with an OEM `SHA256_RSA4096`
 vbmeta descriptor. Its Android boot-v4 `boot_signature` field is zero; that
@@ -135,8 +149,9 @@ image also remained logo-only.
 
 ## Work still needed for an iOS boot
 
-- Test the newly built kernel-only `boot` and `init_boot` pair on the device.
-  Back up and restore both active-slot partitions; this test has not been run.
+- Trace the shim's first instructions and framebuffer initialization. LK
+  decompresses and jumps to the corrected kernel, but neither the full image
+  nor the minimal early probe displayed its diagnostic text.
 - Validate the MTK UFSHCI takeover and DMA behavior. The existing XNU block
   driver assumes the standard UFSHCI register interface; the ADT address alone
   does not prove that it works on MT6991. Dali's user LUN is 2, so the ADT now
@@ -146,6 +161,6 @@ image also remained logo-only.
 - Keep the Qualcomm SPMI/RPMh/GENI touch and button drivers disabled on Dali.
   Dali uses a MediaTek SPI touchscreen and a different panel pipeline.
 - Confirm the Dali framebuffer text path; only the handset logo was observed
-  during the XNU RAM-disk test.
+  during the XNU pair and the compressed probe.
 - Distinguish kernel entry from root mount and PID 1 before creating any
   userdata partition.

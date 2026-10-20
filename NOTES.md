@@ -4,14 +4,17 @@
 
 **STATE:** the Dali branch `port/dali-mt6991` is pushed to the user's fork,
 and the patched XNU build plus paired kernel-only `boot` / `init_boot` images
-are ready locally. This is not a confirmed bootable iOS port: the earlier
-image test showed only the handset boot logo, and the new image pair has not
-been flashed.
+are ready locally. This is not a confirmed bootable iOS port: the first paired
+test failed LK's kernel decompression check, while the corrected legacy-LZ4
+pair reached LK's Linux jump but showed only the handset logo. A compressed
+early probe also showed only the logo; XNU entry and framebuffer text remain
+unconfirmed. Stock `boot_b` and `init_boot_b` are restored and hash-verified.
 
 - Fastboot reports current slot `b`, `unlocked: yes`, and does not implement
-  `fastboot boot`. Per the user's instruction, both 64 MiB boot slots were
-  backed up to `backup/dali-25060RK16C-20261020/`; device and backup SHA-256
-  values matched.
+  `fastboot boot`. Per the user's instruction, `boot_b` (64 MiB) and
+  `init_boot_b` (8 MiB) were backed up to
+  `backup/dali-25060RK16C-pairtest-20261020/` before the paired test; device
+  and backup SHA-256 values matched.
 - The Dali handoff probe was temporarily flashed to active `boot_b`. The phone
   disappeared from USB about 22 seconds after reboot; the user then re-entered
   fastboot. The original `boot_b.img` was restored and verified by root-side
@@ -78,7 +81,24 @@ been flashed.
   kernel-only boot-v4 shim image and an 8 MiB init_boot-v4 image. The init_boot
   has a 7,467,394-byte LZ4 CPIO ramdisk and an AVB hash footer (`Algorithm:
   NONE`); header/footer parsing and byte-for-byte CPIO payload comparison
-  passed. Neither new image has been flashed.
+  passed. The pair was temporarily flashed for an authorized test and then
+  restored from the backups.
+- The first paired test used an uncompressed Linux `Image` in `boot_b`. MTK
+  `expdb` recorded `No magic number of compression is found!` after LK began
+  kernel decompression. `shim/build.sh` and `shim/build-dali-probe.sh` now
+  compress Dali kernels with legacy LZ4 (`02 21 4c 18`), matching the stock
+  kernel format. The corrected paired test logged a 12,850-byte kernel,
+  successful decompression, and `lk finished --> jump to linux kernel 64Bit`;
+  the user still saw only the handset logo, with no XNU entry or framebuffer
+  text confirmed.
+- A follow-up 3,716-byte legacy-LZ4 early probe also showed only the handset
+  logo. Afterward, the original `boot_b` was restored again. The device
+  returned to Android on slot `_b`; current readbacks match the saved backups:
+  `boot_b` SHA-256
+  `6dc40de74fa7de4f435c513047c51fe10634c1891666031039c52a08b27a3cd5`, and
+  `init_boot_b` SHA-256
+  `08794a432befcf0504ee4933a51260cb6ccc4785b69f345c4b5968e8e6053d2d`.
+  `userdata`, `super`, and GPT were not written.
 - The AVB footer did not resolve the logo-only result. No valid OEM signature
   can be produced without Xiaomi's private key; the local test key is not
   trusted by the OEM chain.
@@ -93,10 +113,10 @@ been flashed.
   `0x0c400000/0x40000`, GICR `0x0c440000/0x200000`, 13 MHz generic timer
   (virtual timer PPI 11 = INTID 27), UFSHCI `0x16810000/0x2a00`, framebuffer
   `0xfc990000/0x3660000`, 1280×2772 (stride assumed 5120).
-- Next: with user authorization, test the paired `boot`/`init_boot` images to
-  distinguish kernel entry, console setup and PID 1. Back up and restore both
-  active-slot partitions and verify their hashes. Do not create the proposed
-  userdata partition until the XNU path is demonstrated.
+- Next: trace why the compressed shim and probe do not show their first
+  framebuffer diagnostics after LK's jump. Keep `userdata`, `super`, and GPT
+  unchanged until XNU entry is demonstrated; both boot partitions are
+  currently restored and verified.
 
 ## Agent handoff / active work (2026-10-15, latest)
 
