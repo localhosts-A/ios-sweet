@@ -2,6 +2,18 @@
 
 ### >>> UPDATE 2026-10-20 (Dali / MT6991 bring-up; read first) <<<
 
+**TEMPORARY TEST IN PROGRESS (2026-10-21):** active `boot_b` contains the
+file-check-specific parse-only probe
+`c95fcfc4bc7330977b8154330154bfe9430cbb1997e36b26584fcfdb721fefeb`,
+paired with candidate `init_boot_b`
+`f6d2c91e8e5db820303cff4b8c73e83b69c21461f0efbc81705b7293f39e308e`.
+Both flashes and reboot succeeded after checking dali / slot b / unlocked.
+Await shutdown timing and manual fastboot return, then restore original
+`init_boot_b.img` and `boot_b.img` from
+`backup/dali-25060RK16C-pairtest-20261020/`, reboot Android and verify hashes.
+Do not start another experiment before recovery. Restored descriptions below
+refer to the pre-test state. No userdata/super/GPT writes.
+
 **STATE (2026-10-21):** Dali is not confirmed to enter XNU. Legacy-LZ4
 packaging reaches LK's kernel jump; a minimal shim probe powers off after
 about 20 seconds although the panel retains its logo. The corrected parse-only
@@ -32,7 +44,7 @@ after the logo). Both originals were flashed back successfully; Android is
 online. Root-side hashes exactly match both saved full-partition backups.
 Next: distinguish file-offset overflow, offsets before metadata and file-end
 bounds, using a changed deadline to check the timing inference.
-A finer `PROBE_MODE=files` image is built but not flashed:
+The active finer `PROBE_MODE=files` image is:
 `c95fcfc4bc7330977b8154330154bfe9430cbb1997e36b26584fcfdb721fefeb`.
 It uses 10/30/50-second deadlines for the three segment file checks;
 other errors 80, successful parse 90, exceptions 110. Host fault injection
