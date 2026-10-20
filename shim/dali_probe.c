@@ -64,7 +64,7 @@ void shim_main(uint64_t dtb)
 	con_clear(BLUE);
 	delay(2);
 	con_clear(0xff101820U);
-	con_str("DALI", "DISPLAY PROBE 1");
+	con_str("DALI", "DISPLAY PROBE 2");
 	con_str("SCREEN", "RED - GREEN - BLUE - TEXT");
 	con_hex("OVL", dali_display_ovl());
 	con_hex("FB", (uintptr_t)con_fb);

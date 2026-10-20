@@ -2,7 +2,8 @@
 
 This first display implementation reuses the panel, PHY, DSC, routing, clocks
 and memory translation left by LK. It is not a cold panel driver. Physical
-visibility still needs confirmation on the handset.
+visibility still needs confirmation on the handset. Probe 1 produced no visible
+color/text; stock boot was restored and both partition hashes verified.
 
 Build with `bash shim/build-dali-probe.sh`. The kernel-only boot v4 image is
 `shim/out-dali/dali-probe-boot.img` (legacy LZ4). Keep stock `init_boot_b`.
@@ -44,10 +45,19 @@ Definitions were checked against MiCode's Dali vendor source at commit
 | Mutex | CFG `0x08`; EN `0x20`, SOF `0x30`, MOD0 `0x34`, MOD1 `0x38`, plus `id * 0x20` |
 | EXDMA | EN `0x20`, L_EN `0x40`, size `0x48`, format `0x50`, pitch `0x2f4` / MSB `0x2f0`, address `0xf40` / MSB `0xf4c` |
 
-Refresh follows the vendor command-mode path: wait idle, clear frame-done,
-enable the participating retained mutexes, set HS blanking, queue `0x002c3909`
-(DCS memory write), select one command, pulse START, wait for frame-done and
-idle, then restore command queue and HS settings. Polls are bounded at 200 ms.
+Refresh follows LK's CPU command-mode path: wait idle, clear frame-done,
+enable the participating retained mutexes, retain HS blanking, queue `0x002c3909`
+(DCS memory write), select one command, assert START, wait for frame-done and
+idle, then clear START and restore command queue settings. Polls are bounded at
+200 ms.
+
+A read-only copy of this handset's original `lk_b` was inspected locally after
+probe 1. Its `ddp_dsi_trigger` at LK payload offset `0x52468` queues the same
+command and leaves START asserted during transfer (`0x5257c..0x5259c`). It does
+not require the Linux DSI_EN bit before that trigger. Probe 2 removes that
+unjustified validation prerequisite and avoids immediately clearing START as
+the Linux GCE path does. Neither difference is proven to explain probe 1 until
+hardware output is observed. The firmware dump stays outside Git.
 This probe does not yet implement the vendor GCE TE-wait loop, cold display
 initialization or an XNU refresh service. Other boot builders do not enable
 `DALI_DISPLAY` while this independent probe is unconfirmed.

@@ -1,8 +1,15 @@
+## Display probe 2 prepared (2026-10-21)
+
+- Stock Android and both original boot hashes verified after probe 1 (no colors/text).
+- Read-only `lk_b` copy at `/tmp/dali-lk-b-20261021.bin`; local payload/disassembly outside Git. LK `ddp_dsi_trigger` at payload offset0x52468 uses command0x002c3909, command queue0x44 and retains START=1 through transfer at0x5257c..0x5259c. No Linux DSI_EN prerequisite in this CPU trigger path. LK mutex bit names independently confirm DSI0 MAC0 bit23 and id0..4 scan.
+- Probe 2 removes the ungrounded DSI_EN prerequisite, retains LK HS settings, and clears START only after transfer idle. Same validation/bounds/storage protections. Build succeeds without warnings; image SHA-256 `6a2ffb241d5d04a3ca7305297d1ad0621871afef50292172059c381720e1a254`. **Not yet flashed at this checkpoint; visibility unconfirmed.**
+- Next: boot_b-only trial, then restore and hash-check originals. No SRAM scratch writes, userdata formatting, GPT/super or bootloader writes. Debugfs was temporarily mounted for inspection; generic `mtkdrm` register-read interface is absent.
+
 ## Active display work (2026-10-21)
 
 - User requested display support. Added `shim/dali_display.c/.h` and enabled it only in the independent `build-dali-probe.sh`. Vendor source provenance and exact register offsets are in `docs/dali-display.md`.
 - Reuses the retained LK DSI0/DSC/panel pipeline; validates reserved FB, active mutex, ungated EXDMA, actual framebuffer bounds/geometry/format. Console supports adopted address/pitch and 16/24/32-bit pixels. Refreshes after clear/text via mutex + DCS memory-write + bounded DSI completion.
-- Probe cycles red/green/blue then text/color bars and requests power-off. Build succeeded without warnings; Image 81920 bytes, legacy LZ4 6319 bytes, boot image 12288 bytes. **No handset visibility confirmed yet; no image flashed at this checkpoint.**
+- Probe cycles red/green/blue then text/color bars and requests power-off. Build succeeded without warnings; Image 81920 bytes, legacy LZ4 6319 bytes, boot image 12288 bytes. **No handset visibility confirmed yet.** Implementation committed as `b063b31`. Probe SHA-256 `6e9f40635fe72ccaf20a3b6a0f1f7656f8f530b93ac1b0b57d52e17d4ad5e122`. **TRIAL RESULT:** user saw no colors/text (logo/black). Confirmed dali/slot b in fastboot, restored full original boot_b (OKAY), rebooted Android, and verified both partition hashes match the originals. init_boot_b stayed stock. No diagnostic image remains. No screen visibility or particular init/refresh failure stage is proven.
 - Reverified host originals, root-side originals, and on-device recovery copies: boot_b `6dc40de74fa7de4f435c513047c51fe10634c1891666031039c52a08b27a3cd5`; init_boot_b `08794a432befcf0504ee4933a51260cb6ccc4785b69f345c4b5968e8e6053d2d`. Stock Android remains online.
 - Next: temporary boot_b-only color/text trial, record actual visible result, restore full original boot_b and verify both original partition hashes. Do not run XNU/Android chainload, format userdata, change GPT/super or infer execution stages from timings.
 

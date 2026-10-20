@@ -16,7 +16,6 @@
 #define DSI_CON 0x30
 #define DSI_MODE 0x34
 #define DSI_CMDQ_CON 0x44
-#define DSI_HS 0x50
 #define DSI_CMDQ0 0x400
 #define DSI_BUSY BIT(31)
 #define DSI_FRAME_DONE BIT(4)
@@ -99,7 +98,8 @@ int dali_display_init(uintptr_t fdt)
 	if (rd(0x32400100UL) & (BIT(22) | BIT(2)))
 		return 0;
 	status = 3;
-	if (!(rd(DSI + DSI_CON) & BIT(1)) || (rd(DSI + DSI_CON) & BIT(4)) ||
+	/* LK does not require Linux's DSI_EN bit before its CPU trigger. */
+	if ((rd(DSI + DSI_CON) & BIT(4)) ||
 	    (rd(DSI + DSI_MODE) & 3))
 		return 0; /* Only the single DSI0 command-mode panel is supported. */
 
@@ -162,7 +162,6 @@ int dali_display_flush(void)
 		ready = 0;
 		return 0;
 	}
-	uint32_t hs = rd(DSI + DSI_HS);
 	uint32_t cmd = rd(DSI + DSI_CMDQ0);
 	uint32_t cmdcon = rd(DSI + DSI_CMDQ_CON);
 	/* FB stores are noncacheable with the entry MMU off. */
@@ -174,16 +173,15 @@ int dali_display_flush(void)
 		wr(m + 0x20 + mutex_id * 0x20, 0);
 		wr(m + 0x20 + mutex_id * 0x20, 1);
 	}
-	wr(DSI + DSI_HS, hs | BIT(16)); /* panel lp_perline_en = 0 */
+	/* Match LK's CPU trigger; retain its HS/blanking configuration. */
 	wr(DSI + DSI_CMDQ0, 0x002c3909); /* DCS WRITE_MEMORY_START */
 	wr(DSI + DSI_CMDQ_CON, (cmdcon & ~0xffU) | BIT(15) | 1);
 	wr(DSI, 0);
 	wr(DSI, 1);
-	wr(DSI, 0);
 	int done = wait_bits(DSI + DSI_INTSTA, DSI_FRAME_DONE, DSI_FRAME_DONE);
 	int idle = wait_bits(DSI + DSI_INTSTA, DSI_BUSY, 0);
 	if (idle) {
-		wr(DSI + DSI_HS, hs);
+		wr(DSI, 0);
 		wr(DSI + DSI_CMDQ0, cmd);
 		wr(DSI + DSI_CMDQ_CON, cmdcon);
 	}
