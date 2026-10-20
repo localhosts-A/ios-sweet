@@ -1,6 +1,6 @@
 ## Current handoff: full-initrd frame discovery (2026-10-21)
 
-- Stock Android online; original boot_b and init_boot_b restored and exact root-side SHA-256 verified again. Host full backups also match. No diagnostic image currently installed.
+- ACTIVE TRIAL: commit42aae0a, boot47f87518…3d9be72 paired with matching GH39425210357 init_boot. Confirmed dali/slot b; init_boot_b then boot_b writes OKAY, reboot OKAY. Await actual result photo and manual fastboot; restore original full pair before further trial. Original host/physical hashes verified immediately beforehand.
 - Actual captured previous RESULT: `no final LZ4 init_boot frame`, REASON0. Failure precedes payload metadata validation; timing-based corruption claims are unsupported.
 - Removed final-frame/zero-trailer assumption. Scan the bounded complete initrd (maximum128MiB), validate complete independent64KiB LZ4 frame layout, and require decoded first CPIO member `sweet.payload` plus SWEETXNU identity before accepting it. Metadata/destination checks remain; validation probe never writes XNU destinations.
 - Clean validation build SHA-256 `47f875188fdf3aaedc9e9563b4bfbf9e8b5873850f85f1b74cf73e15c3d9be72`. Existing local harness replay passes vendor-first, generic-first and nonzero-tail layouts with the exact matching payload. These are local checks, not observations of handset archive ordering.
