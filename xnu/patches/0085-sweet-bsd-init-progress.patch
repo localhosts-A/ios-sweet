@@ -1,10 +1,16 @@
 diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
 --- a/bsd/kern/bsd_init.c
 +++ b/bsd/kern/bsd_init.c
-@@ -493,1 +493,5 @@
+@@ -489,7 +489,11 @@
+ #if (DEVELOPMENT || DEBUG)
+ 	platform_stall_panic_or_spin(PLATFORM_STALL_XNU_LOCATION_BSD_INIT);
+ #endif
+ 
 -#define DEBUG_BSDINIT 0
 +#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
 +#define DEBUG_BSDINIT 1
 +#else
 +#define DEBUG_BSDINIT 0
 +#endif
+ 
+ #if DEBUG_BSDINIT
