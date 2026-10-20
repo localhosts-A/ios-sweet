@@ -40,7 +40,18 @@ overflow. Compare stamps within one boot; do not assume a reset keeps the same
 counter origin. Shim values use the existing hexadecimal console format; XNU
 stamps are decimal.
 
+The first timed trial exposed a diagnostic code-generation error: Darwin's
+assembler treated the semicolon in `isb; mrs ...` as a comment. The linked
+helper contained ISB and the frequency read, but no physical counter read;
+its timestamp used an undefined register. Photo060140 has nonmonotonic and
+huge values, so none of that trial's XNU timestamps is usable. Use an escaped
+newline between the instructions. `tools/inspect-boot-counter.py` checks the
+actual linked helper for ordered ISB, CNTPCT_EL0 and CNTFRQ_EL0 instructions.
+
 Patch0090 timestamps existing kernel/bootstrap/BSD messages and brackets Skywalk
 memory initialization and root-device lookup. It retains all initialization,
-security policy, timeout and recovery behavior. The first hardware trial is
-pending. No reset cause is established merely by the last printed call.
+security policy, timeout and recovery behavior. That trial stopped with the
+latest visible line PE_lockdown_iokit and then automatically rebooted; the
+reset mechanism remains unknown. Original partitions were restored and
+physically hash verified. No reset cause is established merely by the last
+printed call.

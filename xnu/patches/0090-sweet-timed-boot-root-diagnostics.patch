@@ -12,7 +12,7 @@ diff --git a/osfmk/kern/startup.c b/osfmk/kern/startup.c
 +sweet_boot_counter_ms(void)
 +{
 +	uint64_t ticks, frequency;
-+	__asm__ volatile("isb; mrs %0, cntpct_el0" : "=r"(ticks));
++	__asm__ volatile("isb\n\tmrs %0, cntpct_el0" : "=r"(ticks));
 +	__asm__ volatile("mrs %0, cntfrq_el0" : "=r"(frequency));
 +	return frequency ? (ticks / frequency) * 1000 +
 +	       ((ticks % frequency) * 1000) / frequency : 0;

@@ -1,3 +1,15 @@
+## Current handoff: timestamp diagnostic codegen fixed (2026-10-21)
+
+- Actual CI39503871642 Mach-O helper disassembly has ISB and CNTFRQ_EL0 read, but NO CNTPCT_EL0 read; x9 is undefined. Darwin assembler treats semicolon as comment in the `isb; mrs...` inline string. This explains bogus/nonmonotonic photo timestamps, not the automatic reset. kprintf supports ll; no format workaround needed.
+- Patch0090 fixed to escaped newline/tab. Full startup.c local object compilation passes; emitted helper52bytes has ordered ISB, MRSx9/CNTPCT, MRSx8/CNTFRQ plus ms arithmetic. Exact patch git apply --check passes. New `tools/inspect-boot-counter.py` inspects actual Mach-O helper opcodes and is wired into CI for the final installed kernel, to catch source-only false confidence. Old helper was40bytes without counter read.
+- Original full pair restoration and Android/root-side physical hashes VERIFIED after timed trial. No active trial. Next commit/push cached rebuild, inspect linked helper/source/image, package same exact shim/root/ADT/args, fresh preflight and authorized temporary trial/recovery. RawWDT/actual reset cause/root/PID1 remain unconfirmed.
+
+## Current handoff: timed trial restored; timestamp values invalid (2026-10-21)
+
+- Photo `/home/baka/Downloads/IMG_20261021_060140.jpg`: latest TOP rows end `kernel_do_post = done`, `PE_lockdown_iokit`, above blank boundary; lower phase5-16 rows stale after wrap. User confirms stopped then automatic reboot. No visible CPU/RTC/BSD/root or raw shimWDT snapshots. Timestamp values jump backward and show huge values; unusable for time/reset diagnosis until counter/variadic formatting audited. Do not infer regression location or watchdog cause from last call alone.
+- Fastboot `boot-reason` and `reboot-reason` returned empty (not an identified reset cause). Full original init_boot_b then boot_b restored OKAY; Android dali/25060RK16C/_b/completed1/root and physical both original SHA256 verified. Authoritative timed manifest originals_verified. No active trial; no userdata/UFS/GPT/watchdog writes.
+- Next inspect actual linked timestamp helper and kprintf/fbcon variadic format support/counter behavior, repair diagnostic fault, compile/package before any further temporary pair trial. Root/PID1 and reset cause remain unconfirmed.
+
 ## ACTIVE TIMED RAM-ROOT TRIAL (2026-10-21)
 
 - Fresh immediate Android dali/model/_b/completed1/root/64+8MiB and both physical original SHA256 matched; host original/candidate hashes rechecked; fastboot dali/slot_b/unlocked/sizes matched. Timed pair CI39503871642 init_boot_b then boot_b writes OKAY, reboot OKAY. Authoritative ignored manifest `shim/out-dali/timed-39503871642/trial-state.json` is trial_rebooted. Await raw shimTOPRGU/WDT_STATUS/COUNTER, decimalXNU T...ms/skmem/root photo/video and reset observation; newest framebuffer rows before blank cursor boundary. No runtime result yet.

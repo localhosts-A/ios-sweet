@@ -138,6 +138,7 @@ jobs:
           grep -Fq 'T%llums bsd_init:' xnu/bsd/kern/bsd_init.c
           grep -Fq 'IOFindBSDRoot entry; IOBSD wait begin' xnu/iokit/bsddev/IOKitBSDInit.cpp
           grep -Fq 'skmem_region_init returned' xnu/bsd/skywalk/mem/skmem.c
+          python3 ../tools/inspect-boot-counter.py fakeroot/System/Library/Kernels/kernel.development.sweet
 
       - name: Package build tree for local compiles
         if: always()
