@@ -1,13 +1,13 @@
 /*
- * Read-only Dali boot handoff probe.
+ * Dali retained-display probe.
  *
- * This does not touch peripheral registers or storage. It checks whether the
- * MediaTek fastboot path enters an ARM64 Image with a live FDT in x0, then
- * paints a small message into the bootloader's reserved framebuffer.
+ * Reuses LK's validated framebuffer and command-mode display pipeline. Writes
+ * volatile display registers and framebuffer RAM, never storage or panel NVM.
  */
 #include <stdint.h>
 #include "console.h"
 #include "fdt.h"
+#include "dali_display.h"
 
 #define FDT_MAGIC 0xd00dfeedU
 #define PSCI_SYSTEM_OFF 0x84000008UL
@@ -31,6 +31,14 @@ static uint64_t read_cntfrq(void)
 	return value;
 }
 
+static void delay(unsigned int seconds)
+{
+	uint64_t frequency = read_cntfrq(), start = read_cntpct();
+	if (frequency)
+		while (read_cntpct() - start < frequency * seconds)
+			__asm__ volatile("nop");
+}
+
 static void poweroff(void)
 {
 	register uint64_t x0 __asm__("x0") = PSCI_SYSTEM_OFF;
@@ -44,8 +52,23 @@ void shim_main(uint64_t dtb)
 {
 	uint64_t initrd_start = 0, initrd_end = 0;
 
+	if (!dali_display_init(dtb)) {
+		delay(20);
+		poweroff();
+	}
+	/* Visually distinguish actual refresh from the retained boot logo. */
+	con_clear(RED);
+	delay(2);
+	con_clear(GREEN);
+	delay(2);
+	con_clear(BLUE);
+	delay(2);
 	con_clear(0xff101820U);
-	con_str("DALI", "MT6991 boot probe");
+	con_str("DALI", "DISPLAY PROBE 1");
+	con_str("SCREEN", "RED - GREEN - BLUE - TEXT");
+	con_hex("OVL", dali_display_ovl());
+	con_hex("FB", (uintptr_t)con_fb);
+	con_hex("DISPLAY", dali_display_status());
 	con_hex("FDT address", dtb);
 	con_hex("FDT magic", dtb ? fdt_be32(dtb) : 0);
 	con_hex("Expected", FDT_MAGIC);
@@ -60,14 +83,12 @@ void shim_main(uint64_t dtb)
 	con_str("Fastboot", "ARM64 handoff reached");
 	con_str("Next", "power off in 20s");
 	con_str("Restore", "hold Vol- + Power for fastboot");
+	for (unsigned int y = FB_H - 240; y < FB_H; y++)
+		for (unsigned int x = 0; x < FB_W; x++)
+			con_pixel(x, y, x < FB_W / 3 ? RED : x < FB_W * 2 / 3 ? GREEN : 0xff0000ffU);
+	dali_display_flush();
 	__asm__ volatile("dsb sy" ::: "memory");
-	uint64_t frequency = read_cntfrq();
-	uint64_t start = read_cntpct();
-	if (frequency) {
-		while (read_cntpct() - start < frequency * 20) {
-			__asm__ volatile("nop");
-		}
-	}
+	delay(20);
 	poweroff();
 }
 
@@ -82,10 +103,8 @@ void secondary_main(uint64_t cpu)
 void exc_handler(uint64_t slot, uint64_t *regs)
 {
 	(void)regs;
-	con_clear(0xff900000U);
-	con_str("DALI", "exception during entry probe");
-	con_hex("vector", slot);
-	for (;;) {
-		__asm__ volatile("wfe");
-	}
+	(void)slot;
+	/* An MMIO fault must not recursively enter the display driver. */
+	delay(5);
+	poweroff();
 }

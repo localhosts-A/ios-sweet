@@ -1,3 +1,11 @@
+## Active display work (2026-10-21)
+
+- User requested display support. Added `shim/dali_display.c/.h` and enabled it only in the independent `build-dali-probe.sh`. Vendor source provenance and exact register offsets are in `docs/dali-display.md`.
+- Reuses the retained LK DSI0/DSC/panel pipeline; validates reserved FB, active mutex, ungated EXDMA, actual framebuffer bounds/geometry/format. Console supports adopted address/pitch and 16/24/32-bit pixels. Refreshes after clear/text via mutex + DCS memory-write + bounded DSI completion.
+- Probe cycles red/green/blue then text/color bars and requests power-off. Build succeeded without warnings; Image 81920 bytes, legacy LZ4 6319 bytes, boot image 12288 bytes. **No handset visibility confirmed yet; no image flashed at this checkpoint.**
+- Reverified host originals, root-side originals, and on-device recovery copies: boot_b `6dc40de74fa7de4f435c513047c51fe10634c1891666031039c52a08b27a3cd5`; init_boot_b `08794a432befcf0504ee4933a51260cb6ccc4785b69f345c4b5968e8e6053d2d`. Stock Android remains online.
+- Next: temporary boot_b-only color/text trial, record actual visible result, restore full original boot_b and verify both original partition hashes. Do not run XNU/Android chainload, format userdata, change GPT/super or infer execution stages from timings.
+
 # iOS 16 on sweet (Redmi Note 10 Pro, SM7150) - working notes
 
 ### >>> UPDATE 2026-10-20 (Dali / MT6991 bring-up; read first) <<<

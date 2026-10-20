@@ -5,16 +5,16 @@ cd "$(dirname "$0")"
 OUT=out-dali
 TARGET=(--target=aarch64-none-elf)
 CFLAGS=(-O2 -ffreestanding -fno-builtin -nostdlib -fno-pic -mgeneral-regs-only
-	-mstrict-align -fno-stack-protector -Wall -Wextra -DBOARD_DALI)
+	-mstrict-align -fno-stack-protector -Wall -Wextra -DBOARD_DALI -DDALI_DISPLAY)
 mkdir -p "$OUT"
 
-for f in start.S dali_probe.c console.c fdt.c; do
+for f in start.S dali_probe.c console.c fdt.c dali_display.c; do
 	clang "${TARGET[@]}" "${CFLAGS[@]}" -c "$f" -o "$OUT/${f%.*}.o"
 done
 
 clang "${TARGET[@]}" "${CFLAGS[@]}" -static -fuse-ld=lld -T shim.ld \
 	-Wl,--build-id=none -Wl,-N \
-	"$OUT/start.o" "$OUT/dali_probe.o" "$OUT/console.o" "$OUT/fdt.o" \
+	"$OUT/start.o" "$OUT/dali_probe.o" "$OUT/console.o" "$OUT/fdt.o" "$OUT/dali_display.o" \
 	-o "$OUT/shim.elf"
 llvm-objcopy -O binary "$OUT/shim.elf" "$OUT/Image"
 end_hex=$(llvm-nm "$OUT/shim.elf" | awk '$3 == "_end" { print $1 }')
