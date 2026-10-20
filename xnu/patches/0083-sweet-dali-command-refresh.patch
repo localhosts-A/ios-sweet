@@ -1,7 +1,7 @@
 diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
 --- a/osfmk/arm64/arm_vm_init.c
 +++ b/osfmk/arm64/arm_vm_init.c
-@@ -1828,9 +1828,65 @@
+@@ -1828,9 +1828,73 @@
  #if defined(SWEET)
  /* The reserved low-globals/kernel region is excluded from VM allocation. */
  #define SWEET_EARLY_FB_VA (VM_MIN_KERNEL_ADDRESS + ARM_TT_L2_SIZE)
@@ -18,13 +18,20 @@ diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
 +		return 0;
 +	}
 +	const vm_map_address_t va = SWEET_EARLY_DALI_IO_VA;
-+	const vm_map_address_t va_end = va + 0x01000000ULL;
-+	if (va_end < va || va_end > gVirtBase ||
-+	    (gVirtBase & ~ARM_TT_L2_OFFMASK) != (va & ~ARM_TT_L2_OFFMASK)) {
++	if ((va & ~ARM_TT_L1_OFFMASK) !=
++	    (SWEET_EARLY_FB_VA & ~ARM_TT_L1_OFFMASK) ||
++	    va < SWEET_EARLY_FB_VA + 2 * ARM_TT_L2_SIZE ||
++	    va + ARM_TT_L2_SIZE < va || va + ARM_TT_L2_SIZE > gVirtBase) {
 +		return 0;
 +	}
 +	tt_entry_t *l2_entry = arm_kva_to_tte(va);
-+	if ((*l2_entry & (ARM_TTE_VALID | ARM_TTE_TYPE_MASK)) !=
++	if (*l2_entry == ARM_TTE_EMPTY) {
++		pt_entry_t *new_l3 = (pt_entry_t *)alloc_ptpage(TRUE);
++		bzero(new_l3, ARM_PGBYTES);
++		*l2_entry = (kvtophys((vm_offset_t)new_l3) & ARM_TTE_TABLE_MASK) |
++		    ARM_TTE_TYPE_TABLE | ARM_TTE_VALID |
++		    ARM_TTE_TABLE_PXN | ARM_TTE_TABLE_XN;
++	} else if ((*l2_entry & (ARM_TTE_VALID | ARM_TTE_TYPE_MASK)) !=
 +	    (ARM_TTE_VALID | ARM_TTE_TYPE_TABLE)) {
 +		return 0;
 +	}
@@ -44,7 +51,8 @@ diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
 +	for (unsigned int i = 0; i < io_page_count; i++) {
 +		uint64_t pa = io_pages[i];
 +		vm_map_address_t page_va = va + (pa - 0x32000000ULL);
-+		if (page_va >= gVirtBase || (page_va & PAGE_MASK) || (pa & PAGE_MASK)) {
++		if (page_va + PAGE_SIZE < page_va || page_va + PAGE_SIZE > gVirtBase ||
++		    (page_va & PAGE_MASK) || (pa & PAGE_MASK)) {
 +			return 0;
 +		}
 +		pt_entry_t *pte = &l3[L3_TABLE_INDEX(page_va)];
@@ -68,7 +76,7 @@ diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
  {
  	const vm_map_address_t va = SWEET_EARLY_FB_VA;
  	const uint64_t block_size = ARM_TT_L2_SIZE;
-@@ -1862,6 +1918,7 @@
+@@ -1862,6 +1926,7 @@
  		    ARM_TTE_BLOCK_ATTRINDX(CACHE_ATTRINDX_WRITECOMB) |
  		    ARM_TTE_BLOCK_AF | ARM_TTE_BLOCK_PNX | ARM_TTE_BLOCK_NX;
  	}
@@ -76,7 +84,7 @@ diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
  	__asm__ volatile("dsb ishst" ::: "memory");
  	return va + (fb_pa - map_start);
  }
-@@ -1881,6 +1938,7 @@
+@@ -1881,6 +1946,7 @@
  	vm_map_address_t dynamic_memory_begin;
  #if defined(SWEET)
  	vm_map_address_t sweet_early_fb_alias;
@@ -84,7 +92,7 @@ diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
  #endif
  
  	/*
-@@ -2200,7 +2258,7 @@
+@@ -2200,7 +2266,7 @@
  
  #if defined(SWEET)
  	/* phystokv() must still refer to the bootstrap aperture here. */
@@ -93,7 +101,7 @@ diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
  #endif
  	arm_vm_physmap_init(args);
  	set_mmu_ttb_alternate(cpu_ttep & TTBR_BADDR_MASK);
-@@ -2209,7 +2267,7 @@
+@@ -2209,7 +2275,7 @@
  
  #if defined(SWEET)
  	/* The final TTBR1 is live; leave the outgoing VA=PA framebuffer alias. */
