@@ -1,0 +1,77 @@
+diff --git a/pexpert/arm/pe_init.c b/pexpert/arm/pe_init.c
+--- a/pexpert/arm/pe_init.c
++++ b/pexpert/arm/pe_init.c
+@@ -378,8 +378,17 @@
+ 	 * against a kernel which has not yet enabled the full set of available
+ 	 * hardware protections.
+ 	 */
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++	kprintf("SWEET IOKit: zalloc lockdown begin\n");
++#endif
+ 	zalloc_iokit_lockdown();
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++	kprintf("SWEET IOKit: matching begin\n");
++#endif
+ 	StartIOKitMatching();
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++	kprintf("SWEET IOKit: matching returned\n");
++#endif
+ }
+ 
+ void
+diff --git a/osfmk/kern/startup.c b/osfmk/kern/startup.c
+--- a/osfmk/kern/startup.c
++++ b/osfmk/kern/startup.c
+@@ -791,18 +791,36 @@
+ 	 * max_cpus must be nailed down by the time PE_lockdown_iokit() finishes,
+ 	 * at the latest
+ 	 */
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++	kernel_bootstrap_log("PE_lockdown_iokit returned; vm_set_restrictions begin");
++#endif
+ 	vm_set_restrictions(machine_info.max_cpus);
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++	kernel_bootstrap_log("vm_set_restrictions returned");
++#endif
+ 
+ 
+ #if KPERF
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++	kernel_bootstrap_log("kperf_init_early begin");
++#endif
+ 	kperf_init_early();
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++	kernel_bootstrap_log("kperf_init_early returned");
++#endif
+ #endif
+ 
+ 	/*
+ 	 *	Start the user bootstrap.
+ 	 */
+ #ifdef  MACH_BSD
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++	kernel_bootstrap_log("bsd_init begin");
++#endif
+ 	bsd_init();
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++	kernel_bootstrap_log("bsd_init returned");
++#endif
+ #endif
+ 
+ 
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -502,9 +502,12 @@
+ #define bsd_init_kprintf(x, ...)
+ #endif
+ 
++	bsd_init_kprintf("entry; throttle_init begin\n");
+ 	throttle_init();
++	bsd_init_kprintf("throttle_init returned; copyright begin\n");
+ 
+ 	printf(copyright);
++	bsd_init_kprintf("copyright returned\n");
+ 
+ #if CONFIG_DEV_KMEM
+ 	bsd_init_kprintf("calling dev_kmem_init\n");

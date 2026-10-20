@@ -82,6 +82,9 @@ jobs:
           grep -Fq 'STARTUP_DEBUG_CALLBACKS = 0x00000002' xnu/osfmk/kern/startup.h
           grep -Fq 'const startup_debug_t callback_mask = STARTUP_DEBUG_CALLBACKS;' xnu/osfmk/kern/startup.c
           grep -Fq 'kernel_startup: phase %u begin' xnu/osfmk/kern/startup.c
+          grep -Fq 'SWEET IOKit: matching returned' xnu/pexpert/arm/pe_init.c
+          grep -Fq 'PE_lockdown_iokit returned; vm_set_restrictions begin' xnu/osfmk/kern/startup.c
+          grep -Fq 'entry; throttle_init begin' xnu/bsd/kern/bsd_init.c
 
       - name: Package build tree for local compiles
         if: always()
