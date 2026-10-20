@@ -1,0 +1,383 @@
+diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
+--- a/osfmk/arm64/arm_vm_init.c
++++ b/osfmk/arm64/arm_vm_init.c
+@@ -1828,9 +1828,65 @@
+ #if defined(SWEET)
+ /* The reserved low-globals/kernel region is excluded from VM allocation. */
+ #define SWEET_EARLY_FB_VA (VM_MIN_KERNEL_ADDRESS + ARM_TT_L2_SIZE)
++#define SWEET_EARLY_DALI_IO_VA (VM_MIN_KERNEL_ADDRESS + 3 * ARM_TT_L2_SIZE)
+ 
+ static vm_map_address_t
+-sweet_early_map_final(boot_args *args)
++sweet_early_map_dali_io(boot_args *args)
++{
++	/* The command-mode panel and its live pipeline are specific to Dali. */
++	if (args->Video.v_width != 1280 || args->Video.v_height != 2772 ||
++	    args->Video.v_depth != 32 || args->Video.v_baseAddr < 0xfc990000ULL ||
++	    args->Video.v_baseAddr >= 0xff000000ULL) {
++		return 0;
++	}
++	const vm_map_address_t va = SWEET_EARLY_DALI_IO_VA;
++	const vm_map_address_t va_end = va + 0x01000000ULL;
++	if (va_end < va || va_end > gVirtBase ||
++	    (gVirtBase & ~ARM_TT_L2_OFFMASK) != (va & ~ARM_TT_L2_OFFMASK)) {
++		return 0;
++	}
++	tt_entry_t *l2_entry = arm_kva_to_tte(va);
++	if ((*l2_entry & (ARM_TTE_VALID | ARM_TTE_TYPE_MASK)) !=
++	    (ARM_TTE_VALID | ARM_TTE_TYPE_TABLE)) {
++		return 0;
++	}
++	pt_entry_t *l3 = (pt_entry_t *)phystokv(*l2_entry & ARM_TTE_TABLE_MASK);
++	uint64_t io_pages[29] = {
++		0x32000000ULL, 0x32020000ULL, 0x32420000ULL, 0x32490000ULL,
++		0x32400000ULL, 0x32800000ULL, 0x32820000ULL, 0x32c00000ULL,
++		0x32c20000ULL,
++	};
++	unsigned int io_page_count = 9;
++	for (unsigned int bank = 0; bank < 2; bank++) {
++		uint64_t config = bank ? 0x32c00000ULL : 0x32800000ULL;
++		for (unsigned int id = 0; id < 10; id++) {
++			io_pages[io_page_count++] = config + 0x30000ULL + id * 0x10000ULL;
++		}
++	}
++	for (unsigned int i = 0; i < io_page_count; i++) {
++		uint64_t pa = io_pages[i];
++		vm_map_address_t page_va = va + (pa - 0x32000000ULL);
++		if (page_va >= gVirtBase || (page_va & PAGE_MASK) || (pa & PAGE_MASK)) {
++			return 0;
++		}
++		pt_entry_t *pte = &l3[L3_TABLE_INDEX(page_va)];
++		if (*pte != ARM_PTE_EMPTY) {
++			return 0;
++		}
++	}
++	for (unsigned int i = 0; i < io_page_count; i++) {
++		uint64_t pa = io_pages[i];
++		vm_map_address_t page_va = va + (pa - 0x32000000ULL);
++		l3[L3_TABLE_INDEX(page_va)] = (pa & ARM_PTE_PAGE_MASK) |
++		    ARM_PTE_TYPE_VALID | ARM_PTE_AF | ARM_PTE_AP(AP_RWNA) |
++		    ARM_PTE_SH(SH_NONE) | ARM_PTE_ATTRINDX(CACHE_ATTRINDX_DISABLE) |
++		    ARM_PTE_PNX | ARM_PTE_NX;
++	}
++	return va;
++}
++
++static vm_map_address_t
++sweet_early_map_final(boot_args *args, vm_map_address_t *dali_io_alias)
+ {
+ 	const vm_map_address_t va = SWEET_EARLY_FB_VA;
+ 	const uint64_t block_size = ARM_TT_L2_SIZE;
+@@ -1862,6 +1918,7 @@
+ 		    ARM_TTE_BLOCK_ATTRINDX(CACHE_ATTRINDX_WRITECOMB) |
+ 		    ARM_TTE_BLOCK_AF | ARM_TTE_BLOCK_PNX | ARM_TTE_BLOCK_NX;
+ 	}
++	*dali_io_alias = sweet_early_map_dali_io(args);
+ 	__asm__ volatile("dsb ishst" ::: "memory");
+ 	return va + (fb_pa - map_start);
+ }
+@@ -1881,6 +1938,7 @@
+ 	vm_map_address_t dynamic_memory_begin;
+ #if defined(SWEET)
+ 	vm_map_address_t sweet_early_fb_alias;
++	vm_map_address_t sweet_early_dali_io_alias;
+ #endif
+ 
+ 	/*
+@@ -2200,7 +2258,7 @@
+ 
+ #if defined(SWEET)
+ 	/* phystokv() must still refer to the bootstrap aperture here. */
+-	sweet_early_fb_alias = sweet_early_map_final(args);
++	sweet_early_fb_alias = sweet_early_map_final(args, &sweet_early_dali_io_alias);
+ #endif
+ 	arm_vm_physmap_init(args);
+ 	set_mmu_ttb_alternate(cpu_ttep & TTBR_BADDR_MASK);
+@@ -2209,7 +2267,7 @@
+ 
+ #if defined(SWEET)
+ 	/* The final TTBR1 is live; leave the outgoing VA=PA framebuffer alias. */
+-	sweet_early_relocate(sweet_early_fb_alias);
++	sweet_early_relocate(sweet_early_fb_alias, sweet_early_dali_io_alias);
+ #endif
+ 	set_mmu_ttb(invalid_ttep & TTBR_BADDR_MASK);
+ 
+diff --git a/osfmk/arm64/sweet_early.c b/osfmk/arm64/sweet_early.c
+--- a/osfmk/arm64/sweet_early.c
++++ b/osfmk/arm64/sweet_early.c
+@@ -6,6 +6,7 @@
+ #include <kern/misc_protos.h>
+ 
+ static volatile uint32_t *early_fb;
++static volatile uint8_t *early_io_base;
+ static unsigned int early_width, early_height, early_stride;
+ #define EARLY_SCALE 2u
+ #define EARLY_CELL_W (8u * EARLY_SCALE)
+@@ -18,6 +19,214 @@
+ /* Initialized data must remain writable until disable, including panics. */
+ static unsigned int early_row, early_col;
+ static unsigned int early_started, early_disabled, early_panicking;
++static unsigned int early_flushing, early_display_ready, early_mutex_id;
++static uint64_t early_mutex_pa[4];
++static unsigned int early_mutex_count;
++static uint64_t early_fb_pa;
++static unsigned int early_video_width, early_video_height, early_video_depth, early_video_pitch;
++
++#define DALI_MMIO_PA_BASE 0x32000000ULL
++#define DALI_DSI_PA       0x32490000ULL
++#define DALI_DSI_INTSTA   0x0c
++#define DALI_DSI_CON      0x30
++#define DALI_DSI_MODE     0x34
++#define DALI_DSI_CMDQ_CON 0x44
++#define DALI_DSI_CMDQ0    0x400
++#define DALI_DSI_BUSY     (1u << 31)
++#define DALI_DSI_FRAME_DONE (1u << 4)
++
++static volatile uint32_t *
++dali_reg(uint64_t pa)
++{
++	return (volatile uint32_t *)(early_io_base + (pa - DALI_MMIO_PA_BASE));
++}
++
++static uint32_t
++dali_read(uint64_t pa)
++{
++	return *dali_reg(pa);
++}
++
++static void
++dali_write(uint64_t pa, uint32_t value)
++{
++	*dali_reg(pa) = value;
++	__asm__ volatile("dsb sy" ::: "memory");
++}
++
++static uint64_t
++dali_ticks(void)
++{
++	uint64_t value;
++	__asm__ volatile("mrs %0, cntpct_el0" : "=r"(value));
++	return value;
++}
++
++static int
++dali_wait(uint64_t pa, uint32_t mask, uint32_t value)
++{
++	uint64_t frequency;
++	__asm__ volatile("mrs %0, cntfrq_el0" : "=r"(frequency));
++	if (frequency == 0) {
++		return 0;
++	}
++	uint64_t start = dali_ticks();
++	do {
++		if ((dali_read(pa) & mask) == value) {
++			return 1;
++		}
++	} while ((dali_ticks() - start) < frequency / 5); /* 200ms bound */
++	return 0;
++}
++
++static int
++dali_add_mutex(uint64_t pa)
++{
++	if (early_mutex_count >= sizeof(early_mutex_pa) / sizeof(early_mutex_pa[0])) {
++		return 0;
++	}
++	early_mutex_pa[early_mutex_count++] = pa;
++	return 1;
++}
++
++static int
++dali_adopt_surface(uint64_t ovl)
++{
++	uint32_t src = dali_read(ovl + 0x40);
++	if (!(dali_read(ovl + 0x20) & 1) || !(src & 1) ||
++	    (src & ((1u << 4) | (1u << 8) | (1u << 9))) ||
++	    !(dali_read(ovl + 0x100) & 1)) {
++		return 0;
++	}
++	uint64_t pa = dali_read(ovl + 0xf40) |
++	    ((uint64_t)(dali_read(ovl + 0xf4c) & 0xf) << 32);
++	uint32_t size = dali_read(ovl + 0x48);
++	uint32_t pitch = dali_read(ovl + 0x2f4) & 0xffff;
++	pitch |= (dali_read(ovl + 0x2f0) & 0xf) << 16;
++	uint32_t fmt = dali_read(ovl + 0x50);
++	unsigned int code = fmt & 0xf;
++	unsigned int bpp = code == 0 ? 2 : code == 1 ? 3 : 4;
++	if (code > 3 || (fmt & ((1u << 4) | (3u << 8))) ||
++	    (size & 0xffff) != early_video_width ||
++	    (size >> 16) != early_video_height ||
++	    dali_read(ovl + 0x44) || dali_read(ovl + 0x4c) ||
++	    pitch != early_video_pitch || pitch < early_video_width * bpp ||
++	    pa != early_fb_pa || (pa & 3) || (pitch & 3)) {
++		return 0;
++	}
++	return 1;
++}
++
++static int
++dali_display_init(void)
++{
++	if (early_io_base == NULL || early_video_width != 1280 ||
++	    early_video_height != 2772 || early_video_depth != 32 ||
++	    early_fb_pa < 0xfc990000ULL || early_fb_pa >= 0xff000000ULL) {
++		return 0;
++	}
++	uint32_t gates = dali_read(0x32400100ULL);
++	if ((gates & ((1u << 22) | (1u << 2))) ||
++	    (dali_read(DALI_DSI_PA + DALI_DSI_CON) & (1u << 4)) ||
++	    (dali_read(DALI_DSI_PA + DALI_DSI_MODE) & 3)) {
++		return 0;
++	}
++	early_mutex_count = 0;
++	for (early_mutex_id = 0; early_mutex_id < 5; early_mutex_id++) {
++		uint64_t off = early_mutex_id * 0x20;
++		if ((dali_read(0x32420034ULL + off) & (1u << 23)) &&
++		    !(dali_read(0x32420030ULL + off) & 0xf)) {
++			break;
++		}
++	}
++	if (early_mutex_id == 5 || !dali_add_mutex(0x32420000ULL)) {
++		return 0;
++	}
++	unsigned int surface_found = 0;
++	for (unsigned int bank = 0; bank < 2 && !surface_found; bank++) {
++		uint64_t config = bank ? 0x32c00000ULL : 0x32800000ULL;
++		gates = dali_read(config + 0x100);
++		if (gates & (1u << 3)) {
++			continue;
++		}
++		uint64_t mutex = config + 0x20000;
++		uint64_t off = early_mutex_id * 0x20;
++		uint32_t modules = dali_read(mutex + 0x34 + off);
++		if (!(modules | dali_read(mutex + 0x38 + off)) ||
++		    (dali_read(mutex + 0x30 + off) & 0xf)) {
++			continue;
++		}
++		for (unsigned int id = 0; id < 10; id++) {
++			if (id == 1 || !(modules & (1u << id)) || (gates & (1u << (id + 4)))) {
++				continue;
++			}
++			uint64_t ovl = config + 0x30000 + id * 0x10000;
++			if (dali_adopt_surface(ovl)) {
++				if (!dali_add_mutex(mutex)) {
++					return 0;
++				}
++				surface_found = 1;
++				break;
++			}
++		}
++	}
++	if (!surface_found) {
++		return 0;
++	}
++	if (!(dali_read(0x32000100ULL) & (1u << 2))) {
++		uint64_t off = early_mutex_id * 0x20;
++		if ((dali_read(0x32020034ULL + off) | dali_read(0x32020038ULL + off)) &&
++		    !(dali_read(0x32020030ULL + off) & 0xf) &&
++		    !dali_add_mutex(0x32020000ULL)) {
++			return 0;
++		}
++	}
++	return 1;
++}
++
++static void
++dali_display_flush(void)
++{
++	if (!early_display_ready || early_flushing || early_disabled) {
++		return;
++	}
++	early_flushing = 1;
++	uint64_t intsta = DALI_DSI_PA + DALI_DSI_INTSTA;
++	uint64_t cmdq0 = DALI_DSI_PA + DALI_DSI_CMDQ0;
++	uint64_t cmdq_con = DALI_DSI_PA + DALI_DSI_CMDQ_CON;
++	if (!dali_wait(intsta, DALI_DSI_BUSY, 0)) {
++		goto failed;
++	}
++	uint32_t cmd = dali_read(cmdq0);
++	uint32_t cmdcon = dali_read(cmdq_con);
++	__asm__ volatile("dsb sy" ::: "memory");
++	dali_write(intsta, dali_read(intsta) & ~DALI_DSI_FRAME_DONE);
++	for (unsigned int i = 0; i < early_mutex_count; i++) {
++		uint64_t mutex = early_mutex_pa[i];
++		dali_write(mutex + 8, dali_read(mutex + 8) & ~1u);
++		dali_write(mutex + 0x20 + early_mutex_id * 0x20, 0);
++		dali_write(mutex + 0x20 + early_mutex_id * 0x20, 1);
++	}
++	dali_write(cmdq0, 0x002c3909);
++	dali_write(cmdq_con, (cmdcon & ~0xffu) | (1u << 15) | 1u);
++	dali_write(DALI_DSI_PA, 0);
++	dali_write(DALI_DSI_PA, 1);
++	int done = dali_wait(intsta, DALI_DSI_FRAME_DONE, DALI_DSI_FRAME_DONE);
++	int idle = dali_wait(intsta, DALI_DSI_BUSY, 0);
++	if (idle) {
++		dali_write(DALI_DSI_PA, 0);
++		dali_write(cmdq0, cmd);
++		dali_write(cmdq_con, cmdcon);
++	}
++	if (!done || !idle) {
++		goto failed;
++	}
++	early_flushing = 0;
++	return;
++failed:
++	early_display_ready = 0;
++	early_flushing = 0;
++}
+ 
+ void
+ sweet_early_init(const boot_args *args)
+@@ -32,11 +241,18 @@
+ 		return;
+ 	}
+ 	early_fb = (volatile uint32_t *)(uintptr_t)args->Video.v_baseAddr;
++	early_fb_pa = args->Video.v_baseAddr;
++	early_video_width = (unsigned int)args->Video.v_width;
++	early_video_height = (unsigned int)args->Video.v_height;
++	early_video_depth = (unsigned int)args->Video.v_depth;
++	early_video_pitch = (unsigned int)args->Video.v_rowBytes;
++	early_io_base = NULL;
+ 	early_width = (unsigned int)args->Video.v_width;
+ 	early_height = (unsigned int)args->Video.v_height;
+ 	early_stride = (unsigned int)(args->Video.v_rowBytes / sizeof(uint32_t));
+ 	early_row = early_col = 0;
+ 	early_started = early_disabled = early_panicking = 0;
++	early_flushing = early_display_ready = early_mutex_count = 0;
+ }
+ 
+ static void
+@@ -72,6 +288,7 @@
+ 		early_row = (early_row + 1) % EARLY_ROWS;
+ 		sweet_early_clear_row();
+ 		if (c == '\n') {
++			dali_display_flush();
+ 			return;
+ 		}
+ 	}
+@@ -141,10 +358,12 @@
+ }
+ 
+ void
+-sweet_early_relocate(uint64_t base)
++sweet_early_relocate(uint64_t base, uint64_t io_base)
+ {
+ 	sweet_early_mark(8, "leaving bootstrap TTBR0");
+ 	early_fb = (volatile uint32_t *)(uintptr_t)base;
++	early_io_base = (volatile uint8_t *)(uintptr_t)io_base;
++	early_display_ready = io_base != 0 && dali_display_init();
+ 	__asm__ volatile("dsb sy" ::: "memory");
+ 	sweet_early_mark(9, "kernel framebuffer VA live");
+ }
+diff --git a/osfmk/arm64/sweet_early.h b/osfmk/arm64/sweet_early.h
+--- a/osfmk/arm64/sweet_early.h
++++ b/osfmk/arm64/sweet_early.h
+@@ -12,7 +12,7 @@
+ void sweet_early_mark(unsigned int stage, const char *label);
+ void sweet_early_putc(char c);
+ void sweet_early_panic(const char *fmt, va_list *args);
+-void sweet_early_relocate(uint64_t base);
++void sweet_early_relocate(uint64_t base, uint64_t io_base);
+ void sweet_early_disable(void);
+ #else
+ static inline void sweet_early_init(const boot_args *args)
