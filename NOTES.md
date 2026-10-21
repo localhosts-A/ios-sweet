@@ -1,8 +1,20 @@
+## ACTIVE bounded OTG source trial — original restoration PENDING (2026-10-21)
+
+CI39551734817/1251c67 pair flashed init_boot_b then boot_b, both OKAY; reboot requested. Fresh immediate Android dali/model/_b/completed/root/full physical original hashes, host original/candidate hashes, fastboot identity/unlocked/sizes all verified. Authoritative ignored manifest `shim/out-dali/usb-source-39551734817/trial-state.json` trial_rebooted. User ready; asked to swap PC cable for ordinary OTG+Udisk within40s of unplug prompt, keep30s, photo DALI OTG/CP/VBUS/end, then reconnect PC/manualfastboot. 5V500mA/15s finite source diagnostic; hardware outcome not yet known. USBhost/storage unimplemented.
+
+**RESTORE IMMEDIATELY on fastboot return:** current pair/device_pair.py recover with absolute pairdir; full original init_boot_b then boot_b, Android boot and verify both physical SHA256. Backups backup/dali-25060RK16C-pairtest-20261020 intact. Current originals NOT yet restored; earlier originals_verified are historical. No userdata/GPT writes.
+
+## Current: bounded OTG source pair verified; fresh preflight next (2026-10-21)
+
+CI39551734817 SUCCESS exact1251c67; cache1382/1385 hits99.78%. Downloaded actual22/22 sources byte-match, linked counter/native power/sharedPMIF/SC8585 markers and full pair checks PASS. Pair `shim/out-dali/usb-source-39551734817/`: kernel cb9d5b27b5cfa6cb985ced513048345168018dd38934c8f0f3e1723402105a24; init_boot d5b84db0f14642c0771c8962dc9f4ef7adc48a146f69fd1bda89d24ecd59daf7; same proven boot/root; payload29251056bytes/11segments, ADT7736, RAM root0x2024d4000. Boot/init_boot headers, segments/entry/RAM, LZ4/CPIO, AVB, ADT and host originals verified. New source-power hardware unverified, USB host/storage not implemented.
+
+User ready to swap PC cable for ordinary OTG+Udisk after waiting prompt. Next fresh physical original/device/slot/root/hash preflight, authorized paired trial, 40s handoff and15s source lease; photo DALI OTG/CP/VBUS/end cleanup lines then manual fastboot and immediate full original recovery + Android physical SHA256. No active trial yet. Backups intact; no userdata/GPT writes.
+
 ## Current: bounded OTG source implementation prepared (2026-10-21)
 
 Patch0096 adds separate `daliotg=1` source diagnostic to existing `daliusb=1 dalicp=1`, exact DaliADT5V/500mA/SC8585config. Defaults retain read-only observation. NewDaliUSBPower serializes100mstimer/stop/free and uses verified13MHzphysicalcounter: PCcablehandoff40s(noRpwhileexternalVBUS), fixeddefaultRp+oneRd>=200ms, CP85/a0/control00/mode00/present08 guard, SC8585mode6/manualACDRVbit5only, MT6379BEvoltage26/current0/protectedPP_CV/OTGbit. NoPD/VCONN/PHY/xHCI/DMA. Waiting40s/rise1s/power15s/total60s bounds; detach/error/stop/lease cleansindependently, restoresCPmode/manualbits/chargersettings/role andobservespassivedecay. FailuretoverifysourceoffleavesCProutingstableandreportsrebootrequired, noautomaticrearm. I2Cperipheralwriteswhitelistonlymode/manualfields, readbackandglobalfaultlatch. No CP/QB/protectionchanges.
 
-Local3/3actualarm64objectscompilePASS, exactpatchappliesbaseline; fullcachedbuild/source+kernel+imageverificationnext. Sources /tmp/dali-timed-boot/buildtree/xnu, baseline /tmp/dali-usb-power/base. Nohandsetboot/powerwritesinthisstage, originals remain restored/physicalhashverified afterSC8585success. Noactivecustomtrial/pendingrestore. USBhost/storage/AppleGUI stillunfinished.
+Local3/3actualarm64objectscompilePASS, exactpatchappliesbaseline; Committed/pushed1251c67; fullcachedCI39551734817inprogress. Candidateusb-source-39551734817stagedsameboot/root/recoveryhelpers andnewADTsourceconfig/argsdaliotg1. Nextactual22source/kernel/imagechecksbeforetrial. Sources /tmp/dali-timed-boot/buildtree/xnu, baseline /tmp/dali-usb-power/base. Nohandsetboot/powerwritesinthisstage, originals remain restored/physicalhashverified afterSC8585success. Noactivecustomtrial/pendingrestore. USBhost/storage/AppleGUI stillunfinished.
 
 ## Current: native SC8585 transport/status SUCCESS; originals restored (2026-10-21)
 
