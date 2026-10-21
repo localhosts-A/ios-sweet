@@ -1,3 +1,9 @@
+## ACTIVE I2C5/SC8581 trial — original restoration PENDING (2026-10-21)
+
+Fresh immediate Android dali/model/slot_b/completed/root/full original64+8MiB SHA256, host originals/candidates, fastboot identity/unlocked/sizes verified. CI39548280221 pair init_boot_b then boot_b writes OKAY/reboot OKAY. Authoritative ignored `shim/out-dali/cp-i2c-39548280221/trial-state.json` = trial_rebooted. Await user DALI I2C5 handoff/timing/SC8581identity/error/cleanup photo and manual fastboot. Optional dalicp1 onlyreads peripheral state; scoped I2C controller/clock writes, no chargepump/VBUS/host/storage. Hardware result unconfirmed.
+
+**Restore immediately on fastboot return:** currentpair/device_pair.py recover with absolutepairdir, then Android boot and verify for both full physical original hashes. Full originals `backup/dali-25060RK16C-pairtest-20261020/`; no userdata/UFS/GPT changes. Finite120sWDT lease retained. USB media already verified. Earlier originals_verified manifests are historical, not current physical state.
+
 ## Current: I2C5/SC8581 pair verified; fresh device preflight next (2026-10-21)
 
 CI39548280221 SUCCESS atfb82632; compiler cache1382/1384hits99.86% (two misses). Actual20/20sourcefiles exact local compiled bytes, linked I2C5/SC8581/sharedPMIF/RTC/USBPMIC markers and counter check pass. Durable ignored candidate `shim/out-dali/cp-i2c-39548280221/`: same proven24KiBbootddfbc184..., init_boot4ae2795f3cd6cc17dd2d8c9d635734a53342e75e83390fb4e3ebcbb3bcaa77fa, kernel1a64a08dc2c3f1ae08533b734b92d08e6c98a0741f6a0e5df3e49c1f58546cae. Payload29233632bytes/11segments, ADT7688 with cp-i2c-reg, same12MiB root0x2024d0000, args adddalicp=1. Full image/entry/segments/RAM/ADT/LZ4CPIO/8MiBAVBNONE/hostoriginal checks passed. Hardware newI2C5/CPidentity unverified; no sourcepower/host/storage yet.
