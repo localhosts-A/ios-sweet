@@ -267,6 +267,14 @@ def build(seed=None, qemu=False, highmem=False, dali=False):
         ('reg', u64(0x1c01a000, 0x900)),
     ])] if dali else []
 
+    # Shared main PMIF, SID14 MT6379. The first native USB stage only reads
+    # Type-C/charger/repeater state when explicitly enabled with daliusb=1.
+    dali_usb_pmic = [node('dali-usb-pmic', [
+        ph(),
+        ('compatible', cstr('mediatek,dali-usb-pmic')),
+        ('reg', u64(0x1c01a000, 0x900)),
+    ])] if dali else []
+
     dali_watchdog = [node('dali-watchdog', [
         ph(),
         ('compatible', cstr('mediatek,mt6991-wdt') + cstr('mediatek,mt6589-wdt')),
@@ -282,7 +290,7 @@ def build(seed=None, qemu=False, highmem=False, dali=False):
         ('manufacturer', cstr('Apple Inc.')),
         ('#address-cells', u32(2)),
         ('#size-cells', u32(2)),
-    ], [chosen, defaults, cpus, arm_io, fbcon, buttons] + product + dali_rtc + dali_watchdog + ([] if qemu else [ufs]))
+    ], [chosen, defaults, cpus, arm_io, fbcon, buttons] + product + dali_rtc + dali_usb_pmic + dali_watchdog + ([] if qemu else [ufs]))
 
 
 if __name__ == '__main__':

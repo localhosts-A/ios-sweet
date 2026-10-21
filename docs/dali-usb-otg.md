@@ -7,6 +7,12 @@ mass-storage boot are not implemented or verified yet.** The existing
 `sweet_usb.c` is a Qualcomm DWC3 device/gadget driver, not a MediaTek host
 controller. A root image on a USB stick alone does not add this support.
 
+The first native platform stage now shares PMIF channel2 between RTC and USB
+under one transaction lock. `daliusb=1` enables an MT6379 identity check and
+a bounded read-only Type-C/charger/repeater status service. It does not
+switch roles, enable connector power or touch a gated xHCI block. Local
+compilation has passed; hardware verification of this new stage is pending.
+
 The intended path is the phone's internal boot/init_boot loader, then the
 native Dali USB host controller, a USB mass-storage block device and its HFSX
 root. Cold boot directly from a stick through the stock bootloader has not
@@ -38,6 +44,25 @@ driver. The vendor NXP probe returns success even if its chip-ID check fails,
 without publishing a PHY; XS PHY treats unavailable repeaters as optional.
 Thus the DT list does not prove both repeaters are populated or active.
 Check actual PHY providers and board hardware before implementing NXP I2C.
+
+## Verified stock Android OTG baseline
+
+With the written stick and the user's ordinary phone-powered OTG adapter:
+
+- Data role `host`, power role `source`, configured regulator5V/1.4A;
+  the reported VBUS reading was approximately5.003V.
+- DataTraveler enumerated at480Mbps, VID:PID `1f75:0903`.
+- USB disk249905152sectors, partition1start2048/size249903071sectors,
+  matching the stick written on the PC.
+- Host IPPC CTRL1=`0`, CTRL2=`1`, STS1=`01013f0f`, U3_CTRL0=`20c`,
+  U2_CTRL0=`a4c`; the corresponding device-mode values are above.
+- No xHCI capability/operational debug views were exposed in this capture.
+  DMA64 capability is still to be checked when the native controller starts.
+
+This verifies the adapter, phone power and stock Linux enumeration, not
+XNU USB support or execution of the stick's Apple userspace. The charger
+power-supply `typec_mode` string said "Nothing attached" despite the actual
+Type-C class roles and enumerated block device; prefer the latter evidence.
 
 ### Source references
 

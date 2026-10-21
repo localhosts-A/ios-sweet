@@ -131,6 +131,13 @@ jobs:
           grep -Fq 'DALI CPU: boot-only match validated' xnu/iokit/Kernel/arm/SweetCPU.cpp
           grep -Fq 'DALI CPU: CPU completion published' xnu/iokit/Kernel/arm/SweetCPU.cpp
           grep -Fq 'DALI RTC: IORTC published from hardware' xnu/iokit/Kernel/arm/DaliRTC.cpp
+          grep -Fq 'dali_pmif_transfer(9, address' xnu/iokit/Kernel/arm/DaliRTC.cpp
+          grep -Fq 'IOLockLock(lock);' xnu/iokit/Kernel/arm/DaliPMIF.cpp
+          grep -Fq 'sid != 9 && sid != 14' xnu/iokit/Kernel/arm/DaliPMIF.cpp
+          grep -Fq 'bounded read-only mode' xnu/iokit/Kernel/arm/DaliUSBPMIC.cpp
+          grep -Fq 'if (enabled != 1)' xnu/iokit/Kernel/arm/DaliUSBPMIC.cpp
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI PMIF: shared SID9/SID14 channel2 mapped'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI USB PMIC: MT6379 TCPC verified; bounded read-only mode'
           grep -Fq "'IONameMatch'     = 'mediatek,mt6685-rtc'" xnu/iokit/KernelConfigTables.cpp
           grep -Fq 'dali_rtc_get_utc(secs, nsecs)' xnu/iokit/Kernel/arm/SweetPlatformExpert.cpp
           grep -Fq 'SWEET time: calendar initialize returned' xnu/iokit/Kernel/IOStartIOKit.cpp

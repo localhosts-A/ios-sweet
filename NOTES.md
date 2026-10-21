@@ -1,3 +1,9 @@
+## Current: native OTG proven on Android; first XNU USB platform patch prepared (2026-10-21)
+
+Androidcapture complete/retrievedignored `research/dali-usb-root/android-host`: host+source, regulator5V/1.4A, VBUS~5.003V, DataTraveler1f75:0903 at480Mbps, disk249905152sectors/partitionstart2048size249903071matcheswrittenUSB. HostIPPC CTRL1=0/CTRL2=1/STS101013f0f/U3CTRL20c/U2CTRLa4c. ActualMT6379+XSphyproviders; noNXPprovider. USBmedia16GiB directreadbackverified; no handsetbootwrites.
+
+Patch0093 `dali-usb-pmif-platform`: commonmainPMIFchannel2IOLock/map forSID9RTC/SID14USB (vendorbusmaskconfirmedbothmain), unchangedRTCcalendarlock/fallback/policy; opt-indaliusb=1 MT6379TCPC29cf/6379identitythen90x1sreadonlyrole/CC/power/charger/repeaterconfig, stop3errors, noVBUS/role/PHY/xHCImutations. DaliADTnodeandIOKitclass/filesregistration, CIartifactchecks. Local4/4actualarm64objectscompileclean; noatomicruntimedeps, exactpatchapplycheckpasses. Fullcachedbuild/source/binaryinspection/package next. This is platformdiagnostics, **USBhost/storage/USBrootNOTimplementedyet**. Phoneoriginalpairunchanged/previouslyphysicalverified, noactiveboottrial.
+
 ## Current: USB media verified; Android OTG capture waiting for attachment (2026-10-21)
 
 **/dev/sdc1 full16GiB write+O_DIRECTreadback VERIFIED**, source/readbackSHA ea6fe9549adc6a2f4f466079e5fb4e2b7432e80977923dbc98a3c6944c5be3cd; GPT/diskfirst1MiBunchanged. Authoritativeignored backup/usb-root-20261021/write-state.json=readback_verified; files.tar compare/hashverified (filebackup+metadata, NOTwhole119GiBraw). SourceUSBnonjournaledHFSXcleanfullfsck-fy/-fn, originaljournaledimagespreserved. blkidiOSRoot; stickpoweredoffviaudisksctl afteridentityguard, safeunplug.
