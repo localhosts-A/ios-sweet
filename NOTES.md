@@ -1,3 +1,9 @@
+## ACTIVE SC8585 identity/status trial — original restoration PENDING (2026-10-21)
+
+Fresh immediate Android dali/model/slot_b/completed/root/full original hashes, host original/candidate hashes and fastboot identity/unlocked/64+8MiB sizes all verified. CI39549699245 pair init_boot_b then boot_b writes OKAY/reboot OKAY. Authoritative ignored `shim/out-dali/cp-sc8585-39549699245/trial-state.json` = trial_rebooted. Await SC8585verified id/ver/ctrl/mode/present orerror and cleanup photo, manualfastboot/reconnectPC. Newprobe twicechecks85 thencommonreadonlystatus; no peripheral configuration/VBUS/host/storage writes. Previous photo132222id85 plusactualAndroidmoduleSC8585proven, currentconfigreadsnotyetobserved.
+
+**Immediately restore on fastboot return** with currentpair/device_pair.py recover absolute pairdir, then Androidbootandverify fullphysicaloriginalboot_b/init_boot_bSHA256. Fullbackups backup/dali-25060RK16C-pairtest-20261020/ retained. No userdata/UFS/GPTchanges, finite120sWDTlease unchanged. Earlier originals_verified describes completedpriortrial, notcurrentphysicalstate.
+
 ## Current: SC8585 corrected pair verified; fresh preflight next (2026-10-21)
 
 CI39549699245 SUCCESS exact529829e, cache1383/1384hits99.93% (one miss). Actual20/20sources match local, linkedcounter/SC8585marker and fullimagechecksPASS. Durableignoredpair `shim/out-dali/cp-sc8585-39549699245/`: bootddfbc184...unchanged, init_boot0a0d70f4c7988618cd5ec8c0b68ee97c40ac4cf7c6b367da5796b5527f87baa1, kernel47b6c05ad595ba2ad4eae89082117b5d9d287076affb58f43de0df03b61f5f38. Samepayload29233632/11segments, ADT/root/args exactpreviouspair; root2024d0000. FirstcompletedID85 and actualAndroidmoduleSC8585 proven prior, newrepeatID/configreads hardwareunverified. No chargepumpconfiguration/VBUSwrites.
