@@ -22,3 +22,9 @@ No initialization, scheduling, syscall filter, executable validation, fallback
 path or return value is bypassed. Root image, shim, ADT, arguments and finite
 watchdog lease remain those of the successful memory-root trial. Absence of
 the console banner alone does not establish that PID1 failed to run.
+
+The unchanged static probe first opens /dev/console (UNIX syscall5). Its error
+branch is a silent self-loop, so an open failure alone explains a missing
+banner without implying exec or EL0 failure. On success it writes (4), gets
+its PID (20), then waits with select (93) and writes heartbeats. These are
+disassembly observations, not hardware syscall results yet.

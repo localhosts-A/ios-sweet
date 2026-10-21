@@ -1,3 +1,12 @@
+## Current handoff: init/exec diagnostic pair verified (2026-10-21)
+
+- CI39538593047 SUCCESS atd291fc8, actual13/13 source files match locally compiled tree, counter/nativeWDT/init source+symbol gates pass; actual binary has bsdinit_task/execerrno/PID1syscall strings. Cache1378/1381hits99.78%,3misses. Kernel SHA8f40db7cbf345717868b947bfd3dcba640106d6c07431100214ef91913f456c5.
+- Durable ignored pair `shim/out-dali/init-39538593047/`: exact same bootddfbc184..., baseADT/RAMDiskADT/root/args as successful preceding WDTtrial. Init_boot53b7cc334b86aa0dea5927bb6dde1872dec76143a48c4c5175901dc75ad2efc9, payload9e4eed1c725ebab9c32c743fc1dbabddb4f678b18a21aac923d26ec19b8afa5a. Payload29229168bytes/11segments,8MiBinit/7542011byteLZ4,ADT7424,root12MiB at2024d0000. Full header/entry/segments/RAM/root/ADTCPU+GIC+RTC+WDT/LZ4CPIO/AVB/hostoriginal checks passed; fresh Android/device/fullphysicaloriginal/candidate preflight now being checked.
+- No active trial yet. Next fresh immediate Android/host/fastboot checks and authorized paired temporary trial; observe initproc/bsdinit_task/exec/usercallcode+errno, then manualfastboot and immediate full original restore/Android readback. PID1execution/console unknown; rootmount/BSDcompletion already proved previous trial. No userdata/UFS/GPT changes.
+
+
+- Init trace committed/pushedd291fc8; Actions39538593047 dispatched. Correction to inspection note: object is valid Mach-O; host llvm-objdump --file-headers mode is unsupported for Mach-O, not proven mid-write. --macho --private-header succeeds (ARM64 OBJECT). Awaited actual compile3/3 passed. Candidate staging init-39538593047 preserves same proven WDTshim/baseADT/root/args; no new hardware writes.
+
 ## Current handoff: init/exec/EL0 diagnostic patch prepared (2026-10-21)
 
 - Patch0092 adds SWEET DEVELOPMENT-only initproc clone/AST/returnwait and bsdinit_task/ux/VM/exec progress, initial pathcopy/scratch/memorysnapshot/execerrno, first16PID1 Unix syscall enter/normal-return markers (no args). Blocking continuation paths need not hit normal-return marker. All scheduling/init/exec/validation/filter/return semantics unchanged. Same proven shim/ADT/12MiB RAMroot/args/finiteWDTlease retained.
@@ -930,3 +939,5 @@ What it took today (in order): 0058 HID services (Apple IOHIDFamily-1915 user cl
   Verify with tools/xnu-cc.py (compile+symbols) and patch-order simulation before the single CI run.
 
 - Native RTC local compilation now passes all4 modified C++ translation units (DaliRTC, platform expert, config tables, IOStartIOKit). Full kernel build and hardware date/IORTC/calendar confirmation pending. RTC alarm/suspend support is not implemented; hardware time-setting path is implemented but has not been exercised. No PMIC register writes have been issued from the host; Android is still original.
+
+- Independent unchanged PID1 binary disassembly audit: initial syscall is open(/dev/console,O_RDWR) code5 via SVC80/x16; on carry/error it branches to an infinite self-loop at0x1000004ac, with no banner/getpid/select. On success writescode4/getpid20/select93heartbeat. Thus absent banner can mean a running userspace probe stuck after failedconsoleopen; new PID1code5 errno log will distinguish. Do not alter probe/root during this controlled trial or assume console failure before observed syscall results.
