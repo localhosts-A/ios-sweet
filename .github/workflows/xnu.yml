@@ -190,7 +190,15 @@ jobs:
           grep -Fq '(saved & ~3U) | 0x204U' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           grep -Fq 'bool u3Touched = engineProbe;' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           grep -Fq 'uint32_t wantedU3 = (u3 & ~3U) | 4U;' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
-          grep -Fq 'u3Ready = u3Control;' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'constexpr uint32_t kMtu3U3ClockMask = 0x10501U;' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'u3Ready = u3Control && waitBits(ip, 0x10, kMtu3U3ClockMask,' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'engineProbe ? 0x80U : 0U' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'class ScopedMtu3HostMac' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq '{0x0c84, 0x00000003U, 0U, 0, false, true}' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq '{0x2450, 0x00000fffU, 0x474U, 0, false, false}' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq '{0x1680, 0x3fffU << 16, 1U << 16, 0, false, false}' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'bool hostMacRestored = hostMac.restore();' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI MTU3: host init tuning ready fields=6'
           grep -Fq 'ip.write(0x30, wantedU3);' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           grep -Fq 'ip.write(0x30, u3);' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U3: host enable saved='
