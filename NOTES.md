@@ -1,4 +1,10 @@
-## Current: xHCI timer fixed and No-op completed; USB2 attachment absent (2026-10-22)
+## ACTIVE: PORTSC readback trial — original restoration PENDING (2026-10-22)
+
+Patch0123/source997c9d5, fullCI39654205935 SUCCESS. Actual32/32 sources exact-match CI/native tree; both boot and xHCI counter helpers have actual ISB/MRS/MRS opcode checks; linked xHCI command calls the timer helper; cache high-PA/scalar-DMA/engine/root markers and paired image checks pass. New port-power/attach diagnostic strings linked. Candidate `shim/out-dali/usb-xhci-port-readback-39654205935`: kernel SHA256 `355586db4f9b2486bd5b74200b36830e7854894fccacc9db138b8c579f16b722`; init_boot SHA256 `b7f9edfbc247d28d7d0de2bc5bfb56db3be81180ea01cc85f558d1092d78080c`; payload29289968/11 segments/ADT8136/root2024e4000. Fresh USB Android full physical original sizes/SHA256/root/model/_b/completed preflight passed. User confirmed swap readiness; temporary init_boot_b then boot_b flashes OKAY and reboot requested. Manifest `trial_rebooted`: ORIGINAL RESTORATION PENDING. Trial log `ci-artifacts/run39654205935-trial.log`.
+
+User told to swap to OTG/Udisk at red loader, photograph PORTSC PP readback/attachment snapshot or later MSC/capacity/ROOT/panic, then return to fastboot. On fastboot return immediately recover full original init_boot_b then boot_b and verify Android physical full hashes. No userdata/GPT/Udisk writes; no USB logging work per user preference.
+
+## Historical: xHCI timer fixed and No-op completed; USB2 attachment absent (2026-10-22)
 
 Photo `IMG_20261022_021912.jpg` shows `DALI XHCI: wait timeout stage=attachment reg=430 mask=1 want=1 read=0`, `no USB2 attachment`, then cleanup. In source order, `stage=attachment` is reached only after the No-op command completed successfully; the controller ran and the corrected local clock let the connection wait expire at ~2144ms. This is the first hardware-confirmed xHCI command/DMA-event completion. USB2 PORTSC connection bit stayed clear on selected port2; no enumeration, BOT, capacity/sector read, or root mount.
 
