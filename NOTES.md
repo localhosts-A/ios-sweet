@@ -1,3 +1,8 @@
+## ACTIVE NATIVE WATCHDOG RAM-ROOT TRIAL (2026-10-21)
+
+- Fresh immediate Android dali/25060RK16C/_b/completed1/root and both original physical hashes, host originals/candidates and fastboot dali/slot_b/unlocked/sizes all matched. CI39536532295 native boundedkeepalive pair init_boot_b then boot_b flash OKAY, reboot OKAY. Authoritative ignored manifest `shim/out-dali/wdt-39536532295/trial-state.json` trial_rebooted. No runtime keepalive/root/reset outcome yet. User asked for DALIWDT/T...ms/BSD/root lastphoto, whether passes old location/auto-reboots, then manualfastboot.120s lease separately from shim/XNU init means later reset can still occur after reloads stop.
+- **RESTORE PENDING:** on fastboot return use current pair's device_pair.py recover (bounded read-only resetvars, full original init_boot_b then boot_b), Android fullboot then verify mode for both root-side physical SHA256. Restore dir backup/dali-25060RK16C-pairtest-20261020. All older originals_verified manifests historical. No userdata/UFS/super/GPT writes; only new runtime HW operation is vendor watchdog reload, preserving enable/mode/length/status and finitelease. No complete productionwatchdog policy claim.
+
 ## Current handoff: native watchdog pair verified/preflight passed (2026-10-21)
 
 - CI39536532295 SUCCESS at867dd0c, compiler1377/1381hits99.71%. Actual11/11 source files byte-match locally compiled sources. Kernel counter instruction and driver symbol gates pass; downloaded poll disassembly confirms native reload0x1971 STRw at+8, DSB, bootCPU/enabled/1s/120s checks. Kernel SHA4072b42934351805ff01c855ce489b5bea8786443cb0a84d4dcba81b899aea1e.
