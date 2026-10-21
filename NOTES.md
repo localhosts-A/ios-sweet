@@ -1,4 +1,10 @@
-## Current: No-op diagnostic candidate ready; originals verified; no active trial (2026-10-22)
+## Current: No-op diagnostic trial started; original restoration pending (2026-10-22)
+
+User requestscontinue after verifiedNoopdiagnosticcandidate. Current usb-noop-event-39645079678 trialhelper completed: immediate Android root/dali/model/_b/completed/fullphysicaloriginalsizesSHA256PASS; fastbootidentity/unlocked/slot/sizes andhostoriginal+candidatehashesPASS. Temporary init_boot_b thenboot_b flashedOKAY/rebootrequested. Authoritative manifesttrial_rebooted. CURRENT ORIGINAL RESTORATION PENDING; priororiginals_verifiedhistoricalonly. Log research/dali-usb-root/ci-artifacts/run39645079678-trial.log.
+
+UserinstructedredloaderearlyswapOTG/Udisk, photographNo-openqueue/eventpollrejected/commandeventrejected/eventtimeout andneighborstate/eventregs/DMApa (orMSC/ROOT/panic), thenPCmanualfastboot. Onreturn immediately use thiscurrentpair device_pair.py recover ABS_PAIR fulloriginalinit_boot_bthenboot_b/rebootAndroid then verifyfullphysicaloriginalsizesSHA256. No hardwareoutcomeyet; NoOP/USB/MSC/rootunverified. NoGPT/userdata/Udiskwrites, backupintact,120swatchdogretained.
+
+## No-op diagnostic candidate verification (historical preflight)
 
 Patch0121/source05a3941 fullCI39645079678 SUCCESS/cache1386of1388hits99.86%. Actual32/32 artifact sources byte-identical to native compiled tree; all new diagnostic strings linked, prior64bit PAconversion and byte-only DMAhelper/noDCZVA/allocatehelpercall disassembly PASS. Fullcounter/linkedmarkers/headers/segments/entry/RAM/ADT/CPIO/AVB/hostoriginal checks PASS.
 
