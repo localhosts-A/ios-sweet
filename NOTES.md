@@ -1,4 +1,12 @@
-## Current: No-op completion failed; originals recovered and physically verified (2026-10-22)
+## Current: No-op diagnostic candidate ready; originals verified; no active trial (2026-10-22)
+
+Patch0121/source05a3941 fullCI39645079678 SUCCESS/cache1386of1388hits99.86%. Actual32/32 artifact sources byte-identical to native compiled tree; all new diagnostic strings linked, prior64bit PAconversion and byte-only DMAhelper/noDCZVA/allocatehelpercall disassembly PASS. Fullcounter/linkedmarkers/headers/segments/entry/RAM/ADT/CPIO/AVB/hostoriginal checks PASS.
+
+Prepared `shim/out-dali/usb-noop-event-39645079678`: kernelSHA2561503528641d17e40039b723e580e0901e63596ee09847fbc373f02800bd66fb6; initboot e9a192bd2df3b24898630336c28fa37b9e2afe5f92559a85ccab35d7cda90889; payload29289904/11segments/ADT8136. Kernel growth moves RAMroot to2024e4000 (verifier confirms no overlap and ADT). Same explicitrddu0/audited36bitDMA/PHYtrim/fullengine-rootflags/120swatchdog. Fresh Android fullphysicaloriginalsizesSHA256/root/model/_b/completed preflight PASS; newmanifestandroid_preflight_verified. Prior usb-device-dma-39642566099 originals_verified. NO ACTIVE TRIAL/PENDING RESTORATION. Newcandidate NOT flashed; No-op failure still unexplained, no hardware fix claimed.
+
+User told no phoneoperation thisoffline round. Next readiness forswap thenpairedtrial; capture No-openqueue/eventpollrejected/commandeventrejected/eventtimeout/state/eventregs/DMApa. Immediatefulloriginalinit_boot_bthenboot_b recovery onfastbootreturn followedbyAndroidphysicalverify. Ignored logs run39645079678-package.log/-preflight.log and package-noop-event-39645079678.py. No newphonewrites since recovery; noGPT/userdata/Udiskwrites. NoOP/USB/MSC/root unverified.
+
+## No-op completion investigation
 
 Photo IMG_20261022_012807.jpg: resetcomplete/pages1/scratch0, commandfailedtype23, startfailedstage=noop-completion elapsed0 published1/running1; stopped/reset DMAownershipreturned, integratedresult0/stopped1; PHY/UTMI/RPTR/U2/hostcleanup all1/noADCerror. Thus scalarDMAfix crossed arena allocation/clear/ringpublication/Run-wait; no successful commandcompletion or enumeration/storage/root. Current logs cannot distinguish controllerHSE/HCE, unexpected raw event or timeout; do not infer DMA-address/cablefault.
 
