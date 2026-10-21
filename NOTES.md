@@ -1,3 +1,23 @@
+## ACTIVE native ADC VBUS trial — original restoration PENDING (2026-10-21)
+
+CI39558561928/bb2ad4f fullyverifiedpair: immediateAndroidoriginalfullphysicalhash/root/model/_b/completed, hostoriginal/candidatehashesandfastbootidentity/unlocked/64+8MiBsizesallPASS. Temporaryinit_boot_bthenboot_bflashesbothOKAY/rebootrequested. Authoritativeignored `shim/out-dali/usb-adc-39558561928/trial-state.json` trial_rebooted. UsertoldNOWearlyswapPCtoOTGbeforeprompt, observe1min/photoADC_PDVBUS+CHGVIN+TCPCI, VBUSvalid/errors/end/finalstatus thenmanualfastboot+PCreconnect. NewnativeADC/sourcephysicalvoltage/cleanuphardwareUNVERIFIED. PriorCCwake/attach/sourcecontrol+registercleanupwork; legacyTCPCIvoltagealways0.
+
+**RESTORE IMMEDIATELY on fastboot return** using currentpair/device_pair.py recover ABS_PAIR, fulloriginalinit_boot_bthenboot_b, AndroidbootthenverifybothfullphysicalSHA256. Backupdir backup/dali-25060RK16C-pairtest-20261020 intact. Previousoriginals_verifiedhistorical; currenttemporarypairNOTrestored. No userdata/GPT/Udiskwrites. HostPHY/xHCI/BOT/USBrootstillunfinished. Artifacts/logs research/dali-usb-root/ci-artifacts/run39558561928; alwaysuseworkdiskTMPDIRfornewdownloads/package. Mainlocalcompiletree/tmp/dali-timed-boot/buildtree.
+
+## Current: native ADC pair fully verified, trial starting (2026-10-21)
+
+CI39558561928/bb2ad4f SUCCESS, cache1383/1385hits99.86%. Actual22/22sourcebytechecks, linkedcounter/ADC/wake/W1C/cleanupmarkers PASS; fullheaders/entry/segments/RAM/ADT/LZ4CPIO/AVBNONE/hostoriginalchecks PASS. Pair `shim/out-dali/usb-adc-39558561928/`: kernelc0d35cb3497020de3ca0d954208c867a81335b2d7b91e1681ac786b084a7dedd, init_bootb32df52fa0481decd26439a7122a3938b2a52b90ae781ef52e75a03fc0baf245, payloaded1c90b1dde2123be89e9a3a2cae6f0cf29b382d98fd768491f9b26d3eaa1647. Sameboot/root/ADT/args; payload29251232/11segments, ADT7736, root2024d4000, LZ4ramdisk7554830bytes.
+
+FreshAndroidoriginalfullphysicalSHA256/device/model/_b/completed/rootpreflightPASS; trialhelperrunning, consultignoredtrial-state.jsonforactualflashstate. CurrentnativeADC/sourcepowerhardwareunverified. CIartifacts/logs research/dali-usb-root/ci-artifacts/run39558561928, useworkdiskTMPDIR. RestorefulloriginalpairafteranytemporarytrialandverifyAndroidphysicalhashes.
+
+## Current: ADC kernel built; final pair packaging (2026-10-21)
+
+CI39558561928SUCCESS exactbb2ad4f, cache1383/1385hits99.86%. Workdiskkernel/buildtree/logdownloadscomplete, packagingactual22source/counter/ADCmarkers/fullpair nowrunning /tmp/dali-usb-adc/package.py withworkdiskTMPDIR. Awaitcompletionbeforefreshpreflight/pairedtrial. OriginalsremainAndroidphysicalverified/noactivetrial.
+
+## Current: native ADC voltage build in progress (2026-10-21)
+
+Patch0100nativePDVBUS/CHGVINADCcommitted/pushedbb2ad4f; fullcachedCI39558561928inprogress. Candidateusb-adc-39558561928stagedsameboot/root/baseADT/helpers, currenthardwareflagsresetfalseandpreviousCC/sourcecontrolproofseparate. Awaitactual22source/counter/ADCmarkers/fullimagechecks. DownloadCIartifacts/workfileswithworkdiskTMPDIRanddest research/dali-usb-root/ci-artifacts/run39558561928. OriginalsremainAndroidphysicalverified/noactivetrial.
+
 ## Current: native VBUS ADC path implemented, originals verified (2026-10-21)
 
 AndroidnormalIIOdriverreferencewhilePCattached: device2MT6379ADC channel1CHGVINraw4661/scale1000, channel11PDVBUSraw4647/scale1000; boot_completed1. LiveDaliADCno replace-chgvin, chargeruses1. Thus channelindex/endian/mVunitsprimarysourceplusstockmeasurementsconfirmed. TCPCIvoltagecallbackhasTODOandnative0 despiteCC02/power0c.
