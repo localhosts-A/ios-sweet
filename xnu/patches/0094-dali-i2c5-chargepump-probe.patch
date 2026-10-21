@@ -1,0 +1,256 @@
+diff --git a/iokit/Kernel/arm/DaliI2C5.h b/iokit/Kernel/arm/DaliI2C5.h
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/DaliI2C5.h
+@@ -0,0 +1,5 @@
++#ifndef DALI_I2C5_H
++#define DALI_I2C5_H
++/* One bounded SC8581 identity/configuration read. No peripheral writes. */
++void dali_i2c5_probe(void);
++#endif
+diff --git a/iokit/Kernel/arm/DaliI2C5.cpp b/iokit/Kernel/arm/DaliI2C5.cpp
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/DaliI2C5.cpp
+@@ -0,0 +1,188 @@
++/* Dali I2C5 FIFO adoption, MT6991 register version2 / 32-bit accesses.
++ * References: MiCode device-modules e45c319, i2c-mt65xx.c,
++ * clk-mt6991{,-peri}.c, clk-mux.c, pinctrl-mt6991.c, sc858x_charger.c.
++ * dalicp=1 requests a single SC8581 probe, never charge-pump programming.
++ * Preserve firmware timing, pinmux, parent selection and all protections.
++ */
++#include <pexpert/arm64/board_config.h>
++#if defined(SWEET)
++#include "DaliI2C5.h"
++#include <IOKit/IOLib.h>
++#include <IOKit/IOMemoryDescriptor.h>
++#include <machine/machine_routines.h>
++
++namespace {
++struct Mapping {
++    IOMemoryDescriptor *memory = nullptr;
++    IOMemoryMap *map = nullptr;
++    vm_offset_t io = 0;
++    bool open(uint64_t address) {
++        memory = IOMemoryDescriptor::withPhysicalAddress(address, 0x1000, kIODirectionInOut);
++        map = memory ? memory->map(kIOMapInhibitCache) : nullptr;
++        if (map) { io = map->getVirtualAddress(); }
++        return io != 0;
++    }
++    uint32_t read(uint32_t offset) {
++        uint32_t v = *(volatile uint32_t *)(io + offset);
++        __asm__ volatile("dmb oshld" ::: "memory");
++        return v;
++    }
++    void write(uint32_t offset, uint32_t value) {
++        *(volatile uint32_t *)(io + offset) = value;
++        __asm__ volatile("dsb sy" ::: "memory");
++    }
++    ~Mapping() { OSSafeReleaseNULL(map); OSSafeReleaseNULL(memory); }
++};
++
++constexpr uint32_t kData = 0, kMask = 8, kStatus = 0xc, kControl = 0x10;
++constexpr uint32_t kLength = 0x14, kTransactions = 0x18, kStart = 0x24;
++constexpr uint32_t kFifoClear = 0x38, kAux = 0x44, kAddress = 0x94, kFifo = 0xf4;
++constexpr uint32_t kComplete = 1, kErrors = 0x20e, kClear = 0x21f;
++/* Save only configuration, never replay START, DATA, status or FIFO strobes. */
++const uint32_t savedOffsets[] = {kMask, kControl, kLength, kTransactions, kAux, kAddress};
++
++class Probe {
++    Mapping bus, dma, top, impe, perao, gpio;
++    uint32_t saved[6] = {};
++    bool parentChanged = false, mainChanged = false, dmaChanged = false;
++    bool configured = false, wedged = false;
++    uint32_t lastStatus = 0;
++
++    bool wait(Mapping &m, uint32_t offset, uint32_t mask, uint32_t expected) {
++        for (unsigned i = 0; i < 1000; ++i) {
++            if ((m.read(offset) & mask) == expected) { return true; }
++            IODelay(10);
++        }
++        return false;
++    }
++    bool readByte(uint8_t reg, uint8_t *value) {
++        if (wedged || (bus.read(kStart) & 1) || (dma.read(8) & 1) ||
++            (bus.read(kFifo) & 0x1f)) { return false; }
++        uint32_t control = saved[1];
++        /* CPU FIFO, repeated START + direction change, ACK checking/stretch.
++         * Do not enable DMA/async/IRQ selection or modify timing/shadow mode.
++         */
++        control &= ~((1U << 2) | (1U << 8) | (1U << 9));
++        control |= (1U << 1) | (1U << 3) | (1U << 4) | (1U << 5);
++        bus.write(kMask, 0);
++        bus.write(kControl, control);
++        bus.write(kAddress, 0x6eU << 1);
++        bus.write(kStatus, kClear);
++        bus.write(kFifoClear, 1);
++        bus.write(kLength, 1);
++        bus.write(kAux, 1);
++        bus.write(kTransactions, 2);
++        bus.write(kData, reg); /* Only register index; never a peripheral value. */
++        bus.write(kStart, (1U << 14) | 1U);
++        bool done = false;
++        for (unsigned i = 0; i < 10000; ++i) {
++            lastStatus = bus.read(kStatus);
++            if (lastStatus & (kComplete | kErrors)) { done = true; break; }
++            IODelay(10);
++        }
++        if (!done || !(lastStatus & kComplete) || (lastStatus & kErrors)) {
++            kprintf("DALI I2C5: read failed reg=%02x irq=%x start=%x fifo=%x\n",
++                reg, lastStatus, bus.read(kStart), bus.read(kFifo));
++            /* A cleared START latch does not prove the electrical bus is idle.
++             * Retain clocks/configuration after any failed transaction until
++             * reboot. No reset, SCL pulses, repeated attempt or DMA programming.
++             */
++            wedged = true;
++            return false;
++        }
++        if (!wait(bus, kStart, 1, 0)) { wedged = true; return false; }
++        uint32_t count = bus.read(kFifo) & 0x1f;
++        if (count != 1) {
++            kprintf("DALI I2C5: RX length rejected reg=%02x count=%u\n", reg, count);
++            bus.write(kStatus, kClear);
++            bus.write(kFifoClear, 1);
++            return false;
++        }
++        *value = bus.read(kData) & 0xff;
++        bus.write(kStatus, kClear);
++        return true;
++    }
++public:
++    void run() {
++        if (!top.open(0x10000000) || !impe.open(0x120c0000) ||
++            !perao.open(0x16640000) || !gpio.open(0x1002d000) ||
++            !bus.open(0x120a0000) || !dma.open(0x16400000)) {
++            kprintf("DALI I2C5: mapping failed\n"); return;
++        }
++        uint32_t pins = gpio.read(0x460), levels = gpio.read(0x250);
++        uint32_t mux = top.read(0xc0);
++        kprintf("DALI I2C5: handoff pins=%x levels=%x mux=%x\n", pins, levels, mux);
++        if ((pins & 0xff) != 0x11 || (levels & 0x30000) != 0x30000 ||
++            ((mux >> 8) & 7) > 4) {
++            kprintf("DALI I2C5: firmware pinmux/idle lines/clock parent rejected\n"); return;
++        }
++        /* Gate-only enable: preserve the firmware PLL and mux selection.
++         * clk-mux.c fence enable uses CLR gate15 then MON1 bit18, no UPDATE.
++         */
++        if (mux & (1U << 15)) {
++            parentChanged = true; top.write(0xc8, 1U << 15);
++        }
++        if (!wait(top, 0x274, 1U << 18, 1U << 18)) {
++            kprintf("DALI I2C5: parent clock fence timeout\n"); return;
++        }
++        if (perao.read(0x14) & (1U << 26)) {
++            dmaChanged = true; perao.write(0x30, 1U << 26);
++        }
++        if (impe.read(0xe00) & 1) {
++            mainChanged = true; impe.write(0xe04, 1);
++        }
++        if (!wait(impe, 0xe00, 1, 0) || !wait(perao, 0x14, 1U << 26, 0)) {
++            kprintf("DALI I2C5: clock gate timeout\n"); return;
++        }
++        IODelay(10);
++        uint32_t timing = bus.read(0x20), ltiming = bus.read(0x2c);
++        uint32_t ioConfig = bus.read(0x34), hs = bus.read(0x30);
++        kprintf("DALI I2C5: timing=%x ltiming=%x div=%x io=%x hs=%x start=%x dma=%x\n",
++            timing, ltiming, bus.read(0x48), ioConfig, hs, bus.read(kStart), dma.read(8));
++        if (!timing || !ltiming || (hs & 1) || (ioConfig & 3) != 3 ||
++            (bus.read(kStart) & 1) || (dma.read(8) & 1) ||
++            (bus.read(kFifo) & 0x1f) || (bus.read(kStatus) & kClear)) {
++            kprintf("DALI I2C5: firmware timing/idle state rejected; no transaction\n"); return;
++        }
++        for (unsigned i = 0; i < 6; ++i) { saved[i] = bus.read(savedOffsets[i]); }
++        configured = true;
++        uint8_t id = 0, version = 0, control = 0, mode = 0, present = 0;
++        if (!readByte(0x6e, &id) || id != 0x81) {
++            kprintf("DALI CP: identity rejected id=%02x irq=%x\n", id, lastStatus); return;
++        }
++        /* Only documented configuration/status registers, no fault/IRQ flags. */
++        if (!readByte(0, &version) || !readByte(0x0b, &control) ||
++            !readByte(0x0e, &mode) || !readByte(0x10, &present)) {
++            kprintf("DALI CP: configuration read failed\n"); return;
++        }
++        kprintf("DALI CP: SC8581 verified id=%02x ver=%02x ctrl=%02x mode=%02x present=%02x\n",
++            id, version, control, mode, present);
++        kprintf("DALI CP: peripheral read-only probe complete; VBUS unchanged\n");
++    }
++    ~Probe() {
++        if (wedged) {
++            kprintf("DALI I2C5: failed transaction; retain clocks until reboot, no bus reuse\n");
++            return;
++        }
++        if (configured) {
++            bus.write(kMask, 0);
++            for (unsigned i = 1; i < 6; ++i) { bus.write(savedOffsets[i], saved[i]); }
++            bus.write(kMask, saved[0]);
++        }
++        if (mainChanged) { impe.write(0xe08, 1); }
++        if (dmaChanged) { perao.write(0x2c, 1U << 26); }
++        if (parentChanged) { top.write(0xc4, 1U << 15); }
++        kprintf("DALI I2C5: scoped controller/clock state restored\n");
++    }
++};
++unsigned probeClaimed;
++}
++
++void dali_i2c5_probe(void)
++{
++    if (!ml_get_interrupts_enabled() || ml_at_interrupt_context() ||
++        __atomic_exchange_n(&probeClaimed, 1U, __ATOMIC_ACQ_REL)) { return; }
++    Probe probe;
++    probe.run();
++}
++#endif
+diff --git a/iokit/Kernel/arm/DaliUSBPMIC.cpp b/iokit/Kernel/arm/DaliUSBPMIC.cpp
+--- a/iokit/Kernel/arm/DaliUSBPMIC.cpp
++++ b/iokit/Kernel/arm/DaliUSBPMIC.cpp
+@@ -6,6 +6,7 @@
+ #include <pexpert/arm64/board_config.h>
+ #if defined(SWEET)
+ #include "DaliPMIF.h"
++#include "DaliI2C5.h"
+ #include <IOKit/IOService.h>
+ #include <IOKit/IOLib.h>
+ #include <IOKit/IOWorkLoop.h>
+@@ -22,6 +23,7 @@
+     uint16_t lastAddress = 0;
+     uint8_t previous[6] = {};
+     bool havePrevious = false;
++    bool probeChargePump = false;
+ 
+     bool read8(uint16_t address, uint8_t *value) {
+         lastAddress = address;
+@@ -32,6 +34,7 @@
+         return dali_pmif_read16(14, address, value, &lastStatus);
+     }
+     void poll() {
++        if (samples == 0 && probeChargePump) { dali_i2c5_probe(); }
+         /* ROLE_CTRL, CC_STATUS, POWER_STATUS, charger OTG enable and
+          * repeater VRT/disconnect/squelch configuration. No alert clearing.
+          */
+@@ -87,6 +90,17 @@
+             vid, pid, lastStatus);
+         return false;
+     }
++    int cp = 0;
++    PE_parse_boot_argn("dalicp", &cp, sizeof(cp));
++    if (cp == 1) {
++        OSData *i2cReg = OSDynamicCast(OSData, provider->getProperty("cp-i2c-reg"));
++        uint64_t i2cRange[2] = {};
++        if (i2cReg && i2cReg->getLength() == sizeof(i2cRange)) {
++            memcpy(i2cRange, i2cReg->getBytesNoCopy(), sizeof(i2cRange));
++            probeChargePump = i2cRange[0] == 0x120a0000 && i2cRange[1] == 0x20000;
++        }
++        if (!probeChargePump) { kprintf("DALI CP: device-tree I2C5 range rejected\n"); }
++    }
+     workLoop = IOWorkLoop::workLoop();
+     timer = IOTimerEventSource::timerEventSource(this, timerAction);
+     if (!workLoop || !timer || workLoop->addEventSource(timer) != kIOReturnSuccess) {
+diff --git a/iokit/conf/files.arm64 b/iokit/conf/files.arm64
+--- a/iokit/conf/files.arm64
++++ b/iokit/conf/files.arm64
+@@ -24,3 +24,4 @@
+ iokit/Kernel/arm/DaliRTC.cpp                                     optional iokitcpp
+ iokit/Kernel/arm/DaliPMIF.cpp                                    optional iokitcpp
+ iokit/Kernel/arm/DaliUSBPMIC.cpp                                 optional iokitcpp
++iokit/Kernel/arm/DaliI2C5.cpp                                    optional iokitcpp

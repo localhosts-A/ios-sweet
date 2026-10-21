@@ -136,6 +136,12 @@ jobs:
           grep -Fq 'sid != 9 && sid != 14' xnu/iokit/Kernel/arm/DaliPMIF.cpp
           grep -Fq 'bounded read-only mode' xnu/iokit/Kernel/arm/DaliUSBPMIC.cpp
           grep -Fq 'if (enabled != 1)' xnu/iokit/Kernel/arm/DaliUSBPMIC.cpp
+          grep -Fq 'if (cp == 1)' xnu/iokit/Kernel/arm/DaliUSBPMIC.cpp
+          grep -Fq 'probeChargePump = i2cRange[0] == 0x120a0000' xnu/iokit/Kernel/arm/DaliUSBPMIC.cpp
+          grep -Fq 'id != 0x81' xnu/iokit/Kernel/arm/DaliI2C5.cpp
+          grep -Fq 'No reset, SCL pulses, repeated attempt or DMA programming.' xnu/iokit/Kernel/arm/DaliI2C5.cpp
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI CP: SC8581 verified'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI I2C5: scoped controller/clock state restored'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI PMIF: shared SID9/SID14 channel2 mapped'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI USB PMIC: MT6379 TCPC verified; bounded read-only mode'
           grep -Fq "'IONameMatch'     = 'mediatek,mt6685-rtc'" xnu/iokit/KernelConfigTables.cpp

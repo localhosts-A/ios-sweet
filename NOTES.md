@@ -1,3 +1,9 @@
+## Current: native I2C5/SC8581 probe prepared (2026-10-21)
+
+Patch0094 adds `dalicp=1` to existing opt-in USBPMIC service and Dali-only ADT `cp-i2c-reg`. New DaliI2C5 helper adopts firmware pinmux/timing, scoped gate enable (parent fence, IMPE/APDMA bus bits), polling FIFO combined1+1 SC8581 identity81/version/control/mode/presence. No peripheral configuration/VBUS/DMA/reset/PLL/pinmux programming. Success restores saved controller/changed gates; failed transaction retains state until reboot and prohibits reuse. Exact baseline patch applies; actual arm64 object compilation2/2 passed (missing output-directory issue corrected before compile). Board facts audited against immutable vendor e45c319 and live Android pins/124.8MHz clocks. Local working tree /tmp/dali-timed-boot/buildtree/xnu, baseline /tmp/dali-cp-i2c/base. Next compile, full cached CI/source+binary checks and paired image before any trial.
+
+Phone original boot_b/init_boot_b remain restored/physical-hash verified; no active trial or pending recovery. USB media16GiB verified. Native host/power/storage remain unfinished. No new handset boot/power writes this stage; stock debugfs mounted normally for read-only clock/pin observations.
+
 ## Current: USB PMIC read-only stage verified; originals restored (2026-10-21)
 
 Photo125352 confirms native shared-PMIF MT6379 status sampling through sample90 and `bounded read-only capture ended`, without visible transaction errors. All reported snapshots: role=0a, cc=10, power=08, otg=60, vrt=14, rx=60. Memory md0 mount/BSD init/custom static PID1 exec and 24-byte heartbeat writes still work after RTC migration. Passing BSD clock initialization supports shared RTC operation; explicit hardware UTC banner is absent from this photo, so UTC accuracy was not independently rechecked. Actual OTG attachment during this trial is unconfirmed; no XNU USB enumeration/host/root support claimed.

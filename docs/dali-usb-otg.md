@@ -45,6 +45,35 @@ the user. Do not infer a broken adapter from these values: the current
 service never enables source mode. Shared PMIF reads are now demonstrated;
 Type-C source policy, power routing and USB host/storage remain unfinished.
 
+## Native charge-pump transport stage
+
+Patch0094 adds an optional `dalicp=1` probe to the existing `daliusb=1`
+service. It requires the Dali-only `cp-i2c-reg` property to identify I2C5 at
+`0x120a0000/0x20000`. The stock SC858x driver is on I2C5 address `0x6e` and
+requires identity byte `0x81` from register `0x6e` (SC8581).
+
+The transport checks retained SCL5/SDA5 GPIO176/177 mode1 and high input
+levels, adopts firmware timing/open-drain configuration only when idle,
+and uses the MT6991 v2 32-bit FIFO registers for a combined one-byte
+register-index write / one-byte read. No DMA buffers or engines are used.
+It temporarily enables only the existing parent gate (with its completion
+fence), IMPE I2C5 bit0 and APDMA bus bit26. PLL and mux selection, pinctrl,
+other channels and global resets are preserved. The parent selection must
+be a documented I2C parent, and an uninitialized timing state is rejected.
+
+Only identity/version, control, mode and non-clearing presence status are
+read. **No charge-pump configuration or VBUS changes are made.** On normal
+completion the saved controller configuration and changed clock gates are
+restored; a failed transaction retains the clock/configuration state until
+reboot and the once-only probe cannot retry. Clearing START alone would
+not prove the electrical bus is idle. This is transport bring-up before
+implementing source power, not a functioning OTG host driver.
+
+Stock Android reports a 124.8MHz I2C5 parent. Its existing debugfs/pinctrl
+views confirm SCL5/SDA5 in mode1. The source path uses SC8581 reverse1:1 mode
+and manual ACDRV before MT6379 regulator enable, with the corresponding
+normal mode/regulator/ACDRV cleanup. These power changes remain future work.
+
 ## Hardware facts
 
 Live stock Android FDT, cross-checked against MiCode's device-module source
@@ -102,6 +131,10 @@ All paths below are within
 - `drivers/phy/mediatek/phy-mtk-{mt6379,nxp}-eusb2-repeater.c`
 - `drivers/misc/mediatek/extcon/extcon-mtk-usb.c`
 - `drivers/power/supply/mt6379-charger.{c,h}`
+- `drivers/power/supply/sc858x_charger.c`
+- `drivers/i2c/busses/i2c-mt65xx.c`
+- `drivers/clk/mediatek/{clk-mt6991.c,clk-mt6991-peri.c,clk-mux.c}`
+- `drivers/pinctrl/mediatek/pinctrl-mt6991.c`
 - `drivers/misc/mediatek/typec/tcpc/tcpc_mt6379.c`
 - [TCPCI register and bit definitions](https://github.com/MiCode/mtk_kernel_device_modules/blob/e45c3199537fbba9aae5fb06c31fc8dbd3c1dcee/drivers/misc/mediatek/typec/tcpc/inc/std_tcpci_v10.h)
 

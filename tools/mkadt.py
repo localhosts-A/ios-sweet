@@ -273,6 +273,7 @@ def build(seed=None, qemu=False, highmem=False, dali=False):
         ph(),
         ('compatible', cstr('mediatek,dali-usb-pmic')),
         ('reg', u64(0x1c01a000, 0x900)),
+        ('cp-i2c-reg', u64(0x120a0000, 0x20000)),
     ])] if dali else []
 
     dali_watchdog = [node('dali-watchdog', [
