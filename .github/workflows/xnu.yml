@@ -163,7 +163,7 @@ jobs:
           grep -Fq 'update(0x155, 0x1f, savedReport)' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI ADC: PDVBUS='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI ADC: failed channel='
-          grep -Fq 'dali_usb_host_observe(hostHwrscsV2, hostVusbAlwaysOn);' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
+          grep -Fq 'dali_usb_host_observe(hostHwrscsV2, hostVusbAlwaysOn, hostNativePhyValidated);' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
           grep -Fq 'PE_parse_boot_argn("daliusbhost"' xnu/iokit/Kernel/arm/DaliUSBPMIC.cpp
           grep -Fq 'hostRanges[6] != 0x16790000 || hostRanges[7] != 0x100' xnu/iokit/Kernel/arm/DaliUSBPMIC.cpp
           grep -Fq 'domainReady(dp, false) && domainReady(p0, true)' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
