@@ -1,4 +1,12 @@
-## Current: DMA arena DC ZVA panic; originals recovered and physically verified (2026-10-22)
+## Current: scalar DMA candidate ready; originals verified; no active trial (2026-10-22)
+
+Patch0120/source73088c0606911b34374907f2a7683d1d457670cc fullCI39642566099 SUCCESS/cache1387of1388 hits99.93%. Actual32/32 artifact sources byte-identical to native compiled tree. Linked dmaZero/dmaCopy disassembly audited: only byte load/store instructions, no DCZVA/vector/generic helper call; allocate calls dmaZero, not bzero/memset. Prior64bit ptoa_64 cachefix actualinstruction preserved. Counter/linkedmarkers/headers/segments/entry/RAM/ADT/CPIO/AVB/hostoriginal checks PASS.
+
+Prepared `shim/out-dali/usb-device-dma-39642566099`: kernelSHA256 b8469d069fa9d544e48f197d4f0e8c2f42cb2c57e39616abf00c06c3015d051e; initboot ed6eb621c41f2aa8036d9b2984d946f6e02dc442285130aae0a67df5b2ea75e4; payload29289856/11segments/ADT8136/root2024e0000. Same audited36bit identityDMA/trimprofile/explicitrddu0/fullengine-rootflags/120swatchdog. Fresh Android full physical original sizes/SHA256/root/model/_b/completed preflight PASS, newmanifestandroid_preflight_verified. Prior usb-cache-pa-39639794623 originals_verified. NO ACTIVE TRIAL/PENDING RESTORATION; candidate NOT flashed. ActualDMA/Run/NoOP/enumeration/MSC/root unverified.
+
+User told computer-only work this round/no further manual trial; next trial requires current swap readiness, use newpair helper and recover full originals init_boot_bthenboot_b immediately onfastbootreturn then Android physicalverify. Ignored package/preflight logs run39642566099-package.log/-preflight.log; packagehelper package-device-dma-39642566099.py. No new phone writes since recovery, no GPT/userdata/Udisk writes.
+
+## DC ZVA panic investigation and fix
 
 Photo IMG_20261022_011333.jpg: reset complete pages1/scratch0 then Unaligned kernel data abort, PCfffffe0007b4acc4/LRfffffe0007a892dc/ESR96000061/FARfffffe50422a0040. Exact CI39639794623 disassembly maps PC to `_bzero` DC ZVA x3; LR is DaliXHCI::allocate after bzero(bytes,0x40000). Full PA now preserved (physical2055d0000). Cache-inhibited mapping uses VM_WIMG_IO/Device-GRE for DRAM, where DC ZVA faults even at aligned address. Not an incorrectly aligned arena and not evidence of USB DMA execution. No running/NoOP/MSC/root proof.
 
