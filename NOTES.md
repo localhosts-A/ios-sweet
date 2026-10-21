@@ -1,4 +1,10 @@
-## Current: originals recovered; independent AO reset candidate verified (2026-10-22)
+## ACTIVE independent AO reset trial — original restoration PENDING (2026-10-22)
+
+User requests continue after verifiedcandidate; Androidconnected. Currentpair `shim/out-dali/usb-reset-ao-39637194159/device_pair.py trial` completed: immediate AndroidfullphysicaloriginalSHA256/size/root/model/_b/completed PASS; fastbootproduct/unlocked/slot/sizes/hostoriginalcandidatehashes PASS. Temporaryinit_boot_bthenboot_b flashedOKAY/rebootrequested. Authoritativeignoredmanifesttrial_rebooted; CURRENT ORIGINAL RESTORATION PENDING. Previousoriginals_verifiedonlyhistorical. Logresearch/dali-usb-root/ci-artifacts/run39637194159-trial.log. UsertoldredloaderearlyswapOTG/Udisk, photographXHCIreset/running/healthrejected/startfailedstage/MSC/ROOT, observe~1minute thenPCmanualfastboot. No newhardwareoutcomeyet.
+
+Onreturnimmediatelyrecoverthispairfulloriginalinit_boot_bthenboot_b viadevice_pair.py recover ABS_PAIR, rebootAndroidthenverifyfullphysicalsizes/SHA256. Backupdirintact. NoGPT/userdata/Udiskwrites. ResetAOguard/newreset/DMA/NoOP/USB/MSC/rootremainunverified; watchdog120sretained.
+
+## Independent AO reset candidate verification (historical preflight)
 
 Patch0118/source762ed81 fullCI39637194159 SUCCESS/cache1387/1388hits99.93%; actual31/31 artifact sources byte-identical to native compiled tree. Counter/new+old linkedmarkers/fullpairedheaders/segments/entry/RAM/ADT/CPIO/AVB/hostoriginal checks PASS. Prepared `shim/out-dali/usb-reset-ao-39637194159`: kernel SHA256234b78fa615868a7423b2938629dc133f5f33961d0ca134d8367743742614023; initbootdf7f61e8cc4210089d691760a3511964688a150f4cfba4a0639ad27326dc4dee. Payload29289760/11segments/ADT8136/root2024e0000; unchangedboot/root/profile/rd=du0+engine/root flags/watchdog120s.
 
