@@ -59,9 +59,16 @@ base0, so the platform refuses widths above36 bits even though xHCI advertises
 AC64. The allocator applies the audited physical-address mask and64KiB
 alignment before publishing any DMA address. The device mask may be narrower.
 
-The next device interaction is read-only Android metadata collection, followed
-by completing the address/calibration audit and candidate packaging. It is
-not another isolated PHY/port photograph trial.
+The Android metadata audit has completed: the correct nvmem provider and
+silicon tag were read, USB nodes have no IOMMU-group membership, and the exact
+vendor generic xHCI source selects DMA64 for AC64 hardware. The local candidate
+profile constrains this to the parent36-bit window and supplies measured PHY
+values. These device dumps remain outside Git. Actual DMA No-op completion,
+USB enumeration, storage reads and root mounting remain hardware-unverified.
+
+Patch0115 also handles the native MTK short-transfer quirk: an extra successful
+event is ignored only for the exact previous Short Packet TRB, endpoint and
+slot. Reusing that ring address clears the old match.
 
 ## Primary references
 

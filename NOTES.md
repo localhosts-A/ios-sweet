@@ -1,4 +1,10 @@
-## Current: integrated USB root implementation, no active trial (2026-10-21)
+## Current: integrated USB root candidate verified, trial ready (2026-10-21)
+
+CI39628092431 succeeded for source7fb235e6988d60a82483343ce78055c8d903b1d1/patch0115. Actual31/31 sources match the native compiled tree. Paired candidate `shim/out-dali/usb-integrated-39628092431` passed headers/segments/entry/RAM/ADT/LZ4CPIO/AVB/counter/linked-marker/host-original checks. Kernel SHA256224f47ea94c08619a7bc1bcb553dd28fc1f3f9c6a59c496d43675ad390be3133; init_boot eae1c35dc7ed625f78f31677a8a7f4162aabac49e59b7f7270e40761081b6b40; boot ddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39. Payload29289760/11segments, ADT8136, unchanged12MiB diagnostic RAM root at2024e0000. Explicit rd=du0/daliusbengine=1/daliusbroot=1 refuses RAM fallback. ADT audited36bit identityDMA and measured trim9/16/21/SW1 supplied.
+
+Fresh Android full physical stock partition sizes/SHA256, root/model/_b/completed passed; current manifest android_preflight_verified. No active trial yet. User now confirms available to swap OTG and requests start. Next authorized temporary paired trial, then immediate original recovery/full physical verification on fastboot return. Actual DMA NoOP/enumeration/MSC/root remain hardware-unverified. No GPT/userdata/Udisk writes.
+
+Historical implementation notes below are superseded by this candidate status.
 
 Android reconnected/dali/root/completed confirmed. Read-only exact8byte nvmem1d4/1d8 (mtk-devinfo0, correctefuseOFnode) gives HSRX_TERM9/HSTX_IMPN16/HSTX_IMPP21; current chip tag SWrevision1. Raw dumps stay ignored. USBparent boundmtu3 and gadget-mode unboundxhci have no actual IOMMU-group link; parent64GiB identity dma-ranges and native genericDMAsetup under audit. No writes/reboots/OTGchange this collection. Native xhci-mtk explicitly sets XHCI_SPURIOUS_SUCCESS;0115 adds exact short-TRB/slot/endpoint duplicate-success suppression, clears stale match on ring reuse. Native XHCI object compile PASS; exact actual0114+0115 source comparison PASS; fullCI pending. Candidate not enabled/flashed yet.
 
