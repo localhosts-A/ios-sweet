@@ -1,4 +1,10 @@
-## ACTIVE I2C5/SC8581 trial — original restoration PENDING (2026-10-21)
+## Current: I2C5 read succeeds; actual SC8585 ID85; originals verified (2026-10-21)
+
+Photo132222 with USBstickattached: handoff pins11007711 levelsf0e312ff mux2020202; firmwaretiming20/20 div4 io3 hs8000 start0 dma0. IDreadcompletedirq1 returned85; old SC8581 gate expected81 and correctly stopped beforeconfiguration, controller/clockrestoration logged. Memoryroot/BSD/PID1 heartbeat and90PMICsamplesnormal. NoUSBhost/5Vsourceenabled; adapterattachmentdoesnotalterfixedRd/Rd0a/CC10/power08/OTG60.
+
+**Fulloriginalpair restored+AndroidrootphysicalSHA256 VERIFIED**, manifestcp-i2c-39548280221originals_verified; noactivetrial/pendingrestore. ExactvendorSC8585file requiresID85 but driver.name=sc858x sameasSC8581; priorinferenceSC8581fromnamewaswrong. Common probed registers match; protectionfieldwidths/ADC differ, do notreuseSC8581writes. Patch0095 corrects85-onlyidentityandrepeatedstableID, retainsreadonlycommonstatus. Local2/2 actualarm64objectscompilePASS; exactbaselinepatchapplycheckpassed. Nextcachedfullbuild and source/kernel/imagechecks. Alloriginalbackupsremain; no userdata/UFS/GPTwrites.
+
+## Historical: I2C5 trial before verified restoration (2026-10-21)
 
 Fresh immediate Android dali/model/slot_b/completed/root/full original64+8MiB SHA256, host originals/candidates, fastboot identity/unlocked/sizes verified. CI39548280221 pair init_boot_b then boot_b writes OKAY/reboot OKAY. Authoritative ignored `shim/out-dali/cp-i2c-39548280221/trial-state.json` = trial_rebooted. Await user DALI I2C5 handoff/timing/SC8581identity/error/cleanup photo and manual fastboot. Optional dalicp1 onlyreads peripheral state; scoped I2C controller/clock writes, no chargepump/VBUS/host/storage. Hardware result unconfirmed.
 

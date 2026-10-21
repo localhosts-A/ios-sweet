@@ -1,0 +1,47 @@
+diff --git a/iokit/Kernel/arm/DaliI2C5.cpp b/iokit/Kernel/arm/DaliI2C5.cpp
+--- a/iokit/Kernel/arm/DaliI2C5.cpp
++++ b/iokit/Kernel/arm/DaliI2C5.cpp
+@@ -1,7 +1,7 @@
+ /* Dali I2C5 FIFO adoption, MT6991 register version2 / 32-bit accesses.
+  * References: MiCode device-modules e45c319, i2c-mt65xx.c,
+- * clk-mt6991{,-peri}.c, clk-mux.c, pinctrl-mt6991.c, sc858x_charger.c.
+- * dalicp=1 requests a single SC8581 probe, never charge-pump programming.
++ * clk-mt6991{,-peri}.c, clk-mux.c, pinctrl-mt6991.c, sc8585_charger.c.
++ * dalicp=1 requests a single SC8585 probe, never charge-pump programming.
+  * Preserve firmware timing, pinmux, parent selection and all protections.
+  */
+ #include <pexpert/arm64/board_config.h>
+@@ -146,16 +146,18 @@
+         }
+         for (unsigned i = 0; i < 6; ++i) { saved[i] = bus.read(savedOffsets[i]); }
+         configured = true;
+-        uint8_t id = 0, version = 0, control = 0, mode = 0, present = 0;
+-        if (!readByte(0x6e, &id) || id != 0x81) {
+-            kprintf("DALI CP: identity rejected id=%02x irq=%x\n", id, lastStatus); return;
++        uint8_t id = 0, repeatedID = 0, version = 0, control = 0, mode = 0, present = 0;
++        if (!readByte(0x6e, &id) || id != 0x85 ||
++            !readByte(0x6e, &repeatedID) || repeatedID != id) {
++            kprintf("DALI CP: identity rejected id=%02x repeat=%02x irq=%x\n", id, repeatedID, lastStatus); return;
+         }
+-        /* Only documented configuration/status registers, no fault/IRQ flags. */
++        /* SC8585 confirmed twice. Only version/control/mode/presence; no fault/IRQ
++         * flags, SC8581-only protection fields, ADC scaling or configuration writes. */
+         if (!readByte(0, &version) || !readByte(0x0b, &control) ||
+             !readByte(0x0e, &mode) || !readByte(0x10, &present)) {
+             kprintf("DALI CP: configuration read failed\n"); return;
+         }
+-        kprintf("DALI CP: SC8581 verified id=%02x ver=%02x ctrl=%02x mode=%02x present=%02x\n",
++        kprintf("DALI CP: SC8585 verified id=%02x ver=%02x ctrl=%02x mode=%02x present=%02x\n",
+             id, version, control, mode, present);
+         kprintf("DALI CP: peripheral read-only probe complete; VBUS unchanged\n");
+     }
+diff --git a/iokit/Kernel/arm/DaliI2C5.h b/iokit/Kernel/arm/DaliI2C5.h
+--- a/iokit/Kernel/arm/DaliI2C5.h
++++ b/iokit/Kernel/arm/DaliI2C5.h
+@@ -1,5 +1,5 @@
+ #ifndef DALI_I2C5_H
+ #define DALI_I2C5_H
+-/* One bounded SC8581 identity/configuration read. No peripheral writes. */
++/* One bounded SC8585 identity/configuration read. No peripheral writes. */
+ void dali_i2c5_probe(void);
+ #endif

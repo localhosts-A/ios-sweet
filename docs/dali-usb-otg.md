@@ -47,10 +47,10 @@ Type-C source policy, power routing and USB host/storage remain unfinished.
 
 ## Native charge-pump transport stage
 
-Patch0094 adds an optional `dalicp=1` probe to the existing `daliusb=1`
+Patches0094/0095 add an optional `dalicp=1` probe to the existing `daliusb=1`
 service. It requires the Dali-only `cp-i2c-reg` property to identify I2C5 at
 `0x120a0000/0x20000`. The stock SC858x driver is on I2C5 address `0x6e` and
-requires identity byte `0x81` from register `0x6e` (SC8581).
+requires identity byte `0x85` from register `0x6e` (SC8585).
 
 The transport checks retained SCL5/SDA5 GPIO176/177 mode1 and high input
 levels, adopts firmware timing/open-drain configuration only when idle,
@@ -70,9 +70,18 @@ not prove the electrical bus is idle. This is transport bring-up before
 implementing source power, not a functioning OTG host driver.
 
 Stock Android reports a 124.8MHz I2C5 parent. Its existing debugfs/pinctrl
-views confirm SCL5/SDA5 in mode1. The source path uses SC8581 reverse1:1 mode
+views confirm SCL5/SDA5 in mode1. The source path uses SC8585 reverse1:1 mode
 and manual ACDRV before MT6379 regulator enable, with the corresponding
 normal mode/regulator/ACDRV cleanup. These power changes remain future work.
+
+Photo132222 with the stick attached confirms a completed native ID read
+(`irq=1`, value `85`) and scoped controller/clock restoration. The initial
+probe expected SC8581 ID81 and stopped before further reads. Both vendor
+chip drivers publish the same Linux name `sc858x`, so that name alone
+cannot identify the silicon. Patch0095 checks SC8585 ID85 twice; unknown
+identities remain rejected. Its common status read still needs a new trial.
+SC8585 protection fields and IBUS ADC scale differ from SC8581; do not
+reuse the older chip's complete configuration.
 
 ## Hardware facts
 
@@ -131,7 +140,7 @@ All paths below are within
 - `drivers/phy/mediatek/phy-mtk-{mt6379,nxp}-eusb2-repeater.c`
 - `drivers/misc/mediatek/extcon/extcon-mtk-usb.c`
 - `drivers/power/supply/mt6379-charger.{c,h}`
-- `drivers/power/supply/sc858x_charger.c`
+- `drivers/power/supply/{sc858x_charger.c,sc8585_charger.c}`
 - `drivers/i2c/busses/i2c-mt65xx.c`
 - `drivers/clk/mediatek/{clk-mt6991.c,clk-mt6991-peri.c,clk-mux.c}`
 - `drivers/pinctrl/mediatek/pinctrl-mt6991.c`
