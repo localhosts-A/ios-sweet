@@ -216,7 +216,10 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: health rejected supply'
           grep -Fq 'startupStage = "pre-reset-health";' xnu/iokit/Kernel/arm/DaliXHCI.cpp
           grep -Fq 'startupStage = "post-reset-health";' xnu/iokit/Kernel/arm/DaliXHCI.cpp
-          grep -Fq 'uint32_t mask = resetPending ? 0x501U : 0xd01U;' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'uint32_t mask = resetPending ? 1U : 0xd01U;' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'uint32_t gate = c->ao->read(0);' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq '!(gate & 0x13U)' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: health rejected AO'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: stopped/reset; DMA ownership returned'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI MSC: ready blocks='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI ROOT: selected read-only du0'

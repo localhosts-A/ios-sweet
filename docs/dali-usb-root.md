@@ -83,14 +83,18 @@ wait failures and DMA allocation/mapping rejection. It preserves existing
 hardware guards; this diagnostic change does not establish a fix.
 
 The next diagnostic boot localized rejection to the health callback while
-waiting for controller reset, before DMA publication. Patch0117 separates
-reset-ready status from supply health: full readiness is required before
-HCRST and again after HCRST/CNR clear, before DMA allocation. Only during
-that bounded reset wait may xHCI/U2 MAC reset-ready bits be low; PLL, REF and
-SYS125 status, source/fault/stop checks remain required. Rejection now logs
-the precise clock/status, PMIF register failure or supply values. The photo
-does not establish which old callback subcondition failed, and the change
-still needs hardware verification.
+waiting for controller reset, before DMA publication. Patch0117 logged the
+precise IPPC status: `STS1=0x210f`, failing mask `0x501` because bit10 was low.
+That bit is SYS125_RST_B, also a reset-deassertion indication. Treating it as
+an invariant clock condition during HCRST was incorrect.
+
+Patch0118 excludes all REF/SYS125/xHCI/U2 reset-ready indications only during
+the bounded HCRST/CNR wait. PLL stability, no IP sleep, stop, PMIF and supply
+fault checks remain required. Independently mapped always-on domain, bus
+protection, VLP/top clock gates/fences and USB AO gates are rechecked before
+each engine poll/transfer. Full reset readiness is required before HCRST
+and again after CNR clears, before DMA allocation. The correction still
+needs hardware verification; DMA No-op and USB storage remain unverified.
 
 ## Primary references
 

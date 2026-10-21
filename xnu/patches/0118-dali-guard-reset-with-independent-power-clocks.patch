@@ -1,0 +1,65 @@
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -505,10 +505,19 @@
+ /* DMA must stop/reset before releasing PHY and platform clocks. */
+ bool integratedStorage(WriteMapping &ip, unsigned op, bool rootMode) {
+     if (!hostDMAValidated) { u2Log("DALI XHCI: DMA policy unverified; engine untouched\n"); return true; }
+-    struct Cookie { WriteMapping *ip; WriteMapping *controller; unsigned op; };
++    struct Cookie {
++        WriteMapping *ip; WriteMapping *controller;
++        ReadMapping *spm; ReadMapping *bus; ReadMapping *vlp; ReadMapping *top; ReadMapping *ao;
++        unsigned op;
++    };
+     WriteMapping registers;
+-    if (!registers.open(0x16700000, 0x1000)) { return true; }
+-    Cookie cookie{&ip, &registers, op};
++    ReadMapping spm, bus, vlp, top, ao;
++    if (!registers.open(0x16700000, 0x1000) || !spm.open(0x1c004000, 0x1000) ||
++        !bus.open(0x1c00d000, 0x1000) || !vlp.open(0x1c016000, 0x1000) ||
++        !top.open(0x10000000, 0x800) || !ao.open(0x16790000, 0x100)) {
++        u2Log("DALI XHCI: independent AO health mappings unavailable; engine untouched\n"); return true;
++    }
++    Cookie cookie{&ip, &registers, &spm, &bus, &vlp, &top, &ao, op};
+     DaliXHCIOps callbacks{};
+     callbacks.cookie = &cookie;
+     callbacks.dmaAddressBits = hostDMAAddressBits;
+@@ -519,14 +528,33 @@
+         if (__atomic_load_n(&hostStopRequested, __ATOMIC_ACQUIRE)) {
+             u2Log("DALI XHCI: health rejected stop requested reset=%u\n", resetPending); return false;
+         }
++        /* These always-on power/bus/gate indications are independent of
++         * the xHCI's own reset-deasserted status. Recheck throughout reset
++         * and normal transfers, without programming power or gate controls.
++         */
++        uint32_t dp = c->spm->read(0xe18), p0 = c->spm->read(0xe1c);
++        uint32_t protect = c->bus->read(0xd8), ack = c->bus->read(0x208);
++        uint32_t vcfg = c->vlp->read(0x90), vfence = c->vlp->read(0x3a0);
++        uint32_t tcfg = c->top->read(0xb0), tfence = c->top->read(0x274);
++        uint32_t gate = c->ao->read(0);
++        bool domains = domainReady(dp, false) && domainReady(p0, true);
++        bool gates = vcfg != ~0U && vfence != ~0U && tcfg != ~0U && tfence != ~0U &&
++            gate != ~0U && !(vcfg & 0x808000U) && (vfence & 0x60000000U) == 0x60000000U &&
++            !(tcfg & 0x80000000U) && (tfence & 0x100000U) && !(gate & 0x13U);
++        bool busReady = protect != ~0U && ack != ~0U && !((protect | ack) & 0xc0U);
++        if (!domains || !gates || !busReady) {
++            u2Log("DALI XHCI: health rejected AO reset=%u domains=%u bus=%u gates=%u dp=%08x p0=%08x usb=%08x\n",
++                resetPending, domains, busReady, gates, dp, p0, gate); return false;
++        }
+         uint32_t s1 = c->ip->read(0x10), s2 = c->ip->read(0x14);
+-        /* IPPC bit11 is XHCI_RST_B_STS, STS2 bit0 is U2 MAC reset-B.
+-         * They are readiness indications, not supply-clock invariants while
+-         * software itself asserts HCRST. PLL/REF/SYS125 stay required. The
+-         * full readiness mask is required again before allocating DMA.
++        /* STS1 bits8/10/11 are REF/SYS125/XHCI_RST_B_STS, not invariant
++         * clocks during HCRST. Photo003640 proves SYS125_RST_B drops too.
++         * Require PLL stable and independent AO health during reset; all
++         * reset-ready bits are required before reset and before DMA.
+          */
+-        uint32_t mask = resetPending ? 0x501U : 0xd01U;
+-        if (s1 == ~0U || s2 == ~0U || (s1 & mask) != mask || (!resetPending && !(s2 & 1))) {
++        uint32_t mask = resetPending ? 1U : 0xd01U;
++        if (s1 == ~0U || s2 == ~0U || (s1 & (1U << 30)) ||
++            (s1 & mask) != mask || (!resetPending && !(s2 & 1))) {
+             u2Log("DALI XHCI: health rejected clocks reset=%u sts=%08x/%08x mask=%08x\n",
+                 resetPending, s1, s2, mask); return false;
+         }
