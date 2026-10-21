@@ -163,6 +163,13 @@ jobs:
           grep -Fq 'update(0x155, 0x1f, savedReport)' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI ADC: PDVBUS='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI ADC: failed channel='
+          grep -Fq 'dali_usb_host_observe();' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
+          grep -Fq 'PE_parse_boot_argn("daliusbhost"' xnu/iokit/Kernel/arm/DaliUSBPMIC.cpp
+          grep -Fq 'domainReady(dp, false) && domainReady(p0, true)' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'phy.read(0x300), phy.read(0x318), phy.read(0x368), phy.read(0x36c)' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: PWR dp='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: xHCI AC64='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: USB reads skipped domains='
           grep -Fq 'No reset, SCL pulses, repeated attempt or DMA programming.' xnu/iokit/Kernel/arm/DaliI2C5.cpp
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI CP: SC8585 verified'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI I2C5: scoped controller/clock state restored'

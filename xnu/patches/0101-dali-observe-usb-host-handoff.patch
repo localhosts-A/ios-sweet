@@ -1,0 +1,250 @@
+diff --git a/iokit/Kernel/arm/DaliUSBPower.cpp b/iokit/Kernel/arm/DaliUSBPower.cpp
+--- a/iokit/Kernel/arm/DaliUSBPower.cpp
++++ b/iokit/Kernel/arm/DaliUSBPower.cpp
+@@ -6,6 +6,7 @@
+ #include <pexpert/arm64/board_config.h>
+ #if defined(SWEET)
+ #include "DaliUSBPower.h"
++#include "DaliUSBHost.h"
+ #include "DaliPMIF.h"
+ #include "DaliI2C5.h"
+ #include <machine/machine_routines.h>
+@@ -401,6 +402,7 @@
+         if ((power & 4) && mv >= 4400 && mv <= 5500) {
+             state = Powered; stateTicks = 0; stateStartedMs = physicalMs();
+             kprintf("DALI OTG: VBUS valid %umV; connector source confirmed, USB host not started\n", mv);
++            if (hostObserve) { dali_usb_host_observe(); }
+         } else if (now - stateStartedMs >= 1000) {
+             finishLocked("VBUS rise timeout"); return false;
+         }
+@@ -412,11 +414,12 @@
+     return true;
+ }
+ 
+-bool DaliUSBPower::init()
++bool DaliUSBPower::init(bool observeHost)
+ {
+     uint64_t frequency;
+     __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(frequency));
+     if (frequency != 13000000) { return false; }
++    hostObserve = observeHost;
+     lock = IOLockAlloc();
+     return lock != nullptr;
+ }
+diff --git a/iokit/Kernel/arm/DaliUSBPower.h b/iokit/Kernel/arm/DaliUSBPower.h
+--- a/iokit/Kernel/arm/DaliUSBPower.h
++++ b/iokit/Kernel/arm/DaliUSBPower.h
+@@ -16,6 +16,7 @@
+     uint8_t savedSys1 = 0, savedSys2 = 0;
+     bool tcpcTouched = false;
+     bool adcFault = false;
++    bool hostObserve = false;
+     unsigned adcReports = 0, previousADCmv = 0;
+     uint64_t startedMs = 0, stateStartedMs = 0;
+     bool roleTouched = false, chargerTouched = false, cpAttempted = false;
+@@ -31,7 +32,7 @@
+     void finishLocked(const char *reason);
+     bool tickLocked();
+ public:
+-    bool init();
++    bool init(bool observeHost = false);
+     bool tick();
+     void finish(const char *reason);
+     void release();
+diff --git a/iokit/Kernel/arm/DaliUSBPMIC.cpp b/iokit/Kernel/arm/DaliUSBPMIC.cpp
+--- a/iokit/Kernel/arm/DaliUSBPMIC.cpp
++++ b/iokit/Kernel/arm/DaliUSBPMIC.cpp
+@@ -117,7 +117,21 @@
+             memcpy(config, sourceData->getBytesNoCopy(), sizeof(config));
+             sourceRequested = config[0] == 5000000 && config[1] == 500000 && config[2] == 0x8585;
+         }
+-        if (!sourceRequested || !source.init()) { return false; }
++        int host = 0;
++        PE_parse_boot_argn("daliusbhost", &host, sizeof(host));
++        bool observeHost = host == 1;
++        if (host != 0 && !observeHost) { return false; }
++        if (observeHost) {
++            /* Exact live Dali ranges; no arbitrary physical-address boot arg. */
++            OSData *hostData = OSDynamicCast(OSData, provider->getProperty("host-observe-reg"));
++            uint64_t hostRanges[6] = {};
++            if (!hostData || hostData->getLength() != sizeof(hostRanges)) { return false; }
++            memcpy(hostRanges, hostData->getBytesNoCopy(), sizeof(hostRanges));
++            if (hostRanges[0] != 0x16700000 || hostRanges[1] != 0x1000 ||
++                hostRanges[2] != 0x16703e00 || hostRanges[3] != 0x100 ||
++                hostRanges[4] != 0x16730000 || hostRanges[5] != 0x400) { return false; }
++        }
++        if (!sourceRequested || !source.init(observeHost)) { return false; }
+     } else if (otg != 0) { return false; }
+     workLoop = IOWorkLoop::workLoop();
+     timer = IOTimerEventSource::timerEventSource(this, timerAction);
+diff --git a/iokit/Kernel/arm/DaliUSBHost.h b/iokit/Kernel/arm/DaliUSBHost.h
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/DaliUSBHost.h
+@@ -0,0 +1,8 @@
++#ifndef DALI_USB_HOST_H
++#define DALI_USB_HOST_H
++/* Read-only handoff observation; caller holds the DaliUSBPower lock and has
++ * just confirmed a debounced source attachment and a fresh 4.4..5.5V ADC.
++ * No controller/PHY/domain/clock/IRQ/DMA writes are performed.
++ */
++void dali_usb_host_observe();
++#endif
+diff --git a/iokit/Kernel/arm/DaliUSBHost.cpp b/iokit/Kernel/arm/DaliUSBHost.cpp
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -0,0 +1,145 @@
++/* Dali USB host handoff observation, not an xHCI driver.
++ * Primary source: MiCode device modules e45c319, live Dali FDT,
++ * mtk-scpsys-mt6991-spm.c, mtk-scpsys.c, clk-mt6991.c,
++ * mtu3{_plat,_host,_hw_regs}.c/h, phy-mtk-xsphy.c.
++ * Standard xHCI capability/operational register layout: Linux v6.6 xhci.h.
++ * Read AO power/clock/bus state before touching the switchable USB region.
++ * Never enable a domain, clock, PHY, port, interrupt or DMA engine here.
++ */
++#include <pexpert/arm64/board_config.h>
++#if defined(SWEET)
++#include "DaliUSBHost.h"
++#include <IOKit/IOLib.h>
++#include <IOKit/IOMemoryDescriptor.h>
++#include <machine/machine_routines.h>
++
++namespace {
++class ReadMapping {
++    IOMemoryDescriptor *memory = nullptr;
++    IOMemoryMap *map = nullptr;
++    vm_offset_t io = 0;
++    uint32_t length = 0;
++public:
++    bool open(uint64_t address, uint32_t size) {
++        length = size;
++        memory = IOMemoryDescriptor::withPhysicalAddress(address, size, kIODirectionIn);
++        map = memory ? memory->map(kIOMapInhibitCache) : nullptr;
++        if (map) { io = map->getVirtualAddress(); }
++        return io != 0;
++    }
++    uint32_t read(uint32_t offset) const {
++        if (!io || (offset & 3) || length < 4 || offset > length - 4) { return ~0U; }
++        uint32_t value = *(volatile const uint32_t *)(io + offset);
++        __asm__ volatile("dmb oshld" ::: "memory");
++        return value;
++    }
++    ~ReadMapping() { OSSafeReleaseNULL(map); OSSafeReleaseNULL(memory); }
++};
++
++/* Both power ACKs and de-isolated, released reset, ungated domain clock.
++ * SSUSB P0 additionally has SRAM PDN/ACK bits8/12, both must be clear.
++ */
++bool domainReady(uint32_t value, bool sram) {
++    uint32_t mask = 0xc000001fU | (sram ? 0x1100U : 0U);
++    return (value & mask) == 0xc000000dU;
++}
++}
++
++void dali_usb_host_observe()
++{
++    if (!ml_get_interrupts_enabled() || ml_at_interrupt_context()) { return; }
++    kprintf("DALI HOST: read-only handoff begin; no PHY/controller/DMA writes\n");
++    ReadMapping spm, bus, vlp, top;
++    if (!spm.open(0x1c004000, 0x1000) || !bus.open(0x1c00d000, 0x1000) ||
++        !vlp.open(0x1c016000, 0x1000) || !top.open(0x10000000, 0x800)) {
++        kprintf("DALI HOST: AO mapping failed; USB region untouched\n"); return;
++    }
++    uint32_t dp = spm.read(0xe18), p0 = spm.read(0xe1c);
++    uint32_t protect = bus.read(0xd8), protectAck = bus.read(0x208);
++    uint32_t vcfg = vlp.read(0x90), vfence = vlp.read(0x3a0);
++    uint32_t tcfg = top.read(0xb0), tfence = top.read(0x274);
++    kprintf("DALI HOST: PWR dp=%08x p0=%08x protect=%08x ack=%08x\n",
++        dp, p0, protect, protectAck);
++    kprintf("DALI HOST: CLK vlp=%08x fence=%08x top=%08x fence=%08x\n",
++        vcfg, vfence, tcfg, tfence);
++    bool domains = domainReady(dp, false) && domainReady(p0, true);
++    bool unprotected = !((protect | protectAck) & 0xc0U);
++    bool clocks = !(vcfg & 0x808000U) && (vfence & 0x60000000U) == 0x60000000U &&
++        !(tcfg & 0x80000000U) && (tfence & 0x100000U);
++    if (!domains || !unprotected || !clocks) {
++        kprintf("DALI HOST: USB reads skipped domains=%u bus=%u clocks=%u\n",
++            domains, unprotected, clocks);
++        return;
++    }
++    ReadMapping ao;
++    if (!ao.open(0x16790000, 0x100)) {
++        kprintf("DALI HOST: USB AO mapping failed\n"); return;
++    }
++    uint32_t gate = ao.read(0);
++    kprintf("DALI HOST: USB AO gate=%08x\n", gate);
++    if (gate & 0x13U) {
++        kprintf("DALI HOST: MAC/PHY reads skipped gated USB0\n"); return;
++    }
++    ReadMapping ippc;
++    if (!ippc.open(0x16703e00, 0x100)) {
++        kprintf("DALI HOST: IPPC mapping failed\n"); return;
++    }
++    uint32_t ctrl0 = ippc.read(0), ctrl1 = ippc.read(4), ctrl2 = ippc.read(8);
++    uint32_t sts1 = ippc.read(0x10), sts2 = ippc.read(0x14);
++    uint32_t cap = ippc.read(0x24), hw = ippc.read(0xa0), sub = ippc.read(0xa4);
++    kprintf("DALI HOST: IPPC ctrl=%08x/%08x/%08x sts=%08x/%08x\n",
++        ctrl0, ctrl1, ctrl2, sts1, sts2);
++    kprintf("DALI HOST: IPPC cap=%08x hw=%08x sub=%08x U2=%08x U3=%08x\n",
++        cap, hw, sub, ippc.read(0x50), ippc.read(0x30));
++    kprintf("DALI HOST: SPM request=%08x ack=%08x\n", ippc.read(0xe0), ippc.read(0xe8));
++    /* Same hardware IDs and port counts as the stock Android host capture. */
++    if (hw != 0x20180724 || sub != 0x10090000 || cap != 0x101 || (ctrl0 & 1)) {
++        kprintf("DALI HOST: IPPC identity/reset rejected; deeper reads skipped\n"); return;
++    }
++    /* IPPC is accessible before the MAC clocks finish coming out of reset. */
++    if ((sts1 & 0x501U) != 0x501U || !(sts2 & 1)) {
++        kprintf("DALI HOST: PHY/xHCI reads skipped MAC clocks not ready\n"); return;
++    }
++    ReadMapping phy;
++    if (phy.open(0x16730000, 0x400)) {
++        kprintf("DALI HOST: PHY acr0=%08x acr6=%08x dtm0=%08x dtm1=%08x\n",
++            phy.read(0x300), phy.read(0x318), phy.read(0x368), phy.read(0x36c));
++    } else { kprintf("DALI HOST: PHY mapping failed\n"); }
++    if ((ctrl1 & 1) || !(sts1 & 0x800)) {
++        kprintf("DALI HOST: xHCI reads skipped host powered down/reset\n"); return;
++    }
++    ReadMapping xhci;
++    if (!xhci.open(0x16700000, 0x1000)) {
++        kprintf("DALI HOST: xHCI mapping failed\n"); return;
++    }
++    uint32_t version = xhci.read(0), hcs1 = xhci.read(4), hcs2 = xhci.read(8);
++    uint32_t hcc1 = xhci.read(0x10), doorbell = xhci.read(0x14), runtime = xhci.read(0x18);
++    unsigned op = version & 0xff, ports = hcs1 >> 24;
++    unsigned slots = hcs1 & 0xff, intrs = (hcs1 >> 8) & 0x7ff;
++    unsigned rev = version >> 16;
++    kprintf("DALI HOST: xHCI cap=%08x hcs1=%08x hcs2=%08x hcc1=%08x\n",
++        version, hcs1, hcs2, hcc1);
++    /* Validate all device-derived offsets before the first operational read. */
++    if (rev < 0x100 || rev > 0x120 || op < 0x20 || op > 0x80 || (op & 3) ||
++        !ports || ports > 32 || !slots || !intrs || intrs > 1024 ||
++        op + 0x400U + ports * 0x10U > 0x1000U ||
++        (doorbell & 3) || doorbell < 0x20 || doorbell > 0xffc ||
++        (runtime & 0x1f) || runtime < 0x20 || runtime > 0xfe0) {
++        kprintf("DALI HOST: xHCI capability bounds rejected\n"); return;
++    }
++    kprintf("DALI HOST: xHCI AC64=%u context=%u slots=%u ports=%u db=%x rt=%x\n",
++        hcc1 & 1, (hcc1 & 4) ? 64U : 32U, slots, ports, doorbell, runtime);
++    uint32_t cmd = xhci.read(op), sts = xhci.read(op + 4);
++    kprintf("DALI HOST: xHCI cmd=%08x sts=%08x pages=%08x config=%08x\n",
++        cmd, sts, xhci.read(op + 8), xhci.read(op + 0x38));
++    if (cmd & 1 || !(sts & 1)) {
++        kprintf("DALI HOST: inherited xHCI running; untouched, not adopted\n");
++    }
++    for (unsigned i = 0; i < ports; ++i) {
++        uint32_t port = xhci.read(op + 0x400 + i * 0x10);
++        kprintf("DALI HOST: port%u sc=%08x connected=%u enabled=%u speed=%u\n",
++            i + 1, port, port & 1, (port >> 1) & 1, (port >> 10) & 0xf);
++    }
++    kprintf("DALI HOST: read-only handoff complete; enumeration not started\n");
++}
++#endif
+diff --git a/iokit/conf/files.arm64 b/iokit/conf/files.arm64
+--- a/iokit/conf/files.arm64
++++ b/iokit/conf/files.arm64
+@@ -26,3 +26,4 @@
+ iokit/Kernel/arm/DaliUSBPMIC.cpp                                 optional iokitcpp
+ iokit/Kernel/arm/DaliI2C5.cpp                                    optional iokitcpp
+ iokit/Kernel/arm/DaliUSBPower.cpp                                optional iokitcpp
++iokit/Kernel/arm/DaliUSBHost.cpp                                 optional iokitcpp

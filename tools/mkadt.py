@@ -276,6 +276,8 @@ def build(seed=None, qemu=False, highmem=False, dali=False):
         ('cp-i2c-reg', u64(0x120a0000, 0x20000)),
         # 5V, USB-default500mA, observed SC8585. No external boost GPIO.
         ('otg-source-config', u32(5000000, 500000, 0x8585)),
+        # Read-only host/PHY handoff, separately enabled by daliusbhost=1.
+        ('host-observe-reg', u64(0x16700000, 0x1000, 0x16703e00, 0x100, 0x16730000, 0x400)),
     ])] if dali else []
 
     dali_watchdog = [node('dali-watchdog', [
