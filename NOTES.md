@@ -6,6 +6,8 @@ Recovered full original init_boot_b then boot_b immediately; Android completed/r
 
 Patch0117 implements reset-pending state only across bounded HCRST/CNR waits; full health required before reset and after it before DMA. During reset IPPCXHCIRST_B/U2MACreset-B indications may assert, but PLL/REF/SYS125(0x501), stop, PMIF and exact source/fault protections stay mandatory. Callback logs precise stop/clockvalues/mask/PMIFreg/status/power/OTG/fault on rejection; no guessed cause asserted. Actual ARM64 Host+XHCI2/2 compile PASS; exact three-source patch replay/full CI pending. No new hardware trial.
 
+Patch0117 committed/pushed13cc485; fullCI39634381746 running. Exact actualCI0116+0117 replay matches all3modified native sources; all85workflow source assertions PASS. Static nextpair will be usb-reset-health-39634381746. No new trial/pending recovery; phone originals_verified. Actual guard subcondition and hardware result remain unproven.
+
 ## Historical startup diagnostic trial (recovered)
 
 User requests continue after diagnostic candidate ready; Android connected. `shim/out-dali/usb-startup-39631757732/device_pair.py trial` completed: immediate Android root/model/_b/completed/full physical original SHA256/size PASS; fastboot product/unlocked/slot/sizes and host originals/candidates hashes PASS. Temporary init_boot_b then boot_b flashes OKAY, reboot requested. Current authoritative manifest is trial_rebooted; CURRENT ORIGINAL RESTORATION PENDING. All earlier originals_verified refer to previous trials only. Log research/dali-usb-root/ci-artifacts/run39631757732-trial.log. User told redloader earlyswap OTG/Udisk, photograph ext/initcap/startfailedstage or running/MSC, observe~1min, return PC/manualfastboot. No new hardware result yet.
