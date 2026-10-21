@@ -785,6 +785,33 @@ static uint64_t loader_elapsed_ms(uint64_t started)
 	return frequency ? (loader_ticks() - started) * 1000 / frequency : 0;
 }
 
+static uint64_t dali_wdt_started, dali_wdt_last, dali_wdt_hz;
+
+static void dali_watchdog_poll(void)
+{
+	if (!dali_wdt_hz)
+		return;
+	uint64_t now = loader_ticks();
+	if (now - dali_wdt_started >= dali_wdt_hz * 120 ||
+	    (dali_wdt_last && now - dali_wdt_last < dali_wdt_hz) ||
+	    !(*(const volatile uint32_t *)WDT_BASE & 1u))
+		return;
+	/* Vendor mtk_wdt_ping: reload only; preserve all mode/length/status. */
+	*(volatile uint32_t *)(WDT_BASE + 0x08) = 0x1971;
+	__asm__ volatile("dsb sy" ::: "memory");
+	dali_wdt_last = now;
+}
+
+static void dali_watchdog_start(void)
+{
+	if (!(*(const volatile uint32_t *)WDT_BASE & 1u))
+		return;
+	dali_wdt_started = loader_ticks();
+	__asm__ volatile("mrs %0, cntfrq_el0" : "=r"(dali_wdt_hz));
+	dali_watchdog_poll();
+	con_str("WDT_FEED", "firmware enabled; interval 1s; boot lease 120s");
+}
+
 static void dali_watchdog_snapshot(const char *when)
 {
 	/* Read-only: mode/length per vendor mtk_wdt.c and live /watchdog@1c010000. */
@@ -812,6 +839,7 @@ static const char *decode_initboot(uint64_t start, uint64_t end, uint64_t conten
 	cur += 2 + 8 + 1; /* FLG, BD, content size, header checksum. */
 	uint64_t total_out = 0;
 	for (;;) {
+		dali_watchdog_poll();
 		uint32_t block = read_le32(cur);
 		cur += 4;
 		if (!block)
@@ -858,6 +886,7 @@ static const char *loader_boot_dali(uintptr_t dtb)
 	uint64_t rd_start, rd_end, ramdisk_end, frame_start, frame_end, content_size;
 	PROBE_STAGE(0);
 	dali_watchdog_snapshot("loader entry");
+	dali_watchdog_start();
 	if (!fdt_chosen_u64(dtb, "linux,initrd-start", &rd_start) ||
 	    !fdt_chosen_u64(dtb, "linux,initrd-end", &rd_end))
 		return "no initrd in /chosen";
@@ -895,6 +924,7 @@ static const char *loader_boot_dali(uintptr_t dtb)
 	if (err)
 		return err;
 	PROBE_STAGE(8);
+	dali_watchdog_poll();
 	dali_watchdog_snapshot("payload copied");
 	con_hex2("PAYLOAD", "bytes=", cpio.payload.size, "segs=", cpio.payload.p->nsegs);
 	con_hex("PHYS", cpio.payload.p->phys_base);

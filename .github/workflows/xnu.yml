@@ -139,6 +139,11 @@ jobs:
           grep -Fq 'IOFindBSDRoot entry; IOBSD wait begin' xnu/iokit/bsddev/IOKitBSDInit.cpp
           grep -Fq 'skmem_region_init returned' xnu/bsd/skywalk/mem/skmem.c
           python3 ../tools/inspect-boot-counter.py fakeroot/System/Library/Kernels/kernel.development.sweet
+          grep -Fq '#define DALI_WDT_BOOT_SECONDS 120u' xnu/pexpert/arm/pe_dali_watchdog.c
+          grep -Fq 'dali_wdt[2] = DALI_WDT_RELOAD;' xnu/pexpert/arm/pe_dali_watchdog.c
+          grep -Fq 'dali_watchdog_init();' xnu/pexpert/arm/pe_init.c
+          grep -Fq 'dali_watchdog_poll();' xnu/osfmk/arm/rtclock.c
+          nm fakeroot/System/Library/Kernels/kernel.development.sweet | grep ' _dali_watchdog_poll$'
 
       - name: Package build tree for local compiles
         if: always()

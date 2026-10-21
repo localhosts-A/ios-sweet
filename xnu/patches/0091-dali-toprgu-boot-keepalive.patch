@@ -1,0 +1,195 @@
+diff --git a/osfmk/arm64/Makefile b/osfmk/arm64/Makefile
+--- a/osfmk/arm64/Makefile
++++ b/osfmk/arm64/Makefile
+@@ -41,6 +41,7 @@
+ 	perfmon_arm64_regs.h \
+ 	proc_reg.h \
+ 	sweet_early.h \
++	dali_watchdog.h \
+ 	asm.h \
+ 	tlb.h \
+ 	pal_hibernate.h
+diff --git a/pexpert/conf/files.arm64 b/pexpert/conf/files.arm64
+--- a/pexpert/conf/files.arm64
++++ b/pexpert/conf/files.arm64
+@@ -3,5 +3,6 @@
+ pexpert/arm/pe_fiq.c                   standard
+ pexpert/arm/pe_identify_machine.c      standard
+ pexpert/arm/pe_init.c                  standard
++pexpert/arm/pe_dali_watchdog.c         standard
+ pexpert/arm/pe_kprintf.c               standard
+ pexpert/arm/pe_serial.c                standard
+diff --git a/pexpert/arm/pe_init.c b/pexpert/arm/pe_init.c
+--- a/pexpert/arm/pe_init.c
++++ b/pexpert/arm/pe_init.c
+@@ -21,6 +21,7 @@
+ #include <os/overflow.h>
+ 
+ #include <pexpert/arm64/board_config.h>
++#include <arm64/dali_watchdog.h>
+ 
+ 
+ /* extern references */
+@@ -434,6 +435,7 @@
+ 		SecureDTInit(PE_state.deviceTreeHead, PE_state.deviceTreeSize);
+ 		pe_identify_machine(boot_args_ptr);
+ 	} else {
++		dali_watchdog_init();
+ 		pe_arm_init_interrupts(args);
+ 		pe_arm_init_debug(args);
+ 	}
+diff --git a/osfmk/kern/startup.c b/osfmk/kern/startup.c
+--- a/osfmk/kern/startup.c
++++ b/osfmk/kern/startup.c
+@@ -91,6 +91,11 @@
+ #include <kern/sfi.h>
+ #endif
+ #include <kern/startup.h>
++#if defined(__arm64__)
++#include <arm64/dali_watchdog.h>
++#else
++#define dali_watchdog_poll() ((void)0)
++#endif
+ #include <kern/task.h>
+ #include <kern/thread.h>
+ #include <kern/timer.h>
+@@ -235,6 +240,7 @@
+ static inline void
+ kernel_bootstrap_log(const char *message)
+ {
++	dali_watchdog_poll();
+ 	if ((startup_debug & STARTUP_DEBUG_VERBOSE) &&
+ 	    startup_phase >= STARTUP_SUB_KPRINTF) {
+ #if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
+@@ -249,6 +255,7 @@
+ static inline void
+ kernel_bootstrap_thread_log(const char *message)
+ {
++	dali_watchdog_poll();
+ 	if ((startup_debug & STARTUP_DEBUG_VERBOSE) &&
+ 	    startup_phase >= STARTUP_SUB_KPRINTF) {
+ #if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
+@@ -428,6 +435,7 @@
+ 	assert(startup_phase < upto);
+ 
+ 	while (cur < startup_entries_end && cur->subsystem <= upto) {
++		dali_watchdog_poll();
+ #if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
+ 		/* A command-mode panel refreshes synchronously on every log line. */
+ 		if ((startup_debug & STARTUP_DEBUG_VERBOSE) &&
+diff --git a/osfmk/arm/rtclock.c b/osfmk/arm/rtclock.c
+--- a/osfmk/arm/rtclock.c
++++ b/osfmk/arm/rtclock.c
+@@ -38,6 +38,11 @@
+  */
+ 
+ #include <mach/mach_types.h>
++#if defined(__arm64__)
++#include <arm64/dali_watchdog.h>
++#else
++#define dali_watchdog_poll() ((void)0)
++#endif
+ 
+ #include <kern/clock.h>
+ #include <kern/thread.h>
+@@ -328,6 +333,7 @@
+ 	unsigned int             user_mode;
+ 	uintptr_t                pc;
+ 
++	dali_watchdog_poll();
+ 	cdp = getCpuDatap();
+ 
+ 	cdp->cpu_stat.timer_cnt++;
+diff --git a/osfmk/arm64/dali_watchdog.h b/osfmk/arm64/dali_watchdog.h
+new file mode 100644
+--- /dev/null
++++ b/osfmk/arm64/dali_watchdog.h
+@@ -0,0 +1,12 @@
++/* Bounded native TOPRGU keepalive during Dali bring-up. */
++#ifndef _ARM64_DALI_WATCHDOG_H_
++#define _ARM64_DALI_WATCHDOG_H_
++#include <pexpert/arm64/board_config.h>
++#if defined(SWEET)
++void dali_watchdog_init(void);
++void dali_watchdog_poll(void);
++#else
++static inline void dali_watchdog_init(void) {}
++static inline void dali_watchdog_poll(void) {}
++#endif
++#endif
+diff --git a/pexpert/arm/pe_dali_watchdog.c b/pexpert/arm/pe_dali_watchdog.c
+new file mode 100644
+--- /dev/null
++++ b/pexpert/arm/pe_dali_watchdog.c
+@@ -0,0 +1,71 @@
++/* Native MT6991 TOPRGU boot keepalive; vendor mtk_wdt.c reload protocol.
++ * Preserve mode/length/status. Only service a firmware-enabled watchdog.
++ * The diagnostic lease is finite: this does not replace watchdogd policy.
++ */
++#include <arm64/dali_watchdog.h>
++#if defined(SWEET)
++#include <arm/machine_routines.h>
++#include <pexpert/pexpert.h>
++#include <pexpert/device_tree.h>
++#include <stdint.h>
++
++#define DALI_WDT_PA 0x1c010000ULL
++#define DALI_WDT_SIZE 0x1000ULL
++#define DALI_WDT_RELOAD 0x1971u
++#define DALI_WDT_BOOT_SECONDS 120u
++static volatile uint32_t *dali_wdt;
++static uint64_t dali_wdt_hz, dali_wdt_started;
++static volatile uint64_t dali_wdt_last;
++
++void
++dali_watchdog_poll(void)
++{
++    if (dali_wdt == NULL || dali_wdt_hz == 0) {
++        return;
++    }
++    uint64_t cpu, now;
++    __asm__ volatile("mrs %0, mpidr_el1" : "=r"(cpu));
++    if (cpu & 0xff00ffffffULL) { /* validated Dali boot CPU MPIDR 0 only */
++        return;
++    }
++    __asm__ volatile("mrs %0, cntpct_el0" : "=r"(now));
++    if (now - dali_wdt_started >= dali_wdt_hz * DALI_WDT_BOOT_SECONDS ||
++        (dali_wdt_last != 0 && now - dali_wdt_last < dali_wdt_hz)) {
++        return;
++    }
++    if (!(dali_wdt[0] & 1u)) { /* never arm a disabled watchdog */
++        return;
++    }
++    dali_wdt[2] = DALI_WDT_RELOAD; /* sole MMIO write: offset 0x08 */
++    __asm__ volatile("dsb sy" ::: "memory");
++    dali_wdt_last = now;
++}
++
++void
++dali_watchdog_init(void)
++{
++    DTEntry entry;
++    const uint64_t *reg;
++    const char *compatible;
++    unsigned int size;
++    if (dali_wdt != NULL ||
++        SecureDTFindEntry("name", "dali-watchdog", &entry) != kSuccess ||
++        SecureDTGetProperty(entry, "compatible", (const void **)&compatible, &size) != kSuccess ||
++        size < sizeof("mediatek,mt6991-wdt") ||
++        __builtin_memcmp(compatible, "mediatek,mt6991-wdt", sizeof("mediatek,mt6991-wdt")) ||
++        SecureDTGetProperty(entry, "reg", (const void **)&reg, &size) != kSuccess ||
++        size != 2 * sizeof(uint64_t) || reg[0] != DALI_WDT_PA || reg[1] != DALI_WDT_SIZE) {
++        return;
++    }
++    dali_wdt = (volatile uint32_t *)ml_io_map(reg[0], reg[1]);
++    if (dali_wdt == NULL) {
++        kprintf("DALI WDT: TOPRGU mapping failed\n");
++        return;
++    }
++    __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(dali_wdt_hz));
++    __asm__ volatile("mrs %0, cntpct_el0" : "=r"(dali_wdt_started));
++    dali_watchdog_poll();
++    kprintf("DALI WDT: mode=0x%x length=0x%x boot lease=%us interval=1s\n",
++        dali_wdt[0], dali_wdt[1], DALI_WDT_BOOT_SECONDS);
++}
++#endif

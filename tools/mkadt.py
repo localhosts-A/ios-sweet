@@ -267,6 +267,12 @@ def build(seed=None, qemu=False, highmem=False, dali=False):
         ('reg', u64(0x1c01a000, 0x900)),
     ])] if dali else []
 
+    dali_watchdog = [node('dali-watchdog', [
+        ph(),
+        ('compatible', cstr('mediatek,mt6991-wdt') + cstr('mediatek,mt6589-wdt')),
+        ('reg', u64(0x1c010000, 0x1000)),
+    ])] if dali else []
+
     return node('device-tree', [
         ph(),
         ('compatible', cstr('D22AP') + cstr('iPhone10,3') + board_compat + cstr('AppleARM')),
@@ -276,7 +282,7 @@ def build(seed=None, qemu=False, highmem=False, dali=False):
         ('manufacturer', cstr('Apple Inc.')),
         ('#address-cells', u32(2)),
         ('#size-cells', u32(2)),
-    ], [chosen, defaults, cpus, arm_io, fbcon, buttons] + product + dali_rtc + ([] if qemu else [ufs]))
+    ], [chosen, defaults, cpus, arm_io, fbcon, buttons] + product + dali_rtc + dali_watchdog + ([] if qemu else [ufs]))
 
 
 if __name__ == '__main__':

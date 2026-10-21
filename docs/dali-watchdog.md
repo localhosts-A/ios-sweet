@@ -55,3 +55,22 @@ latest visible line PE_lockdown_iokit and then automatically rebooted; the
 reset mechanism remains unknown. Original partitions were restored and
 physically hash verified. No reset cause is established merely by the last
 printed call.
+
+## Bounded boot keepalive
+
+Photos104915/104926 show the corrected counter progressing normally, loader
+entry mode0x17d, length0xf000 and status0. Enable, IRQ and dual mode are set.
+The vendor length encoding corresponds to a30-second stage interval; this is
+not a remaining-time measurement. User reports the stopped screen then an
+automatic reboot. Enabled hardware alone does not establish reset attribution.
+
+Patch0091 services the existing watchdog using the vendor reload key0x1971 at
+offset0x08. Shim polls between LZ4 blocks. XNU validates an explicit
+`dali-watchdog` DT compatible and exact0x1c010000/0x1000 region, maps it during
+the VM-initialized platform setup, and polls at bootstrap/constructor progress
+and boot-CPU timer interrupts. Each stage permits at most one reload per second
+for120seconds after that stage starts; after the lease expires, reloads stop.
+No disabled watchdog is armed. Mode, length, status, software reset and PMIC
+registers are not written. This is a finite diagnostic boot lease, not a
+complete production watchdog/watchdogd implementation. Actual reset behavior
+and new native reload path require a temporary hardware trial.
