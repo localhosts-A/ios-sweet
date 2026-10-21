@@ -1,4 +1,12 @@
-## ACTIVE SC8585 identity/status trial — original restoration PENDING (2026-10-21)
+## Current: native SC8585 transport/status SUCCESS; originals restored (2026-10-21)
+
+Photo133652 confirms `DALI CP: SC8585 verified id=85 ver=a0 ctrl=00 mode=00 present=08`, completedperipheralreadonlyprobe/VBUSunchanged andscopedI2Ccontroller/clockrestoration. This proves repeatedID+allcommonstatusreads after0095. FromexactSC8585registerfields: control00 hasCP/QB/manualACDRV/gatesclear; mode00 isforward4:1; presence08 setsVOUTinsertbutVBUS/VUSB/WPCclear. Rawstatusisnotphysicalvoltagemeasurement orUSBhostproof. Memoryroot/BSD/staticPID1exec/heartbeatstillworks; PMICfixedRd/Rdsourceoffunchanged.
+
+**Fulloriginalpair RESTORED/READBACK VERIFIED:** helperrecover flashedfullinit_boot_b thenboot_b, Androiddali/slot_b/completed1/root andbothphysicalSHA256exactoriginals. Authoritativeignored `shim/out-dali/cp-sc8585-39549699245/trial-state.json` originals_verified, newI2C5/CPidentity/status/cleanupflags recorded. Noactivecustomtrial/pendingrestore. Source529829e/CI39549699245 success; no newkernelbuild/trial afterthisrecovery. Backupsintact, no userdata/UFS/GPTchanges.
+
+Nextnativework: TypeCattach/sourcepolicy andboundedpowersequencing withSC8585reverse1:1/manualACDRV +MT6379regulator/protectedPP_CVtransition, failure/detachcleanup andVBUSobservation; thenrepeater/XSphy/clocks/domains/xHCI/BOT/read-onlyUSBroot. CurrentI2Chelperisone-shotreadonly, notyetreusablewrite/powerservice. FullUdisk16GiBimagewrite/readbackalreadyverified; actualXNUUSBbootandAppleGUIremainunimplemented/unverified.
+
+## Historical: SC8585 trial before verified recovery (2026-10-21)
 
 Fresh immediate Android dali/model/slot_b/completed/root/full original hashes, host original/candidate hashes and fastboot identity/unlocked/64+8MiB sizes all verified. CI39549699245 pair init_boot_b then boot_b writes OKAY/reboot OKAY. Authoritative ignored `shim/out-dali/cp-sc8585-39549699245/trial-state.json` = trial_rebooted. Await SC8585verified id/ver/ctrl/mode/present orerror and cleanup photo, manualfastboot/reconnectPC. Newprobe twicechecks85 thencommonreadonlystatus; no peripheral configuration/VBUS/host/storage writes. Previous photo132222id85 plusactualAndroidmoduleSC8585proven, currentconfigreadsnotyetobserved.
 

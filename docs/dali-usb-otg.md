@@ -80,8 +80,14 @@ probe expected SC8581 ID81 and stopped before further reads. Both vendor
 chip drivers publish the same Linux name `sc858x`, so that name alone
 cannot identify the silicon. The live Android driver module resolves to
 `sc8585_charger`, independently confirming the variant. Patch0095 checks
-SC8585 ID85 twice; unknown
-identities remain rejected. Its common status read still needs a new trial.
+SC8585 ID85 twice; unknown identities remain rejected. Photo133652 confirms
+all common status reads completed: `id=85 ver=a0 ctrl=00 mode=00 present=08`.
+The read-only probe and scoped controller/clock restoration completed.
+Control00 has CP/QB/manualACDRV/gates clear; mode00 is forward4:1; presence08
+has VOUT insert set and VBUS/VUSB/WPC presence clear. These are controller
+reports, not independent connector-voltage measurements. The original
+boot/init_boot partitions were subsequently restored and both full physical
+SHA256 values verified from rooted Android.
 SC8585 protection fields and IBUS ADC scale differ from SC8581; do not
 reuse the older chip's complete configuration.
 
