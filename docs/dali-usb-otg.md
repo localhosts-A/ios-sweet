@@ -91,6 +91,40 @@ SHA256 values verified from rooted Android.
 SC8585 protection fields and IBUS ADC scale differ from SC8581; do not
 reuse the older chip's complete configuration.
 
+## Bounded source diagnostic (hardware result pending)
+
+Patch0096 adds an independently opt-in `daliotg=1` state machine. It also
+requires `daliusb=1 dalicp=1` and the exact Dali `otg-source-config` ADT
+property (5V,500mA,SC8585). Existing read-only observations remain the
+default. This stage does not start a PHY, xHCI or mass-storage stack.
+
+- Stay in the original Rd sink configuration while the PC cable supplies
+  VBUS. Allow40seconds to remove it; require VBUS<=800mV and absent power
+  status for at least200ms before fixed default-current Rp.
+- Accept one stable Rd with the unused contact open/Ra. Reject toggling,
+  ambiguous dual Rd/accessories and unexpected external VBUS. No PD/VCONN.
+- Recheck SC8585 ID85 twice, versiona0 and the proven idle routing state.
+  Set only mode[2:0] to reverse1:1 and manual-ACDRV bit5, with readback.
+  No CP/QB enable or protection/ADC fields are changed.
+- Set MT6379 voltage selector26 in big-endian order (5V), current index0
+  (500mA), clear protected PP_CV_FLOW_IDLE using the vendor TM passcode and
+  relock, recheck CC/VBUS, then enable OTG. The optional USB-killer ADC
+  policy is absent from the live Dali board DT, matching stock behavior.
+- Check TCPC VBUS voltage (25mV units) and presence within1second. Observe
+  source power for at most15seconds, or until detach/status error. Whole
+  operation is bounded to60seconds using the physical13MHz counter.
+- Always attempt source disable even if the protected off sequence fails.
+  Restore saved voltage/current, CP mode/manual bit and Type-C role after
+  confirmed regulator-off; observe passive decay for up to500ms. A bus or
+  cleanup failure is logged as requiring reboot and never automatically
+  retried. Service stop/free also requests serialized cleanup.
+
+I2C uses the proven FIFO path for short reads/writes and preserves scoped
+controller/clock state. A failed transaction latches a permanent refusal
+to reuse that bus until reboot. Source-off is independently attempted over
+PMIF. Neither software logging nor a source enable bit alone establishes
+physical VBUS or working USB enumeration; the hardware trial is pending.
+
 ## Hardware facts
 
 Live stock Android FDT, cross-checked against MiCode's device-module source

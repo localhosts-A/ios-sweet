@@ -140,6 +140,14 @@ jobs:
           grep -Fq 'probeChargePump = i2cRange[0] == 0x120a0000' xnu/iokit/Kernel/arm/DaliUSBPMIC.cpp
           grep -Fq 'id != 0x85' xnu/iokit/Kernel/arm/DaliI2C5.cpp
           grep -Fq 'repeatedID != id' xnu/iokit/Kernel/arm/DaliI2C5.cpp
+          grep -Fq 'PE_parse_boot_argn("daliotg"' xnu/iokit/Kernel/arm/DaliUSBPMIC.cpp
+          grep -Fq 'config[0] == 5000000 && config[1] == 500000 && config[2] == 0x8585' xnu/iokit/Kernel/arm/DaliUSBPMIC.cpp
+          grep -Fq 'control == 0 && mode == 0 && present == 8' xnu/iokit/Kernel/arm/DaliI2C5.cpp
+          grep -Fq 'version != 0xa0' xnu/iokit/Kernel/arm/DaliI2C5.cpp
+          grep -Fq 'now - stateStartedMs >= 15000' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
+          grep -Fq 'roleTouched = true;' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI OTG: VBUS valid'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'cleanup incomplete; reboot required'
           grep -Fq 'No reset, SCL pulses, repeated attempt or DMA programming.' xnu/iokit/Kernel/arm/DaliI2C5.cpp
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI CP: SC8585 verified'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI I2C5: scoped controller/clock state restored'

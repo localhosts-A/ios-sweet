@@ -1,0 +1,659 @@
+diff --git a/iokit/Kernel/arm/DaliI2C5.cpp b/iokit/Kernel/arm/DaliI2C5.cpp
+--- a/iokit/Kernel/arm/DaliI2C5.cpp
++++ b/iokit/Kernel/arm/DaliI2C5.cpp
+@@ -1,7 +1,7 @@
+ /* Dali I2C5 FIFO adoption, MT6991 register version2 / 32-bit accesses.
+  * References: MiCode device-modules e45c319, i2c-mt65xx.c,
+  * clk-mt6991{,-peri}.c, clk-mux.c, pinctrl-mt6991.c, sc8585_charger.c.
+- * dalicp=1 requests a single SC8585 probe, never charge-pump programming.
++ * dalicp=1 reads SC8585; daliotg=1 permits mode/manual-ACDRV only.
+  * Preserve firmware timing, pinmux, parent selection and all protections.
+  */
+ #include <pexpert/arm64/board_config.h>
+@@ -41,6 +41,10 @@
+ /* Save only configuration, never replay START, DATA, status or FIFO strobes. */
+ const uint32_t savedOffsets[] = {kMask, kControl, kLength, kTransactions, kAux, kAddress};
+ 
++bool permanentFault;
++bool cpTouched;
++uint8_t cpOriginalMode, cpOriginalControl;
++
+ class Probe {
+     Mapping bus, dma, top, impe, perao, gpio;
+     uint32_t saved[6] = {};
+@@ -55,24 +59,26 @@
+         }
+         return false;
+     }
+-    bool readByte(uint8_t reg, uint8_t *value) {
+-        if (wedged || (bus.read(kStart) & 1) || (dma.read(8) & 1) ||
++    bool transfer(uint8_t reg, uint8_t *value, bool write) {
++        if (permanentFault || wedged || (bus.read(kStart) & 1) || (dma.read(8) & 1) ||
+             (bus.read(kFifo) & 0x1f)) { return false; }
+         uint32_t control = saved[1];
+         /* CPU FIFO, repeated START + direction change, ACK checking/stretch.
+          * Do not enable DMA/async/IRQ selection or modify timing/shadow mode.
+          */
+-        control &= ~((1U << 2) | (1U << 8) | (1U << 9));
+-        control |= (1U << 1) | (1U << 3) | (1U << 4) | (1U << 5);
++        control &= ~((1U << 1) | (1U << 2) | (1U << 4) | (1U << 8) | (1U << 9));
++        control |= (1U << 3) | (1U << 5);
++        if (!write) { control |= (1U << 1) | (1U << 4); }
+         bus.write(kMask, 0);
+         bus.write(kControl, control);
+         bus.write(kAddress, 0x6eU << 1);
+         bus.write(kStatus, kClear);
+         bus.write(kFifoClear, 1);
+-        bus.write(kLength, 1);
+-        bus.write(kAux, 1);
+-        bus.write(kTransactions, 2);
+-        bus.write(kData, reg); /* Only register index; never a peripheral value. */
++        bus.write(kLength, write ? 2 : 1);
++        bus.write(kAux, write ? 0 : 1);
++        bus.write(kTransactions, write ? 1 : 2);
++        bus.write(kData, reg);
++        if (write) { bus.write(kData, *value); }
+         bus.write(kStart, (1U << 14) | 1U);
+         bool done = false;
+         for (unsigned i = 0; i < 10000; ++i) {
+@@ -81,40 +87,49 @@
+             IODelay(10);
+         }
+         if (!done || !(lastStatus & kComplete) || (lastStatus & kErrors)) {
+-            kprintf("DALI I2C5: read failed reg=%02x irq=%x start=%x fifo=%x\n",
++            kprintf("DALI I2C5: transfer failed reg=%02x irq=%x start=%x fifo=%x\n",
+                 reg, lastStatus, bus.read(kStart), bus.read(kFifo));
+             /* A cleared START latch does not prove the electrical bus is idle.
+              * Retain clocks/configuration after any failed transaction until
+              * reboot. No reset, SCL pulses, repeated attempt or DMA programming.
+              */
+-            wedged = true;
++            permanentFault = wedged = true;
+             return false;
+         }
+-        if (!wait(bus, kStart, 1, 0)) { wedged = true; return false; }
++        if (!wait(bus, kStart, 1, 0)) { permanentFault = wedged = true; return false; }
+         uint32_t count = bus.read(kFifo) & 0x1f;
+-        if (count != 1) {
++        if (count != (write ? 0U : 1U)) {
+             kprintf("DALI I2C5: RX length rejected reg=%02x count=%u\n", reg, count);
+             bus.write(kStatus, kClear);
+             bus.write(kFifoClear, 1);
+             return false;
+         }
+-        *value = bus.read(kData) & 0xff;
++        if (!write) { *value = bus.read(kData) & 0xff; }
+         bus.write(kStatus, kClear);
+         return true;
+     }
+ public:
+-    void run() {
++    bool readByte(uint8_t reg, uint8_t *value) { return transfer(reg, value, false); }
++    bool update(uint8_t reg, uint8_t mask, uint8_t bits) {
++        if ((reg != 0x0e || mask != 7) && (reg != 0x0b || mask != 0x20)) { return false; }
++        uint8_t before = 0, after = 0;
++        if (!readByte(reg, &before)) { return false; }
++        uint8_t value = (before & ~mask) | (bits & mask);
++        return transfer(reg, &value, true) && readByte(reg, &after) && after == value;
++    }
++    bool begin() {
++        if (permanentFault) { return false; }
+         if (!top.open(0x10000000) || !impe.open(0x120c0000) ||
+             !perao.open(0x16640000) || !gpio.open(0x1002d000) ||
+             !bus.open(0x120a0000) || !dma.open(0x16400000)) {
+-            kprintf("DALI I2C5: mapping failed\n"); return;
++            kprintf("DALI I2C5: mapping failed\n"); return false;
+         }
+         uint32_t pins = gpio.read(0x460), levels = gpio.read(0x250);
+         uint32_t mux = top.read(0xc0);
+         kprintf("DALI I2C5: handoff pins=%x levels=%x mux=%x\n", pins, levels, mux);
+         if ((pins & 0xff) != 0x11 || (levels & 0x30000) != 0x30000 ||
+             ((mux >> 8) & 7) > 4) {
+-            kprintf("DALI I2C5: firmware pinmux/idle lines/clock parent rejected\n"); return;
++            kprintf("DALI I2C5: firmware pinmux/idle lines/clock parent rejected\n"); return false;
+         }
+         /* Gate-only enable: preserve the firmware PLL and mux selection.
+          * clk-mux.c fence enable uses CLR gate15 then MON1 bit18, no UPDATE.
+@@ -123,7 +138,7 @@
+             parentChanged = true; top.write(0xc8, 1U << 15);
+         }
+         if (!wait(top, 0x274, 1U << 18, 1U << 18)) {
+-            kprintf("DALI I2C5: parent clock fence timeout\n"); return;
++            kprintf("DALI I2C5: parent clock fence timeout\n"); return false;
+         }
+         if (perao.read(0x14) & (1U << 26)) {
+             dmaChanged = true; perao.write(0x30, 1U << 26);
+@@ -132,7 +147,7 @@
+             mainChanged = true; impe.write(0xe04, 1);
+         }
+         if (!wait(impe, 0xe00, 1, 0) || !wait(perao, 0x14, 1U << 26, 0)) {
+-            kprintf("DALI I2C5: clock gate timeout\n"); return;
++            kprintf("DALI I2C5: clock gate timeout\n"); return false;
+         }
+         IODelay(10);
+         uint32_t timing = bus.read(0x20), ltiming = bus.read(0x2c);
+@@ -142,24 +157,32 @@
+         if (!timing || !ltiming || (hs & 1) || (ioConfig & 3) != 3 ||
+             (bus.read(kStart) & 1) || (dma.read(8) & 1) ||
+             (bus.read(kFifo) & 0x1f) || (bus.read(kStatus) & kClear)) {
+-            kprintf("DALI I2C5: firmware timing/idle state rejected; no transaction\n"); return;
++            kprintf("DALI I2C5: firmware timing/idle state rejected; no transaction\n"); return false;
+         }
+         for (unsigned i = 0; i < 6; ++i) { saved[i] = bus.read(savedOffsets[i]); }
+         configured = true;
+-        uint8_t id = 0, repeatedID = 0, version = 0, control = 0, mode = 0, present = 0;
++        return true;
++    }
++    bool identity(uint8_t *control, uint8_t *mode, uint8_t *present) {
++        uint8_t id = 0, repeatedID = 0, version = 0;
+         if (!readByte(0x6e, &id) || id != 0x85 ||
+-            !readByte(0x6e, &repeatedID) || repeatedID != id) {
+-            kprintf("DALI CP: identity rejected id=%02x repeat=%02x irq=%x\n", id, repeatedID, lastStatus); return;
+-        }
+-        /* SC8585 confirmed twice. Only version/control/mode/presence; no fault/IRQ
+-         * flags, SC8581-only protection fields, ADC scaling or configuration writes. */
+-        if (!readByte(0, &version) || !readByte(0x0b, &control) ||
+-            !readByte(0x0e, &mode) || !readByte(0x10, &present)) {
+-            kprintf("DALI CP: configuration read failed\n"); return;
++            !readByte(0x6e, &repeatedID) || repeatedID != id ||
++            !readByte(0, &version) || version != 0xa0) {
++            kprintf("DALI CP: identity rejected id=%02x repeat=%02x ver=%02x irq=%x\n",
++                id, repeatedID, version, lastStatus); return false;
++        }
++        if (!readByte(0x0b, control) || !readByte(0x0e, mode) || !readByte(0x10, present)) {
++            kprintf("DALI CP: configuration read failed\n"); return false;
+         }
+         kprintf("DALI CP: SC8585 verified id=%02x ver=%02x ctrl=%02x mode=%02x present=%02x\n",
+-            id, version, control, mode, present);
+-        kprintf("DALI CP: peripheral read-only probe complete; VBUS unchanged\n");
++            id, version, *control, *mode, *present);
++        return true;
++    }
++    void run() {
++        uint8_t control = 0, mode = 0, present = 0;
++        if (begin() && identity(&control, &mode, &present)) {
++            kprintf("DALI CP: peripheral read-only probe complete; VBUS unchanged\n");
++        }
+     }
+     ~Probe() {
+         if (wedged) {
+@@ -177,14 +200,60 @@
+         kprintf("DALI I2C5: scoped controller/clock state restored\n");
+     }
+ };
+-unsigned probeClaimed;
+-}
++unsigned operationClaimed;
++}
++
++static bool claim()
++{
++    return ml_get_interrupts_enabled() && !ml_at_interrupt_context() &&
++        !__atomic_exchange_n(&operationClaimed, 1U, __ATOMIC_ACQ_REL);
++}
++static void unclaim() { __atomic_store_n(&operationClaimed, 0U, __ATOMIC_RELEASE); }
+ 
+ void dali_i2c5_probe(void)
+ {
+-    if (!ml_get_interrupts_enabled() || ml_at_interrupt_context() ||
+-        __atomic_exchange_n(&probeClaimed, 1U, __ATOMIC_ACQ_REL)) { return; }
+-    Probe probe;
+-    probe.run();
++    if (!claim()) { return; }
++    { Probe probe; probe.run(); }
++    unclaim();
++}
++
++bool dali_cp_prepare_source(void)
++{
++    if (!claim()) { return false; }
++    bool ok = false;
++    {
++        Probe probe;
++        uint8_t control = 0, mode = 0, present = 0;
++        if (!cpTouched && probe.begin() && probe.identity(&control, &mode, &present) &&
++            control == 0 && mode == 0 && present == 8) {
++            cpOriginalControl = control; cpOriginalMode = mode;
++            cpTouched = true; /* Mark BEFORE any write so partial changes get cleanup. */
++            /* extcon ordinary non-boost-GPIO source path, no CP/QB/protection changes. */
++            ok = probe.update(0x0e, 7, 6) && probe.update(0x0b, 0x20, 0x20);
++            kprintf("DALI CP: reverse1:1/manual ACDRV prepare %s\n", ok ? "verified" : "FAILED");
++        }
++    }
++    unclaim();
++    return ok;
++}
++
++bool dali_cp_restore_source(void)
++{
++    if (!claim()) { return false; }
++    bool ok = !cpTouched;
++    if (cpTouched) {
++        Probe probe;
++        uint8_t control = 0, mode = 0, present = 0;
++        if (probe.begin() && probe.identity(&control, &mode, &present)) {
++            /* Restore mode then manual ACDRV as the vendor source-off path. */
++            bool modeOK = probe.update(0x0e, 7, cpOriginalMode);
++            bool controlOK = probe.update(0x0b, 0x20, cpOriginalControl);
++            ok = modeOK && controlOK;
++            if (ok) { cpTouched = false; }
++        }
++        kprintf("DALI CP: source routing restore %s\n", ok ? "verified" : "FAILED; reboot required");
++    }
++    unclaim();
++    return ok;
+ }
+ #endif
+diff --git a/iokit/Kernel/arm/DaliI2C5.h b/iokit/Kernel/arm/DaliI2C5.h
+--- a/iokit/Kernel/arm/DaliI2C5.h
++++ b/iokit/Kernel/arm/DaliI2C5.h
+@@ -1,5 +1,10 @@
+ #ifndef DALI_I2C5_H
+ #define DALI_I2C5_H
+-/* One bounded SC8585 identity/configuration read. No peripheral writes. */
+ void dali_i2c5_probe(void);
++/* Serialized built-in Type-C source client, thread context only.
++ * SC8585 ID85/versiona0 and idle routing required. Only mode[2:0] and
++ * manual-ACDRV bit5 may change; source regulator must be off before restore.
++ */
++bool dali_cp_prepare_source(void);
++bool dali_cp_restore_source(void);
+ #endif
+diff --git a/iokit/Kernel/arm/DaliUSBPMIC.cpp b/iokit/Kernel/arm/DaliUSBPMIC.cpp
+--- a/iokit/Kernel/arm/DaliUSBPMIC.cpp
++++ b/iokit/Kernel/arm/DaliUSBPMIC.cpp
+@@ -1,12 +1,13 @@
+-/* First Dali native USB platform stage: observe the firmware handoff via
+- * the shared PMIF channel. Opt-in, bounded, peripheral-register read-only.
++/* Dali native USB platform: shared PMIF observations by default; separately
++ * opt-in bounded Type-C source diagnostic via daliotg=1.
+  * MT6379 tcpc_mt6379.c maps standard TCPCI00xx registers to PMIC04xx.
+- * This service does NOT switch roles, source VBUS or start an xHCI DMA engine.
++ * No PHY/xHCI/USB-storage engine is started.
+  */
+ #include <pexpert/arm64/board_config.h>
+ #if defined(SWEET)
+ #include "DaliPMIF.h"
+ #include "DaliI2C5.h"
++#include "DaliUSBPower.h"
+ #include <IOKit/IOService.h>
+ #include <IOKit/IOLib.h>
+ #include <IOKit/IOWorkLoop.h>
+@@ -24,6 +25,8 @@
+     uint8_t previous[6] = {};
+     bool havePrevious = false;
+     bool probeChargePump = false;
++    bool sourceRequested = false;
++    DaliUSBPower source;
+ 
+     bool read8(uint16_t address, uint8_t *value) {
+         lastAddress = address;
+@@ -34,6 +37,10 @@
+         return dali_pmif_read16(14, address, value, &lastStatus);
+     }
+     void poll() {
++        if (sourceRequested) {
++            if (source.tick()) { timer->setTimeoutMS(100); }
++            return;
++        }
+         if (samples == 0 && probeChargePump) { dali_i2c5_probe(); }
+         /* ROLE_CTRL, CC_STATUS, POWER_STATUS, charger OTG enable and
+          * repeater VRT/disconnect/squelch configuration. No alert clearing.
+@@ -101,14 +108,28 @@
+         }
+         if (!probeChargePump) { kprintf("DALI CP: device-tree I2C5 range rejected\n"); }
+     }
++    int otg = 0;
++    PE_parse_boot_argn("daliotg", &otg, sizeof(otg));
++    if (otg == 1 && probeChargePump) {
++        OSData *sourceData = OSDynamicCast(OSData, provider->getProperty("otg-source-config"));
++        uint32_t config[3] = {};
++        if (sourceData && sourceData->getLength() == sizeof(config)) {
++            memcpy(config, sourceData->getBytesNoCopy(), sizeof(config));
++            sourceRequested = config[0] == 5000000 && config[1] == 500000 && config[2] == 0x8585;
++        }
++        if (!sourceRequested || !source.init()) { return false; }
++    } else if (otg != 0) { return false; }
+     workLoop = IOWorkLoop::workLoop();
+     timer = IOTimerEventSource::timerEventSource(this, timerAction);
+     if (!workLoop || !timer || workLoop->addEventSource(timer) != kIOReturnSuccess) {
+         return false;
+     }
+-    kprintf("DALI USB PMIC: MT6379 TCPC verified; bounded read-only mode\n");
++    if (!sourceRequested) {
++        kprintf("DALI USB PMIC: MT6379 TCPC verified; bounded read-only mode\n");
++    }
+     setProperty("diagnostic-only", true);
+-    setProperty("programs-vbus", false);
++    setProperty("programs-vbus", sourceRequested);
++    if (sourceRequested) { kprintf("DALI OTG: bounded source mode requested; no xHCI/USB storage\n"); }
+     registerService();
+     timer->setTimeoutMS(1000);
+     return true;
+@@ -120,6 +141,7 @@
+     if (workLoop && timer && timer->getWorkLoop() == workLoop) {
+         workLoop->removeEventSource(timer);
+     }
++    source.finish("service stop");
+     IOService::stop(provider);
+ }
+ 
+@@ -129,6 +151,7 @@
+     if (workLoop && timer && timer->getWorkLoop() == workLoop) {
+         workLoop->removeEventSource(timer);
+     }
++    source.release();
+     OSSafeReleaseNULL(timer);
+     OSSafeReleaseNULL(workLoop);
+     IOService::free();
+diff --git a/iokit/Kernel/arm/DaliUSBPower.cpp b/iokit/Kernel/arm/DaliUSBPower.cpp
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/DaliUSBPower.cpp
+@@ -0,0 +1,263 @@
++/* MT6379 TCPCI + SC8585 source routing. Vendor MiCode e45c319:
++ * tcpc_mt6379.c, std_tcpci_v10.h, extcon-mtk-usb.c, mt6379-charger.{c,h},
++ * sc8585_charger.c. Dali live FDT has no boost GPIO/usb-killer-detect.
++ * A source diagnostic lease, not a USB host or PD policy implementation.
++ */
++#include <pexpert/arm64/board_config.h>
++#if defined(SWEET)
++#include "DaliUSBPower.h"
++#include "DaliPMIF.h"
++#include "DaliI2C5.h"
++#include <machine/machine_routines.h>
++
++static uint64_t physicalMs()
++{
++    uint64_t count;
++    __asm__ volatile("isb\n\tmrs %0, cntpct_el0" : "=r"(count) :: "memory");
++    return count / 13000U; /* Dali verified physical timebase13MHz. */
++}
++
++bool DaliUSBPower::read8(uint16_t reg, uint8_t *v)
++{
++    return dali_pmif_transfer(14, reg, v, false, &status);
++}
++
++bool DaliUSBPower::write8(uint16_t reg, uint8_t v)
++{
++    /* Whitelist only the audited role/polarity/power and charger registers. */
++    if (reg != 0x41a && reg != 0x419 && reg != 0x41c && reg != 0x108 &&
++        reg != 0x11c && reg != 0x11d && reg != 0x11e && reg != 0x135 &&
++        (reg < 7 || reg > 10)) { return false; }
++    uint8_t verify = 0;
++    if (!dali_pmif_transfer(14, reg, &v, true, &status)) { return false; }
++    /* TM passcode registers are write-only/unlock sequence, not readback. */
++    return (reg >= 7 && reg <= 10) || (read8(reg, &verify) && verify == v);
++}
++
++bool DaliUSBPower::update(uint16_t reg, uint8_t mask, uint8_t v)
++{
++    uint8_t before = 0;
++    return read8(reg, &before) && write8(reg, (before & ~mask) | (v & mask));
++}
++
++bool DaliUSBPower::snapshot(uint8_t *cc, uint8_t *power, uint8_t *otg, unsigned *mv)
++{
++    uint16_t raw = 0;
++    uint8_t fault = 0;
++    if (!read8(0x41d, cc) || !read8(0x41e, power) || !read8(0x108, otg) ||
++        !read8(0x41f, &fault) ||
++        !dali_pmif_read16(14, 0x470, &raw, &status)) { return false; }
++    /* Vendor reads low10bits *25mV. Refuse unhandled scaling/reserved bits. */
++    if (fault || (raw & ~0x3ffU) || (*power & 0x40)) { return false; }
++    *mv = (raw & 0x3ffU) * 25U;
++    return true;
++}
++
++bool DaliUSBPower::protectedIdle(bool idle)
++{
++    /* Only this service owns MT6379 test mode; shared PMIF still locks every
++     * bus transaction, so RTC SID9 can safely interleave without touching TM.
++     * Mark all state dirty before writes; always attempt to relock on failure.
++     */
++    static const uint8_t passcode[] = {0x69, 0x96, 0x63, 0x79};
++    bool unlocked = true;
++    for (unsigned i = 0; i < 4 && unlocked; ++i) { unlocked = write8(7 + i, passcode[i]); }
++    bool changed = unlocked && update(0x135, 0x20, idle ? 0x20 : 0);
++    bool relocked = write8(7, 0);
++    return changed && relocked;
++}
++
++bool DaliUSBPower::sourceOn()
++{
++    uint8_t cc = 0, power = 0, otg = 0;
++    unsigned mv = 0;
++    if (!snapshot(&cc, &power, &otg, &mv) || (power & 0x37) || (otg & 1) ||
++        mv > 800 || (cc & 0x30) || (cc & 0xf) != attachedCC) { return false; }
++    /* Do not adopt or shut down another source: all these must start off. */
++    if (!read8(0x11c, &savedCVHi) || !read8(0x11d, &savedCVLo) ||
++        !read8(0x11e, &savedCurrent)) { return false; }
++    cpAttempted = true;
++    if (!dali_cp_prepare_source()) { return false; }
++    chargerTouched = true;
++    /* min4850mV + (selector26 - minselector20)*25mV =5000mV.
++     * Big-endian selector, current table index0=500mA, default Rp advertisement.
++     */
++    if (!write8(0x11c, 0) || !write8(0x11d, 26) || !update(0x11e, 7, 0) ||
++        !protectedIdle(false)) { return false; }
++    /* Recheck after CP configuration and before enabling physical source. */
++    if (!snapshot(&cc, &power, &otg, &mv) || (power & 0x37) || (otg & 1) ||
++        mv > 800 || (cc & 0x30) || (cc & 0xf) != attachedCC) { return false; }
++    if (!update(0x108, 1, 1)) { return false; }
++    kprintf("DALI OTG: 5V/500mA source enabled; waiting for VBUS measurement\n");
++    return true;
++}
++
++void DaliUSBPower::finishLocked(const char *reason)
++{
++    if (state == Finished) { return; }
++    state = Finished; /* Never rearm automatically after detach/error. */
++    bool chargerOK = true, cpOK = true, roleOK = true;
++    bool sourceOffConfirmed = !chargerTouched;
++    if (chargerTouched) {
++        /* Vendor off path enables PP_CV_FLOW_IDLE before regulator-disable.
++         * Attempt physical disable even when protected operation failed.
++         */
++        bool idleOK = protectedIdle(true);
++        bool offOK = update(0x108, 1, 0);
++        uint8_t otg = 1;
++        offOK = read8(0x108, &otg) && !(otg & 1) && offOK;
++        sourceOffConfirmed = offOK;
++        chargerOK = idleOK && offOK;
++        if (offOK) {
++            bool a = write8(0x11c, savedCVHi);
++            bool b = write8(0x11d, savedCVLo);
++            bool c = update(0x11e, 7, savedCurrent);
++            chargerOK = a && b && c && chargerOK;
++            if (cpAttempted) { cpOK = dali_cp_restore_source(); }
++        } else {
++            cpOK = false; /* Keep routing stable until reboot if source-off unconfirmed. */
++        }
++    } else if (cpAttempted) {
++        cpOK = dali_cp_restore_source();
++    }
++    if (roleTouched) {
++        /* Stop advertising before restoring original sink configuration. */
++        bool a = write8(0x41a, 0x0f);
++        bool b = update(0x419, 1, savedPolarity);
++        bool c = update(0x41c, 0x40, savedPowerCtrl);
++        /* Never restore a sink termination when our source-off is unknown. */
++        bool d = sourceOffConfirmed && write8(0x41a, savedRole);
++        roleOK = a && b && c && d;
++    }
++    uint8_t cc = 0, power = 0, otg = 0;
++    unsigned mv = 0;
++    bool measured = snapshot(&cc, &power, &otg, &mv);
++    if (chargerTouched && chargerOK) {
++        /* Observe passive voltage decay, no forced-discharge programming. */
++        for (unsigned i = 0; i < 20 && measured && mv > 800; ++i) {
++            IOSleep(25);
++            measured = snapshot(&cc, &power, &otg, &mv);
++        }
++    }
++    kprintf("DALI OTG: end=%s charger=%s cp=%s role=%s VBUS=%umV valid=%u otg=%02x\n",
++        reason, chargerOK ? "restored" : "FAILED", cpOK ? "restored" : "FAILED",
++        roleOK ? "restored" : "FAILED", mv, measured, otg);
++    if (!chargerOK || !cpOK || !roleOK) { kprintf("DALI OTG: cleanup incomplete; reboot required\n"); }
++}
++
++bool DaliUSBPower::tickLocked()
++{
++    if (state == Finished) { return false; }
++    ++ticks; ++stateTicks;
++    uint64_t now = physicalMs();
++    if (!startedMs) { startedMs = stateStartedMs = now; }
++    if (now - startedMs >= 60000) { finishLocked("total60s lease"); return false; }
++    uint8_t cc = 0, power = 0, otg = 0;
++    unsigned mv = 0;
++    if (!snapshot(&cc, &power, &otg, &mv)) { finishLocked("status/fault error"); return false; }
++    if (state == Initial) {
++        if (!read8(0x41a, &savedRole) || !read8(0x419, &savedPolarity) ||
++            !read8(0x41c, &savedPowerCtrl) || savedRole != 0x0a ||
++            !(power & 8) || (otg & 1)) {
++            finishLocked("handoff not idle sink"); return false;
++        }
++        /* The trial starts on the PC cable. Stay Rd and do not touch power
++         * until it is removed and VBUS is absent for >=200ms. Never advertise
++         * Rp against the PC/charger. This is an explicit handoff window.
++         */
++        if ((power & 0x37) || mv > 800) {
++            stable = 0;
++            if (ticks % 10 == 0) {
++                kprintf("DALI OTG: unplug PC cable; staying sink VBUS=%umV power=%02x\n", mv, power);
++            }
++            if (now - stateStartedMs >= 40000) { finishLocked("PC cable handoff timeout"); return false; }
++            return true;
++        }
++        if (++stable < 3) { return true; }
++        stable = 0;
++        roleTouched = true;
++        if (!write8(0x41a, 0x0f) || !update(0x41c, 0x40, 0) ||
++            !write8(0x41a, 0x05)) { finishLocked("Rp programming failed"); return false; }
++        /* Fixed Rp/default current on both CC pins; no DRP/PD/VCONN. */
++        IODelay(30);
++        state = Waiting; stateTicks = 0; stateStartedMs = physicalMs();
++        kprintf("DALI OTG: default Rp armed; attach window40s, source lease15s\n");
++        return true;
++    }
++    if (ticks % 10 == 0) {
++        kprintf("DALI OTG: tick=%u state=%u cc=%02x power=%02x VBUS=%umV otg=%02x\n",
++            ticks, state, cc, power, mv, otg);
++    }
++    unsigned c1 = cc & 3, c2 = (cc >> 2) & 3;
++    /* Exactly one Rd, the unused contact open or Ra. Reject audio/debug
++     * accessories, source/sink-result ambiguity or active DRP toggling.
++     */
++    bool attached = !(cc & 0x30) && ((c1 == 2 && c2 <= 1) || (c2 == 2 && c1 <= 1));
++    if (state == Waiting) {
++        if ((power & 0x37) || (otg & 1) || mv > 800) {
++            finishLocked("external VBUS while waiting"); return false;
++        }
++        if (attached) {
++            if (attachedCC == (cc & 15)) { ++stable; }
++            else { attachedCC = cc & 15; stable = 1; }
++        } else { stable = 0; attachedCC = 0; }
++        if (stable >= 3) { /* >=200ms between first and third 100ms sample. */
++            if (!update(0x419, 1, c2 == 2 ? 1 : 0) || !sourceOn()) {
++                finishLocked("source prepare failed"); return false;
++            }
++            state = Rising; stateTicks = 0; stateStartedMs = physicalMs();
++        } else if (now - stateStartedMs >= 40000) {
++            finishLocked("attach timeout"); return false;
++        }
++        return true;
++    }
++    if (!attached || (cc & 15) != attachedCC) {
++        finishLocked("detached"); return false;
++    }
++    if (!(otg & 1) || (power & 0x23) || mv > 5500) {
++        finishLocked("source status invalid"); return false;
++    }
++    if (state == Rising) {
++        if ((power & 4) && mv >= 4400 && mv <= 5500) {
++            state = Powered; stateTicks = 0; stateStartedMs = physicalMs();
++            kprintf("DALI OTG: VBUS valid %umV; connector source confirmed, USB host not started\n", mv);
++        } else if (now - stateStartedMs >= 1000) {
++            finishLocked("VBUS rise timeout"); return false;
++        }
++    } else if (mv < 4400 || !(power & 4)) {
++        finishLocked("VBUS dropped"); return false;
++    } else if (now - stateStartedMs >= 15000) {
++        finishLocked("15s source lease expired"); return false;
++    }
++    return true;
++}
++
++bool DaliUSBPower::init()
++{
++    uint64_t frequency;
++    __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(frequency));
++    if (frequency != 13000000) { return false; }
++    lock = IOLockAlloc();
++    return lock != nullptr;
++}
++
++bool DaliUSBPower::tick()
++{
++    if (!lock || !ml_get_interrupts_enabled() || ml_at_interrupt_context()) { return false; }
++    IOLockLock(lock);
++    bool active = tickLocked();
++    IOLockUnlock(lock);
++    return active;
++}
++
++void DaliUSBPower::finish(const char *reason)
++{
++    if (!lock) { return; }
++    IOLockLock(lock); finishLocked(reason); IOLockUnlock(lock);
++}
++
++void DaliUSBPower::release()
++{
++    if (lock) { finish("service release"); IOLockFree(lock); lock = nullptr; }
++}
++#endif
+diff --git a/iokit/Kernel/arm/DaliUSBPower.h b/iokit/Kernel/arm/DaliUSBPower.h
+new file mode 100644
+--- /dev/null
++++ b/iokit/Kernel/arm/DaliUSBPower.h
+@@ -0,0 +1,30 @@
++#ifndef DALI_USB_POWER_H
++#define DALI_USB_POWER_H
++#include <IOKit/IOLib.h>
++/* Single built-in Dali client. Tick/finish serialize through an owned lock.
++ * Diagnostic 5V/default-current source only, no PD/VCONN/PHY/xHCI/DMA.
++ */
++class DaliUSBPower {
++    IOLock *lock = nullptr;
++    enum State { Initial, Waiting, Rising, Powered, Finished } state = Initial;
++    unsigned ticks = 0, stateTicks = 0, stable = 0, attachedCC = 0;
++    uint8_t savedRole = 0, savedPolarity = 0, savedPowerCtrl = 0;
++    uint8_t savedCVHi = 0, savedCVLo = 0, savedCurrent = 0;
++    uint32_t status = 0;
++    uint64_t startedMs = 0, stateStartedMs = 0;
++    bool roleTouched = false, chargerTouched = false, cpAttempted = false;
++    bool read8(uint16_t reg, uint8_t *value);
++    bool write8(uint16_t reg, uint8_t value);
++    bool update(uint16_t reg, uint8_t mask, uint8_t value);
++    bool snapshot(uint8_t *cc, uint8_t *power, uint8_t *otg, unsigned *mv);
++    bool protectedIdle(bool idle);
++    bool sourceOn();
++    void finishLocked(const char *reason);
++    bool tickLocked();
++public:
++    bool init();
++    bool tick();
++    void finish(const char *reason);
++    void release();
++};
++#endif
+diff --git a/iokit/conf/files.arm64 b/iokit/conf/files.arm64
+--- a/iokit/conf/files.arm64
++++ b/iokit/conf/files.arm64
+@@ -25,3 +25,4 @@
+ iokit/Kernel/arm/DaliPMIF.cpp                                    optional iokitcpp
+ iokit/Kernel/arm/DaliUSBPMIC.cpp                                 optional iokitcpp
+ iokit/Kernel/arm/DaliI2C5.cpp                                    optional iokitcpp
++iokit/Kernel/arm/DaliUSBPower.cpp                                optional iokitcpp

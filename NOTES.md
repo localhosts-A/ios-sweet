@@ -1,3 +1,9 @@
+## Current: bounded OTG source implementation prepared (2026-10-21)
+
+Patch0096 adds separate `daliotg=1` source diagnostic to existing `daliusb=1 dalicp=1`, exact DaliADT5V/500mA/SC8585config. Defaults retain read-only observation. NewDaliUSBPower serializes100mstimer/stop/free and uses verified13MHzphysicalcounter: PCcablehandoff40s(noRpwhileexternalVBUS), fixeddefaultRp+oneRd>=200ms, CP85/a0/control00/mode00/present08 guard, SC8585mode6/manualACDRVbit5only, MT6379BEvoltage26/current0/protectedPP_CV/OTGbit. NoPD/VCONN/PHY/xHCI/DMA. Waiting40s/rise1s/power15s/total60s bounds; detach/error/stop/lease cleansindependently, restoresCPmode/manualbits/chargersettings/role andobservespassivedecay. FailuretoverifysourceoffleavesCProutingstableandreportsrebootrequired, noautomaticrearm. I2Cperipheralwriteswhitelistonlymode/manualfields, readbackandglobalfaultlatch. No CP/QB/protectionchanges.
+
+Local3/3actualarm64objectscompilePASS, exactpatchappliesbaseline; fullcachedbuild/source+kernel+imageverificationnext. Sources /tmp/dali-timed-boot/buildtree/xnu, baseline /tmp/dali-usb-power/base. Nohandsetboot/powerwritesinthisstage, originals remain restored/physicalhashverified afterSC8585success. Noactivecustomtrial/pendingrestore. USBhost/storage/AppleGUI stillunfinished.
+
 ## Current: native SC8585 transport/status SUCCESS; originals restored (2026-10-21)
 
 Photo133652 confirms `DALI CP: SC8585 verified id=85 ver=a0 ctrl=00 mode=00 present=08`, completedperipheralreadonlyprobe/VBUSunchanged andscopedI2Ccontroller/clockrestoration. This proves repeatedID+allcommonstatusreads after0095. FromexactSC8585registerfields: control00 hasCP/QB/manualACDRV/gatesclear; mode00 isforward4:1; presence08 setsVOUTinsertbutVBUS/VUSB/WPCclear. Rawstatusisnotphysicalvoltagemeasurement orUSBhostproof. Memoryroot/BSD/staticPID1exec/heartbeatstillworks; PMICfixedRd/Rdsourceoffunchanged.
