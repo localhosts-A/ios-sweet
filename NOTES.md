@@ -1,3 +1,12 @@
+## Current handoff: native watchdog pair verified/preflight passed (2026-10-21)
+
+- CI39536532295 SUCCESS at867dd0c, compiler1377/1381hits99.71%. Actual11/11 source files byte-match locally compiled sources. Kernel counter instruction and driver symbol gates pass; downloaded poll disassembly confirms native reload0x1971 STRw at+8, DSB, bootCPU/enabled/1s/120s checks. Kernel SHA4072b42934351805ff01c855ce489b5bea8786443cb0a84d4dcba81b899aea1e.
+- Durable ignored pair `shim/out-dali/wdt-39536532295/`: bootddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39, init_boot4f1ab4fe99a8b96d499c693fbcebf471317f168a2957ddd1bcf661430a6590bf, payload50d76285f4df6c622956d4829e5baef5a6f2a3561622b1672679313292281599. Payload29229120bytes/11segments, ADT7424bytes including explicitWDT, same exact12MiB RAM root0x2024d0000..0x2030d0000, sameargs. Init_boot8MiB/7541787byteLZ4. All headers/entry/RAM/segments/CPU/GIC/RTC/WDT/rootbytes/LZ4CPIO/AVB/host originals passed.
+- Fresh Android dali/model/_b/completed1/root/fullphysicaloriginalhashes and host/candidatehashes matched. No active trial yet; next immediate repeated preflight/fastboot identity then already authorized pair trial, observe WDT_FEED/DALIWDT/timedBSD/root and reset, manualfastboot then original restoration/readback. Lease expiry can later permit reset; do not mislabel as productionwatchdog support. Root/PID1/resetcause unconfirmed.
+
+
+- Native keepalive committed/pushed867dd0c; Actions39536532295 dispatched. Durable candidate staging shim/out-dali/wdt-39536532295 holds new shim, explicit-WDT base ADT and unchanged root/recovery helper; no complete candidate or hardware write before kernel and full verification.
+
 ## Current handoff: bounded native TOPRGU keepalive implemented/compiled (2026-10-21)
 
 - User confirms corrected-counter screen stopped then automatic reboot. Patch0091 adds native WDT module/header, export/build registration, early VM-initialized PE init (after kprintf setup), constructor/bootstrap progress and boot-CPU timer IRQ polls. Explicit MT6991 DT compatible + exact1c010000/1000 region required. Firmware EN required;1s rate and120s diagnostic lease, no permanent driver policy. Only MMIO write is vendor reload0x1971 at+8; mode/length/status/software reset/PMIC not written. Existing SweetWatchdog userspace stub remains distinct and unchanged. This is not yet hardware verified.
