@@ -186,6 +186,12 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: restore SPM req='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: restore gates='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: restore ACK req='
+          grep -Fq 'PE_parse_boot_argn("daliusbport"' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq '(saved & ~3U) | 0x204U' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'portRestored && asleep && releaseResourcesAndRestore' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U2: MAC ready='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U2: PORTSC sample='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U2: restore want='
 
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: PWR dp='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: AC64='

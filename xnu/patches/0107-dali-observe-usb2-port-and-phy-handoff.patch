@@ -1,0 +1,147 @@
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -2,7 +2,8 @@
+  * xHCI driver. Primary source: MiCode device modules e45c319 and live Dali
+  * FDT. Acquire the audited MTU3 v2 SPM request, pulse IP reset, release only
+  * host PDN, and read capabilities only after clock-ready status. Then restore
+- * host/device PDN and release SPM. No PHY tuning, port writes, IRQ or DMA.
++ * host/device PDN and release SPM. Optional U2 port0 enable/read/restore;
++ * no PHY tuning, xHCI engine, IRQ or DMA programming.
+  */
+ #include <pexpert/arm64/board_config.h>
+ #if defined(SWEET)
+@@ -10,6 +11,7 @@
+ #include <IOKit/IOLib.h>
+ #include <IOKit/IOMemoryDescriptor.h>
+ #include <machine/machine_routines.h>
++#include <pexpert/pexpert.h>
+ 
+ namespace {
+ class ReadMapping {
+@@ -73,7 +75,8 @@
+ bool waitBits(const WriteMapping &m, uint32_t offset, uint32_t mask,
+     uint32_t expected, unsigned tries, unsigned delayUs) {
+     for (unsigned i = 0; i < tries; ++i) {
+-        if ((m.read(offset) & mask) == expected) { return true; }
++        uint32_t value = m.read(offset);
++        if (value != ~0U && (value & mask) == expected) { return true; }
+         IODelay(delayUs);
+     }
+     return false;
+@@ -156,12 +159,77 @@
+         oldCtrl0, restoredCtrl0, reset);
+     return reset && restoreSpmAndGates(ip, gate, oldRequest, oldAck, savedGates);
+ }
++
++/* Return whether the original U2 port state is intact, including skips.
++ * This is the MTU3 host-enable port RMW followed by its inverse. The xHCI
++ * engine stays halted; PORTSC and PHY accesses below are reads only.
++ */
++bool observeU2Port(WriteMapping &ip, const ReadMapping &xhci,
++    unsigned op, unsigned ports) {
++    uint32_t saved = ip.read(0x50), u3 = ip.read(0x30);
++    uint32_t cmd = xhci.read(op), sts = xhci.read(op + 4);
++    if (saved == ~0U || u3 == ~0U || (saved & 3U) != 3U ||
++        (u3 & 3U) != 3U || !(ip.read(8) & 1U) || cmd != 0U ||
++        sts == ~0U || !(sts & 1U) || ip.read(0x24) != 0x101U) {
++        kprintf("DALI U2: entry rejected port=%08x U3=%08x cmd=%08x sts=%08x\n",
++            saved, u3, cmd, sts);
++        return true; /* No port was changed. */
++    }
++    /* SSUSB_U2_PORT_HOST_SEL is HOST(bit2) | VBUSVALID(bit9),
++     * not just bit2. Preserve OTG/IDDIG/other firmware fields.
++     */
++    uint32_t wanted = (saved & ~3U) | 0x204U;
++    ip.write(0x50, wanted);
++    uint32_t enabled = ip.read(0x50);
++    bool control = enabled == wanted;
++    bool ready = control && waitBits(ip, 0x14, 1U, 1U, 100, 100);
++    kprintf("DALI U2: enable saved=%08x want=%08x read=%08x ctrl=%u\n",
++        saved, wanted, enabled, control);
++    kprintf("DALI U2: MAC ready=%u sts=%08x/%08x\n",
++        ready, ip.read(0x10), ip.read(0x14));
++    if (ready) {
++        ReadMapping phy;
++        if (phy.open(0x16730000, 0x400)) {
++            kprintf("DALI U2: PHY acr0=%08x acr4=%08x acr6=%08x dcr1=%08x\n",
++                phy.read(0x300), phy.read(0x310), phy.read(0x318), phy.read(0x364));
++            kprintf("DALI U2: PHY dtm0=%08x dtm1=%08x reserve=%08x/%08x ref=%08x\n",
++                phy.read(0x368), phy.read(0x36c), phy.read(0x330), phy.read(0x334),
++                phy.read(0x344));
++        } else { kprintf("DALI U2: PHY mapping failed\n"); }
++        for (unsigned sample = 0; sample < 3; ++sample) {
++            if (sample) { IOSleep(100); }
++            if ((ip.read(0x10) & 0xd01U) != 0xd01U || !(ip.read(0x14) & 1U) ||
++                xhci.read(op) != 0U || !(xhci.read(op + 4) & 1U)) {
++                kprintf("DALI U2: observation stopped clock/engine state changed\n"); break;
++            }
++            for (unsigned port = 0; port < ports; ++port) {
++                uint32_t sc = xhci.read(op + 0x400U + port * 0x10U);
++                if (sc == ~0U) {
++                    kprintf("DALI U2: PORTSC read invalid port=%u\n", port + 1); break;
++                }
++                kprintf("DALI U2: PORTSC sample=%u port=%u raw=%08x ccs=%u ped=%u speed=%u\n",
++                    sample, port + 1, sc, sc & 1U, (sc >> 1) & 1U, (sc >> 10) & 0xfU);
++            }
++        }
++    }
++    /* Disable/power down the port before the existing host-PDN handshake.
++     * Never release the SPM request if this exact restoration fails.
++     */
++    ip.write(0x50, saved);
++    uint32_t after = ip.read(0x50);
++    bool restored = after == saved;
++    kprintf("DALI U2: restore want=%08x read=%08x match=%u\n", saved, after, restored);
++    return restored;
++}
+ }
+ 
+ void dali_usb_host_observe(bool hwrscsV2, bool vusbAlwaysOn)
+ {
+     if (!ml_get_interrupts_enabled() || ml_at_interrupt_context()) { return; }
+-    kprintf("DALI HOST: guarded MTU3 v2 host power-up begin; no PHY/port/DMA\n");
++    int portProbe = 0;
++    PE_parse_boot_argn("daliusbport", &portProbe, sizeof(portProbe));
++    if (portProbe != 0 && portProbe != 1) { return; }
++    kprintf("DALI HOST: guarded MTU3 v2 host power-up begin; U2 probe=%u no DMA\n", portProbe);
+     ReadMapping spm, bus, vlp, top;
+     if (!spm.open(0x1c004000, 0x1000) || !bus.open(0x1c00d000, 0x1000) ||
+         !vlp.open(0x1c016000, 0x1000) || !top.open(0x10000000, 0x800)) {
+@@ -290,6 +358,7 @@
+         return;
+     }
+     constexpr uint32_t clockMask = 0xd01U; /* SYSPLL/REF/SYS125/XHCI */
++    bool portRestored = true;
+     bool clockReady = waitBits(ip, 0x10, clockMask, clockMask, 200, 100);
+     uint32_t liveSts1 = ip.read(0x10), liveSts2 = ip.read(0x14);
+     kprintf("DALI HOST: powered clocks=%u sts=%08x/%08x\n", clockReady, liveSts1, liveSts2);
+@@ -325,11 +394,12 @@
+                 uint32_t cmd = xhci.read(op), sts = xhci.read(op + 4);
+                 kprintf("DALI HOST: xHCI cmd=%08x sts=%08x pages=%08x\n",
+                     cmd, sts, xhci.read(op + 8));
++                if (portProbe == 1) { portRestored = observeU2Port(ip, xhci, op, ports); }
+             } else { kprintf("DALI HOST: xHCI capability bounds rejected\n"); }
+         }
+     }
+-    /* Return host Pdn and device Pdn to the observed firmware state before
+-     * releasing SPM. No port selector, PHY tuning, IRQ, xHCI or DMA action.
++    /* U2 port was restored before returning host/device PDN and SPM.
++     * No PHY tuning, xHCI engine, IRQ or DMA action.
+      */
+     ip.write(4, ctrl1);
+     ip.write(8, ctrl2);
+@@ -337,11 +407,11 @@
+     bool pdnsRestored = ip.read(4) == ctrl1 && ip.read(8) == ctrl2;
+     bool asleep = pdnsRestored && waitBits(ip, 0x10, 1U << 30, 1U << 30, 1000, 100);
+     if (asleep) { IODelay(100); }
+-    bool released = asleep && releaseResourcesAndRestore(ip, requestGates,
++    bool released = portRestored && asleep && releaseResourcesAndRestore(ip, requestGates,
+         oldRequest, oldAck, savedGates, ctrl0);
+     bool controlsRestored = ip.read(0) == ctrl0 && ip.read(4) == ctrl1 && ip.read(8) == ctrl2;
+-    kprintf("DALI HOST: host handoff cleaned sleep=%u ctrl=%u SPM/gates/force=%u\n",
+-        asleep, controlsRestored, released);
++    kprintf("DALI HOST: host handoff cleaned sleep=%u ctrl=%u SPM/gates/force=%u U2=%u\n",
++        asleep, controlsRestored, released, portRestored);
+     if (!asleep || !released) {
+         kprintf("DALI HOST: cleanup incomplete; reboot required\n");
+     }
