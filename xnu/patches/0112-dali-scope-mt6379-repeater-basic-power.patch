@@ -1,0 +1,206 @@
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -291,6 +291,110 @@
+         values[0], values[1], values[2], values[3], values[4], values[5], values[6]);
+ }
+ 
++/* MT6379 chip74 normal-mode basic power controls. This is deliberately not
++ * the efuse/default/host-eye calibration path. Keep all trims untouched.
++ * Each PMIF write is limited to a saved control field, including rollback.
++ */
++class ScopedRepeater {
++    struct Field { uint16_t reg; uint8_t mask, saved; bool dirty; };
++    Field fields[8] = {
++        {0xd00, 1, 0, false}, {0xd03, 3, 0, false},
++        {0xd12, 0x20, 0, false}, {0xd34, 1, 0, false},
++        {0xd89, 0x80, 0, false}, {0xd8b, 0x20, 0, false},
++        {0xd92, 7, 0, false}, {0xd94, 2, 0, false}
++    };
++    bool saved = false;
++    uint32_t status = 0;
++    bool read(uint16_t reg, uint8_t *v) {
++        bool ok = dali_pmif_transfer(14, reg, v, false, &status);
++        if (!ok) { u2Log("DALI RPTR: control read failed reg=%03x pmif=%x\n", reg, status); }
++        return ok;
++    }
++    bool change(uint16_t reg, uint8_t mask, uint8_t value) {
++        if (!saved) { return false; }
++        for (auto &field : fields) {
++            if (reg != field.reg) { continue; }
++            if (mask & ~field.mask) { return false; }
++            uint8_t before = 0, after = 0;
++            if (!read(reg, &before)) { return false; }
++            uint8_t wanted = (before & ~mask) | (value & mask);
++            field.dirty = true; /* Transfer can partly succeed before timeout. */
++            bool wrote = dali_pmif_transfer(14, reg, &wanted, true, &status);
++            bool got = read(reg, &after);
++            bool ok = wrote && got && after == wanted;
++            if (!ok) { u2Log("DALI RPTR: control write failed reg=%03x wrote=%u read=%u value=%02x\n",
++                reg, wrote, got, after); }
++            return ok;
++        }
++        return false;
++    }
++    bool off() {
++        /* Native power-off order; attempt all safe shutdown fields. */
++        bool ok = change(0xd8b, 0x20, 0x20);
++        ok = change(0xd03, 1, 1) && ok;
++        ok = change(0xd00, 1, 0) && ok;
++        ok = change(0xd03, 2, 0) && ok;
++        ok = change(0xd12, 0x20, 0) && ok;
++        IODelay(300);
++        return ok;
++    }
++public:
++    bool powerOn() {
++        uint8_t chip = 0, reset = 0;
++        if (!read(0, &chip) || chip != 0x74 || !read(0xd91, &reset) || reset != 0) {
++            u2Log("DALI RPTR: chip/reset guard rejected chip=%02x reset=%02x; untouched\n", chip, reset);
++            return false;
++        }
++        for (auto &field : fields) {
++            if (!read(field.reg, &field.saved) || field.saved == 0xff) { return false; }
++        }
++        /* Only the photographed firmware-off handoff, no LP or active owner. */
++        if (fields[0].saved != 4 || fields[1].saved != 1 || fields[2].saved != 0x78 ||
++            fields[4].saved != 0 || fields[5].saved != 0x46) {
++            u2Log("DALI RPTR: entry guard rejected; controls untouched\n"); return false;
++        }
++        for (auto &field : fields) {
++            uint8_t current = 0;
++            if (!read(field.reg, &current) || current != field.saved) { return false; }
++        }
++        if (!read(0, &chip) || chip != 0x74 || !read(0xd91, &reset) || reset != 0) { return false; }
++        saved = true;
++        bool ok = change(0xd92, 7, 7) && change(0xd94, 2, 2);
++        ok = ok && off();
++        /* Normal power-on in vendor >=E3 path; retain calibration registers. */
++        ok = ok && change(0xd12, 0x20, 0x20) && change(0xd89, 0x80, 0x80) &&
++            change(0xd8b, 0x20, 0) && change(0xd00, 1, 1);
++        if (ok) { IODelay(100); }
++        ok = ok && change(0xd03, 1, 0);
++        if (ok) { IODelay(50); }
++        ok = ok && change(0xd34, 1, 1) && change(0xd03, 2, 2);
++        if (ok) { IODelay(10); }
++        ok = ok && change(0xd03, 2, 0);
++        if (ok) { IODelay(30); }
++        ok = ok && change(0xd34, 1, 0) && change(0xd03, 2, 2);
++        if (ok) { IODelay(100); }
++        ok = ok && change(0xd89, 0x80, 0);
++        uint8_t bg = 0, osc = 0;
++        bool got = read(0xd00, &bg) && read(0xd03, &osc);
++        ok = ok && got && (bg & 1) && (osc & 3) == 2;
++        u2Log("DALI RPTR: basic power ready=%u chip=%02x d00=%02x d03=%02x trims preserved\n",
++            ok, chip, bg, osc);
++        return ok;
++    }
++    bool restore() {
++        if (!saved) { return true; }
++        bool ok = off();
++        for (unsigned i = sizeof(fields) / sizeof(fields[0]); i-- > 0;) {
++            auto &field = fields[i];
++            if (!field.dirty) { continue; }
++            bool matched = change(field.reg, field.mask, field.saved);
++            ok = matched && ok;
++        }
++        u2Log("DALI RPTR: owned controls restored=%u\n", ok);
++        return ok;
++    }
++};
++
+ /* Identify the sole USB2 port from Supported Protocol capabilities. Never
+  * infer xHCI port order from the physical IPPC U2/U3 numbering.
+  */
+@@ -395,7 +499,7 @@
+  * the PP probe switches only the protocol-selected USB2 PORTSC power bit.
+  */
+ bool observeU2Port(WriteMapping &ip, const ReadMapping &xhci,
+-    unsigned op, unsigned ports, bool powerProbe, bool phyProbe) {
++    unsigned op, unsigned ports, bool powerProbe, bool phyProbe, bool repeaterProbe) {
+     u2Report.reached = true;
+     uint32_t saved = ip.read(0x50), u3 = ip.read(0x30);
+     uint32_t cmd = xhci.read(op), sts = xhci.read(op + 4);
+@@ -421,13 +525,16 @@
+     bool ppRestored = true, nativeReady = true, ckTouched = false;
+     uint32_t savedCK = 0;
+     ScopedU2Phy nativePhy;
++    ScopedRepeater nativeRepeater;
+     if (ready) {
+         if (phyProbe) {
+             observeRepeaterHandoff();
+             savedCK = ip.read(0x9c);
+             nativeReady = savedCK != ~0U && hostStillHalted(ip, xhci, op);
+             if (nativeReady) {
+-                nativeReady = nativePhy.powerOn() && hostStillHalted(ip, xhci, op);
++                nativeReady = (!repeaterProbe || nativeRepeater.powerOn()) &&
++                    hostStillHalted(ip, xhci, op);
++                nativeReady = nativeReady && nativePhy.powerOn() && hostStillHalted(ip, xhci, op);
+                 if (nativeReady) {
+                     uint32_t roleBefore = ip.read(0x50);
+                     nativeReady = roleBefore == enabled && ip.read(0x9c) == savedCK;
+@@ -486,6 +593,10 @@
+             u2Log("DALI PHY: restore guard failed; reboot required\n");
+         }
+     }
++    /* Reverse native PHY power order. PMIF rollback does not depend on MAC
++     * clocks: also run if the SoC-PHY restore guard failed.
++     */
++    bool repeaterRestored = !repeaterProbe || nativeRepeater.restore();
+     /* Disable/power down the port before the existing host-PDN handshake.
+      * Never release the SPM request if this exact restoration fails.
+      */
+@@ -493,20 +604,22 @@
+     uint32_t after = ip.read(0x50);
+     bool restored = after == saved;
+     u2Log("DALI U2: restore want=%08x read=%08x match=%u\n", saved, after, restored);
+-    return restored && ppRestored && phyRestored;
++    return restored && ppRestored && phyRestored && repeaterRestored;
+ }
+ }
+ 
+ void dali_usb_host_observe(bool hwrscsV2, bool vusbAlwaysOn, bool nativePhyValidated)
+ {
+     if (!ml_get_interrupts_enabled() || ml_at_interrupt_context()) { return; }
+-    int portProbe = 0, powerProbe = 0, phyProbe = 0;
++    int portProbe = 0, powerProbe = 0, phyProbe = 0, repeaterProbe = 0;
+     PE_parse_boot_argn("daliusbport", &portProbe, sizeof(portProbe));
+     PE_parse_boot_argn("daliusbpp", &powerProbe, sizeof(powerProbe));
+     PE_parse_boot_argn("daliusbphy", &phyProbe, sizeof(phyProbe));
++    PE_parse_boot_argn("daliusbrptr", &repeaterProbe, sizeof(repeaterProbe));
+     if ((portProbe != 0 && portProbe != 1) || (powerProbe != 0 && powerProbe != 1) ||
+         (phyProbe != 0 && phyProbe != 1) || (powerProbe && !portProbe) ||
+-        (phyProbe && (!powerProbe || !nativePhyValidated))) { return; }
++        (phyProbe && (!powerProbe || !nativePhyValidated)) ||
++        (repeaterProbe != 0 && repeaterProbe != 1) || (repeaterProbe && !phyProbe)) { return; }
+     bzero(&u2Report, sizeof(u2Report));
+     u2Report.called = true;
+     u2Report.requested = portProbe == 1;
+@@ -677,7 +790,8 @@
+                 kprintf("DALI HOST: xHCI cmd=%08x sts=%08x pages=%08x\n",
+                     cmd, sts, xhci.read(op + 8));
+                 if (portProbe == 1) {
+-                    portRestored = observeU2Port(ip, xhci, op, ports, powerProbe == 1, phyProbe == 1);
++                    portRestored = observeU2Port(ip, xhci, op, ports,
++                        powerProbe == 1, phyProbe == 1, repeaterProbe == 1);
+                 }
+             } else { kprintf("DALI HOST: xHCI capability bounds rejected\n"); }
+         }
+--- a/iokit/Kernel/arm/DaliUSBPMIC.cpp
++++ b/iokit/Kernel/arm/DaliUSBPMIC.cpp
+@@ -157,6 +157,16 @@
+                 config[2] == 0x19 && config[3] == 0x1e && config[4] == 0x1e && config[5] == 1;
+             if (!nativePhyValidated) { return false; }
+         } else if (nativePhy != 0) { return false; }
++        int repeater = 0;
++        PE_parse_boot_argn("daliusbrptr", &repeater, sizeof(repeater));
++        if (repeater == 1 && nativePhyValidated) {
++            OSData *repeaterData = OSDynamicCast(OSData, provider->getProperty("host-repeater-config"));
++            uint32_t config[4] = {};
++            if (!repeaterData || repeaterData->getLength() != sizeof(config)) { return false; }
++            memcpy(config, repeaterData->getBytesNoCopy(), sizeof(config));
++            /* Live SID/base, observed chip revision, control-only policy version. */
++            if (config[0] != 14 || config[1] != 0xd00 || config[2] != 0x74 || config[3] != 1) { return false; }
++        } else if (repeater != 0) { return false; }
+         if (!sourceRequested || !source.init(observeHost, hostHwrscsV2, hostVusbAlwaysOn,
+             nativePhyValidated)) { return false; }
+     } else if (otg != 0) { return false; }
