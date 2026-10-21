@@ -1,0 +1,180 @@
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -1086,21 +1086,33 @@
+ 	bsd_init_kprintf("done\n");
+ }
+ 
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++extern uint64_t sweet_boot_counter_ms(void);
++#define SWEET_INIT_LOG(fmt, ...) kprintf("T%llums init: " fmt, sweet_boot_counter_ms(), ## __VA_ARGS__)
++#else
++#define SWEET_INIT_LOG(fmt, ...) do { } while (0)
++#endif
++
+ void
+ bsdinit_task(void)
+ {
+ 	proc_t p = current_proc();
+ 
++	SWEET_INIT_LOG("bsdinit_task entry\n");
+ 	process_name("init", p);
+ 
+ 	/* Set up exception-to-signal reflection */
++	SWEET_INIT_LOG("ux_handler_setup begin\n");
+ 	ux_handler_setup();
++	SWEET_INIT_LOG("ux_handler_setup returned\n");
+ 
+ #if CONFIG_MACF
+ 	mac_cred_label_associate_user(proc_ucred(p));
+ #endif
+ 
++	SWEET_INIT_LOG("vm_init_before_launchd begin\n");
+ 	vm_init_before_launchd();
++	SWEET_INIT_LOG("vm_init_before_launchd returned\n");
+ 
+ #if CONFIG_XNUPOST
+ 	int result = bsd_list_tests();
+@@ -1112,7 +1124,9 @@
+ 
+ 	bsd_init_kprintf("bsd_do_post - done");
+ 
++	SWEET_INIT_LOG("load_init_program begin\n");
+ 	load_init_program(p);
++	SWEET_INIT_LOG("load_init_program returned\n");
+ 	lock_trace = 1;
+ }
+ 
+@@ -1186,7 +1200,9 @@
+ 	 * Clone the bootstrap process from the kernel process, without
+ 	 * inheriting either task characteristics or memory from the kernel;
+ 	 */
++	SWEET_INIT_LOG("cloneproc begin\n");
+ 	thread = cloneproc(TASK_NULL, NULL, kernproc, CLONEPROC_FLAGS_MEMSTAT_INTERNAL);
++	SWEET_INIT_LOG("cloneproc returned\n");
+ 
+ 	/* Hold the reference as it will be dropped during shutdown */
+ 	initproc = proc_find(1);
+@@ -1208,10 +1224,12 @@
+ 	ut = (struct uthread *)get_bsdthread_info(thread);
+ 	ut->uu_sigmask = 0;
+ 	act_set_astbsd(thread);
++	SWEET_INIT_LOG("initproc created; ASTBSD set\n");
+ 
+ 	ipc_task_enable(get_threadtask(thread));
+ 
+ 	task_clear_return_wait(get_threadtask(thread), TCRW_CLEAR_ALL_WAIT);
++	SWEET_INIT_LOG("initproc return wait cleared\n");
+ }
+ 
+ static void
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -6748,6 +6748,13 @@
+  *		word width of the kernel. Once the self-exec completes, the
+  *		initproc might be different.
+  */
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++extern uint64_t sweet_boot_counter_ms(void);
++#define SWEET_INIT_LOG(fmt, ...) kprintf("T%llums init: " fmt, sweet_boot_counter_ms(), ## __VA_ARGS__)
++#else
++#define SWEET_INIT_LOG(fmt, ...) do { } while (0)
++#endif
++
+ static int
+ load_init_program_at_path(proc_t p, user_addr_t scratch_addr, const char* path)
+ {
+@@ -6768,7 +6775,9 @@
+ 	 */
+ 	size_t path_length = strlen(path) + 1;
+ 	argv0 = scratch_addr;
++	SWEET_INIT_LOG("prepare exec path=%s\n", path);
+ 	error = copyout(path, argv0, path_length);
++	SWEET_INIT_LOG("copyout init path errno=%d\n", error);
+ 	if (error) {
+ 		return error;
+ 	}
+@@ -6828,7 +6837,10 @@
+ 	 */
+ 	set_security_token(p);
+ 
+-	return execve(p, &init_exec_args, retval);
++	SWEET_INIT_LOG("execve begin path=%s\n", path);
++	error = execve(p, &init_exec_args, retval);
++	SWEET_INIT_LOG("execve returned path=%s errno=%d\n", path, error);
++	return error;
+ }
+ 
+ static const char * init_programs[] = {
+@@ -6879,9 +6891,13 @@
+ 	mach_vm_offset_t scratch_addr = 0;
+ 	mach_vm_size_t map_page_size = vm_map_page_size(map);
+ 
++	SWEET_INIT_LOG("scratch allocation begin\n");
+ 	(void) mach_vm_allocate_kernel(map, &scratch_addr, map_page_size, VM_FLAGS_ANYWHERE, VM_KERN_MEMORY_NONE);
++	SWEET_INIT_LOG("scratch allocation returned\n");
+ #if CONFIG_MEMORYSTATUS
++	SWEET_INIT_LOG("memorystatus boot snapshot begin\n");
+ 	(void) memorystatus_init_at_boot_snapshot();
++	SWEET_INIT_LOG("memorystatus boot snapshot returned\n");
+ #endif /* CONFIG_MEMORYSTATUS */
+ 
+ #if DEBUG || DEVELOPMENT
+diff --git a/bsd/dev/arm/systemcalls.c b/bsd/dev/arm/systemcalls.c
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -15,6 +15,11 @@
+ #include <arm/thread.h>
+ #include <arm64/proc_reg.h>
+ #include <pexpert/pexpert.h>
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++#include <os/atomic_private.h>
++extern uint64_t sweet_boot_counter_ms(void);
++static unsigned int sweet_pid1_syscalls;
++#endif
+ 
+ #include <sys/kernel.h>
+ #include <sys/kern_debug.h>
+@@ -97,6 +102,10 @@
+ 	unsigned short  code, syscode;
+ 	pid_t           pid;
+ 	struct uthread *uthread = get_bsdthread_info(thread_act);
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++	unsigned int sweet_init_call = 0;
++	boolean_t sweet_init_trace = FALSE;
++#endif
+ 
+ 	uthread_reset_proc_refcount(uthread);
+ 
+@@ -149,6 +158,16 @@
+ 	}
+ #endif
+ 	pid = proc_pid(proc);
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++	if (pid == 1) {
++		sweet_init_call = os_atomic_inc_orig(&sweet_pid1_syscalls, relaxed);
++		sweet_init_trace = sweet_init_call < 16;
++		if (sweet_init_trace) {
++			kprintf("T%llums init: user syscall %u code=%u enter\n",
++			    sweet_boot_counter_ms(), sweet_init_call, code);
++		}
++	}
++#endif
+ 
+ #ifdef CONFIG_IOCOUNT_TRACE
+ 	uthread->uu_iocount = 0;
+@@ -184,6 +203,13 @@
+ #if CONFIG_MACF
+ skip_syscall:
+ #endif /* CONFIG_MACF */
++
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++	if (sweet_init_trace) {
++		kprintf("T%llums init: user syscall %u code=%u errno=%d rval=%d\n",
++		    sweet_boot_counter_ms(), sweet_init_call, code, error, uthread->uu_rval[0]);
++	}
++#endif
+ 
+ 	unix_syscall_kprintf("code %d, error %d, results %x, %x (pid %d - %s, tid %lld)\n", code, error,
+ 	    uthread->uu_rval[0], uthread->uu_rval[1],

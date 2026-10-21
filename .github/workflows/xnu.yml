@@ -144,6 +144,10 @@ jobs:
           grep -Fq 'dali_watchdog_init();' xnu/pexpert/arm/pe_init.c
           grep -Fq 'dali_watchdog_poll();' xnu/osfmk/arm/rtclock.c
           nm fakeroot/System/Library/Kernels/kernel.development.sweet | grep ' _dali_watchdog_poll$'
+          grep -Fq 'bsdinit_task entry' xnu/bsd/kern/bsd_init.c
+          grep -Fq 'initproc return wait cleared' xnu/bsd/kern/bsd_init.c
+          grep -Fq 'execve returned path=%s errno=%d' xnu/bsd/kern/kern_exec.c
+          grep -Fq 'sweet_init_trace = sweet_init_call < 16;' xnu/bsd/dev/arm/systemcalls.c
 
       - name: Package build tree for local compiles
         if: always()

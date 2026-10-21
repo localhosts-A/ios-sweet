@@ -1,0 +1,24 @@
+# Dali memory-root and init diagnostics
+
+CI39536532295's hardware trial reached memory root md0 (major1/minor0),
+passed vfs_mountroot, VFS_ROOT and devfs initialization, and returned from
+bsd_init at physical-counter36492ms. Photo111408's following
+vm_free_delayed_pages message belongs to normal bootstrap/pageout work.
+There is no PID1 banner or heartbeat in that photo. The user reports the
+screen then stayed on those lines. Original boot/init_boot were subsequently
+restored and both full physical partition hashes matched the saved originals.
+
+Patch0092 adds SWEET DEVELOPMENT diagnostics to distinguish the next stages:
+
+- Clone/initproc, ASTBSD and return-wait release in bsd_utaskbootstrap.
+- bsdinit_task entry, exception handler setup and VM preparation.
+- Initial executable path copy, scratch allocation and execve return code.
+- The first16 PID1 UNIX syscall entries and normal-path results, with no
+  syscall argument data. These entries provide EL0 execution evidence even
+  when the probe's /dev/console text is invisible. Blocking syscalls can
+  return through continuation paths without the normal-return marker.
+
+No initialization, scheduling, syscall filter, executable validation, fallback
+path or return value is bypassed. Root image, shim, ADT, arguments and finite
+watchdog lease remain those of the successful memory-root trial. Absence of
+the console banner alone does not establish that PID1 failed to run.
