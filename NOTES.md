@@ -6,6 +6,8 @@ Immediately recovered full original init_boot_b then boot_b and rebooted Android
 
 Patch0116 (2026-10-22) adds precise protocol/capability/reset/arena/ring/Run/NoOP/port/enumeration startup-stage reporting, existing wait readback and source/budget rejection, allocation/prepare/mapping failure values. No guard relaxation or changed hardware write sequence. Local actual native ARM64 DaliXHCI compile1/1 PASS; patch replay against actual CI0115 sources gives2/2 byte-identical source files. CI linked diagnostic checks added. Full CI remains pending; no additional trial. An attempted git status in extracted native tree failed because artifacts have no .git (no changes); baseline comparison instead uses verified-source directory.
 
+Patch0116 committed/pushed d80e05c; full Actions39631757732 building. No new candidate packaged/flashed, physical originals remain verified. Exact startup failure is still unknown; diagnostics do not constitute a fix.
+
 ## Historical integrated USB root trial (recovered)
 
 User explicitly confirmed ready for timed cable swap. Currentpair `shim/out-dali/usb-integrated-39628092431/device_pair.py trial` completed successfully: immediate Android full physical original SHA256/size/root/model/_b/completed PASS, fastboot product/slot/unlocked/sizes PASS, host original/candidate hashes PASS; temporary init_boot_b then boot_b flashed OKAY and reboot requested. Authoritative ignored manifest is now trial_rebooted. CURRENT ORIGINAL RESTORATION PENDING; all earlier originals_verified/preflight records are historical. Log research/dali-usb-root/ci-artifacts/run39628092431-trial.log. User instructed swap at red loader before prompt allowed, photograph XHCI/MSC/ROOT/failure and return PC/manual fastboot. No hardware result received yet.
