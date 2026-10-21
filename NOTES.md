@@ -6,6 +6,8 @@ Sourceaudit found pmap_sync_page_attributes_phys uses `(vm_offset_t)(pp << PAGE_
 
 Patch0119 widenspageaddressvia ptoa_64(pp) beforecacheflush; actualoldkernelinstruction lslw0,w0,#14 confirms32bittruncation; newnativeobject ubfizx0,x0,#14,#32 preservesfullPA. NativepmapARM64compile1/1PASS. Adjacentcache_sync_page/cacheattrpathsuseptoa orwideaddr; nootherrawppshiftinthisfile. ExactactualCI0118patchreplay/fullCIpending. Physicalrangeguard/uncachedDMApolicyunchanged; no actualDMA/USBproof. Oldhypothesistruncationnowinstructionconfirmed, exactsourcecallerstacknotprintedbyphoto.
 
+Patch0119 committed/pushed8fc0413; fullCI39639794623 running. Nativepmap1/1compile+new64bitinstructionPASS; exactactualCI0118+0119pmapreplay1/1PASS;88positiveworkflowassertions+oldtruncationnegativecheckPASS. Nextpair usb-cache-pa-39639794623 must validate32actualsources(includingpmap) anddisassembleactualCIkernel64bitconversionbeforepackage. Previousoriginalsverified/noactive trial.
+
 ## Historical independent AO reset trial (recovered)
 
 User requests continue after verifiedcandidate; Androidconnected. Currentpair `shim/out-dali/usb-reset-ao-39637194159/device_pair.py trial` completed: immediate AndroidfullphysicaloriginalSHA256/size/root/model/_b/completed PASS; fastbootproduct/unlocked/slot/sizes/hostoriginalcandidatehashes PASS. Temporaryinit_boot_bthenboot_b flashedOKAY/rebootrequested. Authoritativeignoredmanifesttrial_rebooted; CURRENT ORIGINAL RESTORATION PENDING. Previousoriginals_verifiedonlyhistorical. Logresearch/dali-usb-root/ci-artifacts/run39637194159-trial.log. UsertoldredloaderearlyswapOTG/Udisk, photographXHCIreset/running/healthrejected/startfailedstage/MSC/ROOT, observe~1minute thenPCmanualfastboot. No newhardwareoutcomeyet.
