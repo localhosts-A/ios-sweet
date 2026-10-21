@@ -1,3 +1,13 @@
+## USB write active; native Android host capture prepared (2026-10-21)
+
+Host `/dev/sdc1` backup files.tar compared/hashed; metadata prefixes/table saved in ignored `backup/usb-root-20261021/` (file backup, not whole raw disk). Initial lsblk flat/tree guard mismatch fixed before writes. Current guarded writer active (session88579), source16GiB nonjournaledHFSX SHAea6fe9549adc6a2f4f466079e5fb4e2b7432e80977923dbc98a3c6944c5be3cd, fullrepair andindependentreadonlyfsck clean. Originaljournaledroot andjournaledclonepreserved. Await `write-state.json` readback_verified afterfsync/directall16GiBhash/table+prefix checks; do notremoveUSB untilthen.
+
+New `tools/dali-usb-host-capture.sh` and `docs/dali-usb-otg.md`; syntax/whitespacechecked, notyetarmed. RealSSUSB/xHCI/XSphy+NXP/MT6379repeater/TypeC5V+cp_masterchargepump facts documented. UserordinaryphonepoweredOTG, so nativeAndroidhostbaseline needed beforepowerconfiguration. XNUUSBhost/storageNOTimplemented; do notclaimbootableUSBjustbecauseimagewritten. Phone originalsremainverified; no newtrial. Afterwritefinishedarmboundedrootcapture, userattachOTG20sec/returnPC, thenretrievelogs.
+
+## Active: Dali USB OTG root request (2026-10-21)
+
+User explicitly requests USB OTG/U-disk root and write to host `/dev/sdc1`. Read-only target identified as removable Kingston119.2GiB, existing FAT32 ~1.1GiB EFI/recovery files mounted `/home/baka/Music/1`; backup before overwrite. Use existing16GiB iOS root for requested purpose; no USB writes yet. Need MT6991 SSUSB/xHCI/PHY/VBUS host+storage implementation; Qualcomm Sweet gadget code is unrelated. Phone original pair verified, no active trial. PID1 static probe success remains proven, full iOS GUI not verified.
+
 
 - Sync status: PID1 success/recovery results committed locally7ebde99. Both normal HTTPS and HTTP/1.1 push hit TLS unexpected EOF; remote remains at prior87a0066 until connectivity recovers. All implementation commits/artifact builds already on fork; only final result documentation pending push. Phone originals verified, no active trial.
 
