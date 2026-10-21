@@ -1,0 +1,28 @@
+diff --git a/iokit/Kernel/arm/DaliUSBHost.cpp b/iokit/Kernel/arm/DaliUSBHost.cpp
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -186,12 +186,19 @@
+     bool clockReady = waitBits(ip, 0x10, clockMask, clockMask, 200, 100);
+     uint32_t liveSts1 = ip.read(0x10), liveSts2 = ip.read(0x14);
+     kprintf("DALI HOST: powered clocks=%u sts=%08x/%08x\n", clockReady, liveSts1, liveSts2);
+-    if (clockReady && (liveSts2 & 1U)) {
+-        ReadMapping phy;
+-        if (phy.open(0x16730000, 0x400)) {
+-            kprintf("DALI HOST: PHY acr0=%08x acr6=%08x dtm0=%08x dtm1=%08x (observe only)\n",
+-                phy.read(0x300), phy.read(0x318), phy.read(0x368), phy.read(0x36c));
++    if (clockReady) {
++        if (liveSts2 & 1U) {
++            ReadMapping phy;
++            if (phy.open(0x16730000, 0x400)) {
++                kprintf("DALI HOST: PHY acr0=%08x acr6=%08x dtm0=%08x dtm1=%08x (observe only)\n",
++                    phy.read(0x300), phy.read(0x318), phy.read(0x368), phy.read(0x36c));
++            }
++        } else {
++            kprintf("DALI HOST: PHY reads skipped U2 MAC reset status\n");
+         }
++        /* The xHCI IP is independently clocked. Its capability block can be
++         * observed after HCI reset deasserts, even if U2/PHY is still gated.
++         */
+         ReadMapping xhci;
+         if (xhci.open(0x16700000, 0x1000)) {
+             uint32_t version = xhci.read(0), hcs1 = xhci.read(4), hcs2 = xhci.read(8);
