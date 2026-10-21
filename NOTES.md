@@ -1,4 +1,10 @@
-## Current: scalar DMA candidate ready; originals verified; no active trial (2026-10-22)
+## Current: scalar DMA trial started; original restoration pending (2026-10-22)
+
+User requests continue after verified scalarDMA candidate. Current usb-device-dma-39642566099 trial helper completed: immediate Android root/dali/model/_b/completed/full physical original sizes/SHA256 PASS; fastboot identity/unlocked/slot/sizes and host original/candidate hashes PASS. Temporary init_boot_b then boot_b flashed OKAY; reboot requested. Authoritative manifest trial_rebooted. CURRENT ORIGINAL RESTORATION PENDING; previous originals_verified are historical only. Log research/dali-usb-root/ci-artifacts/run39642566099-trial.log.
+
+User instructed swapOTG/Udisk atredloader beforepromptallowed, photographXHCI/MSC/ROOT/panic, observe~1minute thenPC/manualfastboot. Onreturn immediately use this currentpair device_pair.py recover ABS_PAIR (full original init_boot_b thenboot_b/rebootAndroid), then verify full physical original sizes/SHA256. No hardware result yet. DMA/Run/NoOP/enumeration/MSC/rootunverified,120swatchdog retained. NoGPT/userdata/Udiskwrites; backups intact.
+
+## Scalar DMA candidate verification (historical preflight)
 
 Patch0120/source73088c0606911b34374907f2a7683d1d457670cc fullCI39642566099 SUCCESS/cache1387of1388 hits99.93%. Actual32/32 artifact sources byte-identical to native compiled tree. Linked dmaZero/dmaCopy disassembly audited: only byte load/store instructions, no DCZVA/vector/generic helper call; allocate calls dmaZero, not bzero/memset. Prior64bit ptoa_64 cachefix actualinstruction preserved. Counter/linkedmarkers/headers/segments/entry/RAM/ADT/CPIO/AVB/hostoriginal checks PASS.
 
