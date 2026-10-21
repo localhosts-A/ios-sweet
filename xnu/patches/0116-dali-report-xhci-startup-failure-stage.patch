@@ -1,0 +1,177 @@
+--- a/iokit/Kernel/arm/DaliXHCI.h
++++ b/iokit/Kernel/arm/DaliXHCI.h
+@@ -34,6 +34,7 @@
+     unsigned epIn = 0, epOut = 0, inPacket = 0, outPacket = 0, interface = 0;
+     unsigned operationBudgetMs = 0;
+     uint64_t startedMs = 0;
++    const char *startupStage = "idle";
+     bool dmaPublished = false, running = false, faulted = false, configured = false;
+     bool prepared = false;
+     void fail() { __atomic_store_n(&faulted, true, __ATOMIC_RELEASE); }
+--- a/iokit/Kernel/arm/DaliXHCI.cpp
++++ b/iokit/Kernel/arm/DaliXHCI.cpp
+@@ -44,8 +44,14 @@
+     wr(n, uint32_t(v)); wr(n + 4, uint32_t(v >> 32));
+ }
+ bool DaliXHCI::live() {
+-    if (__atomic_load_n(&faulted, __ATOMIC_ACQUIRE) || !ops.alive(ops.cookie) ||
+-        milliseconds() - startedMs > operationBudgetMs) { fail(); return false; }
++    if (__atomic_load_n(&faulted, __ATOMIC_ACQUIRE)) { return false; }
++    bool healthy = ops.alive(ops.cookie);
++    uint64_t elapsed = milliseconds() - startedMs;
++    if (!healthy || elapsed > operationBudgetMs) {
++        ops.log("DALI XHCI: guard stage=%s healthy=%u elapsed=%llu budget=%u\n",
++            startupStage, healthy, elapsed, operationBudgetMs);
++        fail(); return false;
++    }
+     return true;
+ }
+ bool DaliXHCI::wait(unsigned reg, uint32_t mask, uint32_t expected, unsigned ms) {
+@@ -53,10 +59,15 @@
+     do {
+         if (!live()) { return false; }
+         uint32_t value = rd(reg);
+-        if (value == ~0U) { fail(); return false; }
++        if (value == ~0U) {
++            ops.log("DALI XHCI: read rejected stage=%s reg=%x\n", startupStage, reg);
++            fail(); return false;
++        }
+         if ((value & mask) == expected) { return true; }
+         IOSleep(1);
+     } while (milliseconds() - start < ms);
++    ops.log("DALI XHCI: wait timeout stage=%s reg=%x mask=%08x want=%08x read=%08x\n",
++        startupStage, reg, mask, expected, rd(reg));
+     return false;
+ }
+ bool DaliXHCI::allocate() {
+@@ -67,14 +78,24 @@
+     memory = IOBufferMemoryDescriptor::inTaskWithPhysicalMask(kernel_task,
+         kIODirectionInOut | kIOMemoryPhysicallyContiguous | kIOMemoryMapperNone |
+         kIOMapInhibitCache, arenaBytes, limit & ~0xffffULL);
+-    if (!memory || memory->prepare(kIODirectionInOut) != kIOReturnSuccess) { return false; }
++    if (!memory) {
++        ops.log("DALI XHCI: arena allocation rejected bytes=%u bits=%u\n", arenaBytes, ops.dmaAddressBits);
++        return false;
++    }
++    IOReturn result = memory->prepare(kIODirectionInOut);
++    if (result != kIOReturnSuccess) {
++        ops.log("DALI XHCI: arena prepare failed status=%08x\n", result); return false;
++    }
+     prepared = true;
+     IOByteCount length = 0;
+     physical = memory->getPhysicalSegment(0, &length, kIOMemoryMapperNone);
+     arenaMap = memory->map(kIOMapAnywhere | kIOMapInhibitCache);
+     bytes = arenaMap ? reinterpret_cast<uint8_t *>(arenaMap->getVirtualAddress()) : nullptr;
+     if (!physical || (physical & 0xffff) || length < arenaBytes || !bytes ||
+-        physical > limit - (arenaBytes - 1)) { return false; }
++        physical > limit - (arenaBytes - 1)) {
++        ops.log("DALI XHCI: arena validation failed pa=%llx length=%llu mapped=%u limit=%llx\n",
++            physical, uint64_t(length), bytes != nullptr, limit); return false;
++    }
+     bzero(bytes, arenaBytes);
+     Ring *rings[] = {&commandRing, &controlRing, &inRing, &outRing};
+     for (Ring *r : rings) {
+@@ -180,8 +201,11 @@
+ bool DaliXHCI::usb2Port(unsigned *selected) {
+     unsigned ports = rd(4) >> 24, ext = (rd(0x10) >> 16) * 4, found = 0;
+     for (unsigned count = 0; ext && count < 16; ++count) {
+-        if ((ext & 3) || ext < 0x20 || ext > 0xff0) { return false; }
++        if ((ext & 3) || ext < 0x20 || ext > 0xff0) {
++            ops.log("DALI XHCI: protocol offset rejected ext=%x\n", ext); return false;
++        }
+         uint32_t cap = rd(ext), range = rd(ext + 8);
++        ops.log("DALI XHCI: ext offset=%x header=%08x range=%08x\n", ext, cap, range);
+         if ((cap & 255) == 1) { return false; } /* Unimplemented legacy ownership. */
+         if ((cap & 255) == 2 && rd(ext + 4) == 0x20425355 && (cap >> 24) == 2) {
+             if (found || ((range >> 8) & 255) != 1 || !(range & 255) || (range & 255) > ports) { return false; }
+@@ -192,24 +216,34 @@
+         if (ext + next <= ext || ext + next > 0xff0) { return false; }
+         ext += next;
+     }
+-    if (ext || !found) { return false; }
++    if (ext || !found) {
++        ops.log("DALI XHCI: protocol end rejected ext=%x selected=%u\n", ext, found); return false;
++    }
+     *selected = found; return true;
+ }
+ bool DaliXHCI::initialize(unsigned usbPort) {
++    startupStage = "capabilities";
+     uint32_t cap = rd(0), hcc = rd(0x10), hcs = rd(4);
+     op = cap & 255; contextBytes = (hcc & 4) ? 64 : 32;
+     doors = rd(0x14); runtime = rd(0x18);
++    uint32_t command = op >= 0x20 && op <= 0x80 ? rd(op) : ~0U;
++    uint32_t status = op >= 0x20 && op <= 0x80 ? rd(op + 4) : ~0U;
++    ops.log("DALI XHCI: init cap=%08x hcc=%08x hcs=%08x db=%x rt=%x cmd=%08x sts=%08x port=%u\n",
++        cap, hcc, hcs, doors, runtime, command, status, usbPort);
+     if (op < 0x20 || op > 0x80 || (op & 3) || (cap >> 16) < 0x100 ||
+         (cap >> 16) > 0x120 || !(hcc & 1) || !(hcc & 8) ||
+         !usbPort || usbPort > (hcs >> 24) || (hcs & 255) < 1 ||
+         doors < 0x20 || doors > 0xfc0 || (doors & 3) ||
+         runtime < 0x20 || runtime > 0xfa0 || (runtime & 31) ||
+-        op + 0x400 + (hcs >> 24) * 16 > 0x1000 || rd(op) != 0 ||
+-        (rd(op + 4) & 0x801) != 1) { return false; }
++        op + 0x400 + (hcs >> 24) * 16 > 0x1000 || command != 0 ||
++        (status & 0x801) != 1) { return false; }
+     port = usbPort;
++    startupStage = "controller-reset";
+     wr(op, 2); /* Host controller reset only after halt, no DMA published. */
+     if (!wait(op, 2, 0, 1000) || !wait(op + 4, 0x800, 0, 1000) || !(rd(op + 8) & 1)) { return false; }
+     unsigned scratch = ((rd(8) >> 27) & 31) | (((rd(8) >> 21) & 31) << 5);
++    startupStage = "arena-allocation";
++    ops.log("DALI XHCI: reset complete pages=%08x scratch=%u\n", rd(op + 8), scratch);
+     if (scratch > 32 || !allocate()) { return false; }
+     auto *dcbaa = reinterpret_cast<uint64_t *>(bytes);
+     if (scratch) {
+@@ -219,25 +253,33 @@
+     }
+     auto *erst = reinterpret_cast<uint64_t *>(bytes + 0x3000);
+     erst[0] = physical + 0x2000; erst[1] = 256;
++    startupStage = "publish-rings";
+     publish(); dmaPublished = true;
+     wr64(op + 0x30, physical); wr64(op + 0x18, (physical + 0x1000) | 1);
+     wr(runtime + 0x20, 0); /* IRQ disabled: event ring is polled. */
+     wr(runtime + 0x28, 1); wr64(runtime + 0x30, physical + 0x3000);
+     wr64(runtime + 0x38, physical + 0x2000); wr(op + 0x38, 1);
+     wr(op, 1); running = true;
+-    if (!wait(op + 4, 1, 0, 1000) || !command(23, 0, 0, 0)) { return false; }
++    startupStage = "run";
++    if (!wait(op + 4, 1, 0, 1000)) { return false; }
++    startupStage = "noop-completion";
++    if (!this->command(23, 0, 0, 0)) { return false; }
+     ops.log("DALI XHCI: running AC64=1 context=%u arena=%llx bytes=%u\n", contextBytes, physical, arenaBytes);
+     unsigned reg = op + 0x400 + (port - 1) * 16;
+     constexpr uint32_t neutral = 0x4e00ffe9U; /* RO/RWS, no RW1C/reset/strobe. */
+     uint32_t value = rd(reg);
++    startupStage = "port-power";
+     if (value == ~0U || (value & 8)) { return false; }
+     wr(reg, (value & neutral) | 0x200);
+     IOSleep(20);
++    startupStage = "attachment";
+     if (!wait(reg, 1, 1, 2000)) { ops.log("DALI XHCI: no USB2 attachment\n"); return false; }
++    startupStage = "debounce";
+     for (unsigned n = 0; n < 10; ++n) {
+         if (!live() || (rd(reg) & 9) != 1) { return false; }
+         IOSleep(10); /* USB2 connection debounce, independent of Type-C debounce. */
+     }
++    startupStage = "port-reset";
+     value = rd(reg); wr(reg, (value & neutral) | 0x200 | 16); /* USB2 reset. */
+     if (!wait(reg, 16, 0, 1000) || !(rd(reg) & 2)) { return false; }
+     unsigned speed = (rd(reg) >> 10) & 15;
+@@ -495,9 +537,14 @@
+         maxMilliseconds < 1000 || maxMilliseconds > 12000) { return false; }
+     ops = callbacks; operationBudgetMs = maxMilliseconds; startedMs = milliseconds();
+     unsigned selected = 0;
+-    if (!usb2Port(&selected) || !initialize(selected) || !enumerate()) {
+-        fail(); ops.log("DALI XHCI: start failed; shutdown required\n"); return false;
+-    }
++    startupStage = "protocol-map";
++    bool initialized = usb2Port(&selected) && initialize(selected);
++    if (initialized) { startupStage = "enumeration"; initialized = enumerate(); }
++    if (!initialized) {
++        fail(); ops.log("DALI XHCI: start failed stage=%s elapsed=%llu published=%u running=%u; shutdown required\n",
++            startupStage, milliseconds() - startedMs, dmaPublished, running); return false;
++    }
++    startupStage = "storage";
+     return true;
+ }
+ bool DaliXHCI::stop() {

@@ -208,6 +208,9 @@ jobs:
           grep -Fq 'if (!(buf_flags(bp) & B_READ)) { error = EROFS;' xnu/bsd/dev/dali_usb_disk.c
           grep -Fq 'usbroot != 1 && PE_parse_boot_argn("rootrw"' xnu/bsd/vfs/vfs_subr.c
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: running AC64=1'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: start failed stage='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: init cap='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: arena validation failed'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: stopped/reset; DMA ownership returned'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI MSC: ready blocks='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI ROOT: selected read-only du0'

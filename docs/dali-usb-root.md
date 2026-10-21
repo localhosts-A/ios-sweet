@@ -70,6 +70,18 @@ Patch0115 also handles the native MTK short-transfer quirk: an extra successful
 event is ignored only for the exact previous Short Packet TRB, endpoint and
 slot. Reusing that ring address clears the old match.
 
+## First integrated device result
+
+The 2026-10-21 integrated candidate completed native repeater calibration and
+SoC PHY setup, then reported xHCI startup failure and successful shutdown.
+No DMA No-op completion, USB enumeration, storage read or USB root mount was
+established. Original Android boot partitions were restored and their full
+physical sizes and SHA256 hashes verified.
+
+Patch0116 records the exact startup stage, capability/offset values, reset
+wait failures and DMA allocation/mapping rejection. It preserves existing
+hardware guards; this diagnostic change does not establish a fix.
+
 ## Primary references
 
 - [Intel xHCI1.22 specification](https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/extensible-host-controler-interface-usb-xhci.pdf), sections4/5/6.

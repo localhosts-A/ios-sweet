@@ -1,4 +1,12 @@
-## ACTIVE integrated USB root trial — original restoration PENDING (2026-10-21)
+## Current: integrated trial failed at xHCI startup; originals recovered (2026-10-21)
+
+Photo IMG_20261021_235626.jpg records report reached1/truncated0: RPTR native calibration/basic power1 chip74,d0005,d0302; PHY slew ready1 valid0 fallbackvalue4; power/mode1/UTMIhost1. Engine emits start failed; integratedresult0/stopped1, then ownedPHY/UTMI/RPTR/U2restore1 and hostcleanup sleep1/ctrl1/SPM-gates-force1/U2intact1. No running/NoOP/USB enumeration/MSC/root success in photo. Exact failed initialization guard is not logged yet. Do not infer a cable or disk fault. Source ADC~4.98V, source cleanup/noADCerror reported.
+
+Immediately recovered full original init_boot_b then boot_b and rebooted Android. Android boot_completed1/root/dali/model/_b/full physical original sizes and SHA256 PASS. Current authoritative manifest `shim/out-dali/usb-integrated-39628092431/trial-state.json` originals_verified. NO ACTIVE TRIAL OR PENDING RESTORATION. Next offline audit xHCI protocol/capability/reset/allocation guards and add precise failure-stage evidence before any further consolidated trial. No GPT/userdata/Udisk writes.
+
+Patch0116 (2026-10-22) adds precise protocol/capability/reset/arena/ring/Run/NoOP/port/enumeration startup-stage reporting, existing wait readback and source/budget rejection, allocation/prepare/mapping failure values. No guard relaxation or changed hardware write sequence. Local actual native ARM64 DaliXHCI compile1/1 PASS; patch replay against actual CI0115 sources gives2/2 byte-identical source files. CI linked diagnostic checks added. Full CI remains pending; no additional trial. An attempted git status in extracted native tree failed because artifacts have no .git (no changes); baseline comparison instead uses verified-source directory.
+
+## Historical integrated USB root trial (recovered)
 
 User explicitly confirmed ready for timed cable swap. Currentpair `shim/out-dali/usb-integrated-39628092431/device_pair.py trial` completed successfully: immediate Android full physical original SHA256/size/root/model/_b/completed PASS, fastboot product/slot/unlocked/sizes PASS, host original/candidate hashes PASS; temporary init_boot_b then boot_b flashed OKAY and reboot requested. Authoritative ignored manifest is now trial_rebooted. CURRENT ORIGINAL RESTORATION PENDING; all earlier originals_verified/preflight records are historical. Log research/dali-usb-root/ci-artifacts/run39628092431-trial.log. User instructed swap at red loader before prompt allowed, photograph XHCI/MSC/ROOT/failure and return PC/manual fastboot. No hardware result received yet.
 
