@@ -1,3 +1,9 @@
+## ACTIVE USB PMIC TRIAL — original restoration PENDING (2026-10-21)
+
+Currentpair `shim/out-dali/usbpmic-39544763251/`, manifest **trial_rebooted**. FreshimmediateAndroidoriginalphysical64+8MiBhashes/root/model/slot/completed +hostbackup/candidate +fastbootidentity/unlocked/sizesallverified. CI39544763251 readonlyUSBPMIC/sharedPMIFRTC pairinit_boot_b thenboot_bwritesOKAY/rebootOKAY. UseraskedDaliRTC/PMIF/USBPMICTCPCID+rolephotos, optionalOTG20sec, thenmanualfastbootandreconnectPC. No hardwareoutcomeyet. USBhost/storageNOTimplemented.
+
+**Onfastbootreturn immediatelyrestore**: runpair/device_pair.py recover withabsolute pairdir, thenwaitAndroidbootandrunverify forbothfullphysicaloriginalSHA256. Fullbackups `backup/dali-25060RK16C-pairtest-20261020/`. bootSHA6dc40de74fa7de4f435c513047c51fe10634c1891666031039c52a08b27a3cd5; initSHA08794a432befcf0504ee4933a51260cb6ccc4785b69f345c4b5968e8e6053d2d. Finite120sWDTlease retained; no userdata/UFS/GPTwrites. USBmediaalready16GiBdirectreadbackverified, filesbackupavailable.
+
 ## Current: verified USB PMIC trial pair; fresh preflight pending (2026-10-21)
 
 CI39544763251 SUCCESS6960bca; actual18/18sourcebytesmatchlocalcompiled, nativePMIF/RTC/USBPMICsymbols/stringsandcounterverified. Durableignoredpair `shim/out-dali/usbpmic-39544763251/`: unchangedprovenbootddfbc184..., newinit_bootfbafad1c9142197c653bd9d54421dabf6ff7441acbc56f7dd3f39bed252166e6, kernel588e1e5435386c27b1941087e0c927607f03983a1e3af0a4eb073aa1973ff13d. Payload29233424/11segments,ADT7636withUSBPMIC/RTC/CPU/GIC/WDT, same12MiBrootat2024d0000, argsadddaliusb=1. Fullheaders/segments/entry/RAM/LZ4CPIO/8MiBAVB/hostoriginalchecksPASS. NewRTC/sharedPMIF/USBPMICcandidatehardwareUNVERIFIED. No USBhost/storageimplementationyet.
