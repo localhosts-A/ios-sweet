@@ -1,0 +1,93 @@
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -96,7 +96,11 @@
+         gate.write(offset, value);
+         uint32_t after = gate.read(offset);
+         if (after == ~0U || (after & 0xfU) != (value & 0xfU) ||
+-            (after & ~0xfU) != (current & ~0xfU)) { ok = false; }
++            (after & ~0xfU) != (current & ~0xfU)) {
++            kprintf("DALI HOST: REQ_GATE%u %s want=%08x read=%08x before=%08x\n",
++                i, enable ? "enable" : "restore", value, after, current);
++            ok = false;
++        }
+     }
+     return ok;
+ }
+@@ -114,18 +118,34 @@
+     bool control = after != ~0U &&
+         (after & (kHwrscsForceMask | kHwrscsRequestMask)) ==
+         (oldRequest & (kHwrscsForceMask | kHwrscsRequestMask));
+-    return ack && control && setRequestGates(gate, savedGates, false);
++    kprintf("DALI HOST: restore SPM req=%08x ack=%08x saved=%08x/%08x match=%u/%u\n",
++        after, ip.read(0xe8), oldRequest, oldAck, control, ack);
++    bool gates = ack && control && setRequestGates(gate, savedGates, false);
++    kprintf("DALI HOST: restore gates=%u attempted=%u\n", gates, ack && control);
++    return gates;
+ }
+ 
+ bool releaseResourcesAndRestore(WriteMapping &ip, WriteMapping &gate,
+-    uint32_t oldRequest, uint32_t oldAck, const uint32_t *savedGates) {
++    uint32_t oldRequest, uint32_t oldAck, const uint32_t *savedGates, uint32_t oldCtrl0) {
+     uint32_t current = ip.read(0xe0);
+     if (current == ~0U) { return false; }
+     uint32_t off = current & ~(kHwrscsForceMask | kHwrscsRequestMask);
+     ip.write(0xe0, off);
+-    if (!waitBits(ip, 0xe8, kHwrscsRequestMask,
+-            oldAck & kHwrscsRequestMask, 200, 100)) { return false; }
+-    return restoreSpmAndGates(ip, gate, oldRequest, oldAck, savedGates);
++    bool offAck = waitBits(ip, 0xe8, kHwrscsRequestMask,
++        oldAck & kHwrscsRequestMask, 200, 100);
++    kprintf("DALI HOST: SPM off req=%08x ack=%08x goal=%08x match=%u reset=%08x\n",
++        ip.read(0xe0), ip.read(0xe8), oldAck, offAck, ip.read(0));
++    if (!offAck) { return false; }
++    /* Vendor OFF handshake runs with whole-IP reset released. Wait its
++     * documented 2ms before restoring the firmware reset/force/gate state.
++     */
++    IODelay(2000);
++    ip.write(0, oldCtrl0);
++    uint32_t restoredCtrl0 = ip.read(0);
++    bool reset = restoredCtrl0 == oldCtrl0;
++    kprintf("DALI HOST: reset restore want=%08x read=%08x match=%u\n",
++        oldCtrl0, restoredCtrl0, reset);
++    return reset && restoreSpmAndGates(ip, gate, oldRequest, oldAck, savedGates);
+ }
+ }
+ 
+@@ -249,14 +269,14 @@
+         /* Keep reset released until the IP sleep handshake completes. */
+         bool pdnsRestored = ip.read(4) == ctrl1 && ip.read(8) == ctrl2;
+         bool asleep = pdnsRestored && waitBits(ip, 0x10, 1U << 30, 1U << 30, 1000, 100);
+-        if (asleep) { IODelay(100); ip.write(0, ctrl0); }
++        if (asleep) { IODelay(100); }
++        bool released = asleep && releaseResourcesAndRestore(ip, requestGates,
++            oldRequest, oldAck, savedGates, ctrl0);
+         bool controlsRestored = ip.read(0) == ctrl0 && ip.read(4) == ctrl1 && ip.read(8) == ctrl2;
+-        bool released = asleep && controlsRestored && releaseResourcesAndRestore(ip, requestGates,
+-            oldRequest, oldAck, savedGates);
+         kprintf("DALI HOST: control readback rejected restore=%u sleep=%u SPM=%u\n",
+             controlsRestored, asleep, released);
+         if (!asleep || !released) {
+-            kprintf("DALI HOST: safe powered state retained; reboot required\n");
++            kprintf("DALI HOST: cleanup incomplete; reboot required\n");
+         }
+         return;
+     }
+@@ -307,14 +327,14 @@
+     /* Keep reset released until the IP sleep handshake completes. */
+     bool pdnsRestored = ip.read(4) == ctrl1 && ip.read(8) == ctrl2;
+     bool asleep = pdnsRestored && waitBits(ip, 0x10, 1U << 30, 1U << 30, 1000, 100);
+-    if (asleep) { IODelay(100); ip.write(0, ctrl0); }
++    if (asleep) { IODelay(100); }
++    bool released = asleep && releaseResourcesAndRestore(ip, requestGates,
++        oldRequest, oldAck, savedGates, ctrl0);
+     bool controlsRestored = ip.read(0) == ctrl0 && ip.read(4) == ctrl1 && ip.read(8) == ctrl2;
+-    bool released = asleep && controlsRestored && releaseResourcesAndRestore(ip, requestGates,
+-        oldRequest, oldAck, savedGates);
+     kprintf("DALI HOST: host handoff cleaned sleep=%u ctrl=%u SPM/gates/force=%u\n",
+         asleep, controlsRestored, released);
+     if (!asleep || !released) {
+-        kprintf("DALI HOST: controller left in safe powered state; reboot required\n");
++        kprintf("DALI HOST: cleanup incomplete; reboot required\n");
+     }
+ }
+ #endif

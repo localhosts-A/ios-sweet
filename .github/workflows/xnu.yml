@@ -181,6 +181,10 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: SPM v2 request ACK timeout'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: powered clocks='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: host handoff cleaned sleep='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: SPM off req='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: reset restore want='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: restore SPM req='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: restore gates='
 
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: PWR dp='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: AC64='
