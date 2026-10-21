@@ -1,3 +1,11 @@
+## Host handoff result and verified recovery (2026-10-21)
+
+Photos153400/153406 confirm prior native5V source still stable: PDVBUS4977-4989mV, CHGVIN4977-5003mV, tick10-130, then15slease-off/cleanup; finalPDVBUS2173mV/CHGVIN32mV, ADC no error. Host AO checks pass: SPM DP domain c200100d and P0 c200000d with dual ACKs, protection d8=20 and ACK has bits6/7 clear; VLP/top gate/fences pass; USB AO gate=0. IPPC identity20180724/sub10090000/cap101 valid, but ctrl0=10411021 means SW reset bit0 remains asserted; host/device power-down ctrl1/ctrl2=1, IPPC sts1/sts2 zero, SPM V2 request/ack0. Candidate correctly skipped all MAC/PHY/xHCI deeper accesses and made no host/PHY/controller/DMA writes or enumeration. Thus USB Host still unstarted.
+
+Original init_boot_b then boot_b restored. `device_pair.py verify` PASS: Android dali/_b/completed/root and both full physical original sizes/SHA256 verified. Ignored manifest originals_verified, no active trial/pending restore. No userdata/GPT/Udisk writes.
+
+Next implement the documented MTU3 prerequisite sequence against vendor source: preserve hardware-request ownership, 1us IP reset pulse, device-IP PDN hold, bounded SPM v2 request/ACK, host-PDN release, wait IPPC clock-stability flags, then capability-only xHCI reads. Audit MT6373 VUSB regulator supply (live DT says always-on), vUSB33 voter, XSPHY efuse calibration/refclock/repeater before any PHY or port changes. Keep conservative 500mA/15s source lease. Avoid xHCI DMA until AC64/IOMMU/cache ownership/address-width and reset/adoption contract are resolved.
+
 ## ACTIVE host handoff observation trial — original restoration PENDING (2026-10-21)
 
 CI39561692789/725df01 fullverifiedpair: fresh immediateAndroidoriginalfullphysicalSHA256/root/model/_b/completed, hostbackup/candidatehashes andfastbootidentity/unlocked/64+8MiBsizes allPASS. Temporary init_boot_b then boot_b flashes bothOKAY/rebootrequested. Authoritativeignored shim/out-dali/usb-host-39561692789/trial-state.json trial_rebooted. UsertoldNOWearlyswapPCtoOTGbeforeprompt, photographDALI HOST PWR/CLK/IPPC/PHY/xHCI orreads-skipped, observe1minute thenPC/manualfastboot. HardwarehostobservationoutcomeUNVERIFIED. Thiscandidate onlyreads guardedhosthandoff; PHY/xHCI/DMA/enum notstarted. PriorboundedADC5Vsource proof separate.
