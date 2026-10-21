@@ -1309,3 +1309,11 @@ CI39582234663/d057f8b succeeded5m13s, cache1384/1386hits99.86%. Actual24/24 sour
 Fresh and immediately repeated Android root/model/_b/completed/full physical original SHA256/size checks passed; fastboot identity/unlocked/slot/partition sizes and host candidate/original hashes passed. Temporary init_boot_b then boot_b flashed OKAY, reboot requested, current ignored manifest `trial_rebooted`. CURRENT original restoration PENDING. Previous recovery is historical. User told swap to OTG/Udisk at redloader beforepromptallowed, observe~1minute and photograph complete DALI U2 REPORT block, then PC/manualfastboot.
 
 Immediately recover current pair on fastboot return, full original init_boot_b then boot_b, reboot Android and verify physical originals. Backup dir unchanged. No userdata/GPT/Udisk writes; no new hardware operations/engine/DMA/storage writes, source500mA/15s and watchdog120s preserved. Replay uses saved text only under power lock; look for reached/truncated, enable/MAC/PHY/PORTSC/restore and host-cleanup values.
+
+## Current: U2 enable/MAC/PHY reads verified; no connection, originals recovered (2026-10-21)
+
+Photos181535/181544/181549 give complete report reached1/truncated0. U2 control saved4f/want24c/read24c ctrl1; MACready1 sts3d0f/1. PHY acr0=00463c2a/acr4=00004434/acr6=00100442/dcr1=00040001, dtm0=02000000/dtm1=0, reserve201bb13b/00010800/ref00ff103d. PORTSC for both ports all3samples000001c0, CCS0/PED0/speed0; PORT_POWER bit9 is0. Exact U2 restore4f match1, host sleep1/ctrl1/resources1/U2intact1. Native source remained4977-4989mV/15s, CP/I2C5/TCPC cleanup restored, noADCerror; finalPDVBUS2209mV. This proves gated U2/MAC access, not USB device detection or enumeration.
+
+Immediately recovered full original init_boot_b then boot_b and rebooted Android. Full physical SHA256/size/root/model/_b/completed verified; current manifest originals_verified. No active trial or pending recovery. No userdata/GPT/Udisk writes.
+
+Next audit missing native XSphy/MT6379 repeater power/mode sequence plus xHCI Supported Protocol USB2 mapping and safe PORT_POWER switching. Existing candidate intentionally never set PORTSC PP or initialized PHY/repeater. PP0 and DTM1=0 are concrete missing setup, but do not establish the sole cause. Keep controller halted/no DMA until prerequisites audited and restored on bounded trial.
