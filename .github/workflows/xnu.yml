@@ -192,13 +192,25 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U2: MAC ready='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U2: PORTSC sample='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U2: restore want='
-          grep -Fq 'if (hostObserve) { dali_usb_host_report(); }' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
+          grep -Fq 'if (hostObserve && hostJoined) { dali_usb_host_report(); }' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U2 REPORT: saved results begin'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U2 REPORT: end; saved text only, no hardware access'
           grep -Fq 'PE_parse_boot_argn("daliusbpp"' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
-          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI PP: protocol rev='
-          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI PP: enable port='
-          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI PP: restore port='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI PP: halted PORTSC writes disabled'
+          grep -Fq 'host-dma-policy' xnu/iokit/Kernel/arm/DaliUSBPMIC.cpp
+          grep -Fq 'host-u2-calibration' xnu/iokit/Kernel/arm/DaliUSBPMIC.cpp
+          grep -Fq 'dali_usb_host_stop()' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
+          grep -Fq 'if (!portRestored)' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'first->control ^= 1U;' xnu/iokit/Kernel/arm/DaliXHCI.cpp
+          grep -Fq 'arenaMap = memory->map(kIOMapAnywhere | kIOMapInhibitCache)' xnu/iokit/Kernel/arm/DaliXHCI.cpp
+          grep -Fq 'if (!(buf_flags(bp) & B_READ)) { error = EROFS;' xnu/bsd/dev/dali_usb_disk.c
+          grep -Fq 'usbroot != 1 && PE_parse_boot_argn("rootrw"' xnu/bsd/vfs/vfs_subr.c
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: running AC64=1'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: stopped/reset; DMA ownership returned'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI MSC: ready blocks='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI ROOT: selected read-only du0'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI RPTR: native host calibration ready='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI PHY: slew calibration ready='
           grep -Fq 'host-u2-native-config' xnu/iokit/Kernel/arm/DaliUSBPMIC.cpp
           grep -Fq 'PE_parse_boot_argn("daliusbphy"' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           grep -Fq 'change(0x320, 3U << 8, 0)' xnu/iokit/Kernel/arm/DaliUSBHost.cpp

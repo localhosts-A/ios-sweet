@@ -1,0 +1,1579 @@
+--- /dev/null
++++ b/iokit/Kernel/arm/DaliXHCI.h
+@@ -0,0 +1,71 @@
++#ifndef DALI_XHCI_H
++#define DALI_XHCI_H
++#include <stdint.h>
++#include <stddef.h>
++class IOBufferMemoryDescriptor;
++class IOMemoryMap;
++
++/* Single directly attached USB2 BOT device; serialized by the platform owner.
++ * The owner must validate physical DMA, clocks/PHY/VBUS and retain them until
++ * stop() succeeds. No IRQ, UAS, hubs, write commands or automatic bus retry.
++ */
++struct DaliXHCIOps {
++    void *cookie;
++    uint32_t (*read)(void *, unsigned);
++    void (*write)(void *, unsigned, uint32_t);
++    bool (*alive)(void *); /* source/clock/removal guard, must not reenter */
++    void (*log)(const char *, ...);
++};
++
++class DaliXHCI {
++    struct TRB { uint32_t lo, hi, status, control; };
++    struct Ring { unsigned offset, index, cycle; };
++    DaliXHCIOps ops{};
++    IOBufferMemoryDescriptor *memory = nullptr;
++    IOMemoryMap *arenaMap = nullptr;
++    uint8_t *bytes = nullptr;
++    uint64_t physical = 0, blockCount = 0;
++    uint32_t blockBytes = 0, tag = 0;
++    unsigned op = 0, runtime = 0, doors = 0, slot = 0, port = 0;
++    unsigned contextBytes = 0, eventIndex = 0, eventCycle = 1;
++    unsigned epIn = 0, epOut = 0, inPacket = 0, outPacket = 0, interface = 0;
++    unsigned operationBudgetMs = 0;
++    uint64_t startedMs = 0;
++    bool dmaPublished = false, running = false, faulted = false, configured = false;
++    bool prepared = false;
++    void fail() { __atomic_store_n(&faulted, true, __ATOMIC_RELEASE); }
++    Ring commandRing{0x1000, 0, 1}, controlRing{0x5000, 0, 1};
++    Ring inRing{0x6000, 0, 1}, outRing{0x7000, 0, 1};
++    uint32_t rd(unsigned) const;
++    void wr(unsigned, uint32_t) const;
++    void wr64(unsigned, uint64_t) const;
++    bool live();
++    bool wait(unsigned, uint32_t, uint32_t, unsigned);
++    bool nextEvent(TRB *, unsigned);
++    uint64_t submitTRB(Ring &, uint64_t, uint32_t, uint32_t, bool = true);
++    bool command(unsigned, uint64_t, uint32_t, uint32_t, unsigned * = nullptr);
++    bool completion(uint64_t, unsigned, bool, unsigned *, unsigned, uint64_t = 0);
++    bool control(uint8_t, uint8_t, uint16_t, uint16_t, void *, unsigned, unsigned * = nullptr);
++    bool bulk(bool, void *, unsigned, unsigned * = nullptr);
++    bool scsi(const uint8_t *, unsigned, void *, unsigned, bool * = nullptr);
++    bool allocate();
++    bool initialize(unsigned);
++    bool enumerate();
++    bool configureEndpoints(unsigned);
++    bool usb2Port(unsigned *);
++    bool readBlocks(uint64_t, unsigned, void *);
++public:
++    DaliXHCI() = default;
++    ~DaliXHCI();
++    DaliXHCI(const DaliXHCI &) = delete;
++    DaliXHCI &operator=(const DaliXHCI &) = delete;
++    bool start(const DaliXHCIOps &, unsigned maxMilliseconds = 10000);
++    bool stop(); /* False => pin DMA allocations/resources until reboot. */
++    bool read(uint64_t byteOffset, size_t length, void *destination);
++    bool findHFS(uint64_t *firstByte, uint64_t *length);
++    bool ready() const { return configured && !__atomic_load_n(&faulted, __ATOMIC_ACQUIRE); }
++    bool sourceHealthy() const { return ready() && ops.alive(ops.cookie); }
++    uint64_t capacity() const { return blockCount * blockBytes; }
++    uint32_t sectorSize() const { return blockBytes; }
++};
++#endif
+--- /dev/null
++++ b/iokit/Kernel/arm/DaliXHCI.cpp
+@@ -0,0 +1,518 @@
++/* Dali polling xHCI + USB2 enumeration + read-only BOT/SCSI transport.
++ * Register/TRB definitions: xHCI1.22 chapters4/5/6, USB2 ch9, USB MSC BOT1.0.
++ * Default-unreachable until the platform validates its DMA ownership policy.
++ */
++#include <pexpert/arm64/board_config.h>
++#if defined(SWEET)
++#include "DaliXHCI.h"
++#include <IOKit/IOLib.h>
++#include <IOKit/IOBufferMemoryDescriptor.h>
++#include <kern/task.h>
++#include <libkern/libkern.h>
++
++namespace {
++constexpr unsigned arenaBytes = 0x40000, dataOffset = 0x10000, dataBytes = 0x10000;
++constexpr uint32_t cycle = 1, ioc = 1U << 5;
++uint64_t milliseconds() {
++    uint64_t count, hz;
++    __asm__ volatile("isb; mrs %0, cntpct_el0; mrs %1, cntfrq_el0" : "=r"(count), "=r"(hz));
++    return hz ? count / (hz / 1000) : 0;
++}
++void publish() { __asm__ volatile("dsb oshst" ::: "memory"); }
++void consume() { __asm__ volatile("dmb oshld" ::: "memory"); }
++uint16_t le16(const uint8_t *p) { return p[0] | (uint16_t(p[1]) << 8); }
++uint32_t le32(const uint8_t *p) { return le16(p) | (uint32_t(le16(p + 2)) << 16); }
++uint64_t le64(const uint8_t *p) { return le32(p) | (uint64_t(le32(p + 4)) << 32); }
++uint32_t be32(const uint8_t *p) {
++    return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) | (uint32_t(p[2]) << 8) | p[3];
++}
++void put32(uint8_t *p, uint32_t v) {
++    for (unsigned i = 0; i < 4; ++i) { p[i] = uint8_t(v >> (8 * i)); }
++}
++void putBE32(uint8_t *p, uint32_t v) {
++    for (unsigned i = 0; i < 4; ++i) { p[i] = uint8_t(v >> (24 - 8 * i)); }
++}
++}
++
++uint32_t DaliXHCI::rd(unsigned n) const {
++    return n <= 0xffc && !(n & 3) ? ops.read(ops.cookie, n) : ~0U;
++}
++void DaliXHCI::wr(unsigned n, uint32_t v) const {
++    if (n <= 0xffc && !(n & 3)) { ops.write(ops.cookie, n, v); }
++}
++void DaliXHCI::wr64(unsigned n, uint64_t v) const {
++    wr(n, uint32_t(v)); wr(n + 4, uint32_t(v >> 32));
++}
++bool DaliXHCI::live() {
++    if (__atomic_load_n(&faulted, __ATOMIC_ACQUIRE) || !ops.alive(ops.cookie) ||
++        milliseconds() - startedMs > operationBudgetMs) { fail(); return false; }
++    return true;
++}
++bool DaliXHCI::wait(unsigned reg, uint32_t mask, uint32_t expected, unsigned ms) {
++    uint64_t start = milliseconds();
++    do {
++        if (!live()) { return false; }
++        uint32_t value = rd(reg);
++        if (value == ~0U) { fail(); return false; }
++        if ((value & mask) == expected) { return true; }
++        IOSleep(1);
++    } while (milliseconds() - start < ms);
++    return false;
++}
++bool DaliXHCI::allocate() {
++    /* One uncached mapping avoids cache-line sharing with device-written TRBs.
++     * No synthetic IOVA: physical address is permitted only by platform policy.
++     */
++    memory = IOBufferMemoryDescriptor::inTaskWithOptions(kernel_task,
++        kIODirectionInOut | kIOMemoryPhysicallyContiguous | kIOMemoryMapperNone |
++        kIOMapInhibitCache, arenaBytes, 0x10000);
++    if (!memory || memory->prepare(kIODirectionInOut) != kIOReturnSuccess) { return false; }
++    prepared = true;
++    IOByteCount length = 0;
++    physical = memory->getPhysicalSegment(0, &length, kIOMemoryMapperNone);
++    arenaMap = memory->map(kIOMapAnywhere | kIOMapInhibitCache);
++    bytes = arenaMap ? reinterpret_cast<uint8_t *>(arenaMap->getVirtualAddress()) : nullptr;
++    if (!physical || (physical & 0xffff) || length < arenaBytes || !bytes ||
++        physical > ((1ULL << 48) - arenaBytes)) { return false; }
++    bzero(bytes, arenaBytes);
++    Ring *rings[] = {&commandRing, &controlRing, &inRing, &outRing};
++    for (Ring *r : rings) {
++        auto *link = reinterpret_cast<TRB *>(bytes + r->offset) + 255;
++        uint64_t target = physical + r->offset;
++        link->lo = uint32_t(target); link->hi = uint32_t(target >> 32);
++        link->control = (6U << 10) | 2U; /* Link TRB, toggle cycle; C set at wrap. */
++    }
++    publish();
++    return true;
++}
++uint64_t DaliXHCI::submitTRB(Ring &r, uint64_t parameter, uint32_t status,
++    uint32_t control, bool give) {
++    if (r.index >= 255 || !live()) { return 0; }
++    unsigned offset = r.offset + r.index * sizeof(TRB);
++    auto *trb = reinterpret_cast<volatile TRB *>(bytes + offset);
++    trb->lo = uint32_t(parameter); trb->hi = uint32_t(parameter >> 32); trb->status = status;
++    publish(); trb->control = control | (give ? r.cycle : (r.cycle ^ 1U)); publish();
++    if (++r.index == 255) {
++        auto *link = reinterpret_cast<volatile TRB *>(bytes + r.offset) + 255;
++        publish(); link->control = (6U << 10) | 2U | r.cycle; publish();
++        r.index = 0; r.cycle ^= 1;
++    }
++    return physical + offset;
++}
++bool DaliXHCI::nextEvent(TRB *out, unsigned ms) {
++    uint64_t start = milliseconds();
++    do {
++        if (!live()) { return false; }
++        uint32_t status = rd(op + 4);
++        if (status == ~0U || (status & ((1U << 2) | (1U << 12)))) { fail(); return false; }
++        auto *t = reinterpret_cast<volatile TRB *>(bytes + 0x2000) + eventIndex;
++        uint32_t control = t->control;
++        if ((control & cycle) == eventCycle) {
++            consume();
++            out->lo = t->lo; out->hi = t->hi; out->status = t->status; out->control = control;
++            if (++eventIndex == 256) { eventIndex = 0; eventCycle ^= 1; }
++            wr64(runtime + 0x38, (physical + 0x2000 + eventIndex * 16) | 8U);
++            return true;
++        }
++        IOSleep(1);
++    } while (milliseconds() - start < ms);
++    return false;
++}
++bool DaliXHCI::command(unsigned type, uint64_t parameter, uint32_t status,
++    uint32_t flags, unsigned *resultSlot) {
++    uint64_t trb = submitTRB(commandRing, parameter, status, (type << 10) | flags);
++    if (!trb) { return false; }
++    publish(); wr(doors, 0);
++    uint64_t start = milliseconds();
++    while (milliseconds() - start < 1000) {
++        TRB event{};
++        if (!nextEvent(&event, 1000)) { break; }
++        unsigned kind = (event.control >> 10) & 63;
++        if (kind == 34) { continue; } /* PORTSC is polled; no port change ACK here. */
++        uint64_t pointer = event.lo | (uint64_t(event.hi) << 32);
++        if (kind != 33 || pointer != trb || (event.status >> 24) != 1) { break; }
++        if (resultSlot) { *resultSlot = event.control >> 24; }
++        return true;
++    }
++    fail(); ops.log("DALI XHCI: command failed type=%u\n", type); return false;
++}
++bool DaliXHCI::completion(uint64_t pointer, unsigned endpoint, bool shortAllowed,
++    unsigned *residual, unsigned ms, uint64_t shortPointer) {
++    uint64_t start = milliseconds();
++    unsigned shortResidual = 0;
++    while (milliseconds() - start < ms) {
++        TRB event{};
++        if (!nextEvent(&event, ms)) { break; }
++        unsigned kind = (event.control >> 10) & 63;
++        if (kind == 34) { continue; }
++        uint64_t address = event.lo | (uint64_t(event.hi) << 32);
++        unsigned code = event.status >> 24;
++        if (shortPointer && kind == 32 && (event.control >> 24) == slot &&
++            ((event.control >> 16) & 31) == endpoint && address == shortPointer && code == 13) {
++            shortResidual = event.status & 0xffffff; continue;
++        }
++        if (kind != 32 || (event.control >> 24) != slot ||
++            ((event.control >> 16) & 31) != endpoint || address != pointer ||
++            (code != 1 && !(shortAllowed && code == 13))) { break; }
++        if (residual) { *residual = shortResidual ? shortResidual : (event.status & 0xffffff); }
++        return true;
++    }
++    fail(); ops.log("DALI XHCI: transfer failed endpoint=%u\n", endpoint); return false;
++}
++bool DaliXHCI::usb2Port(unsigned *selected) {
++    unsigned ports = rd(4) >> 24, ext = (rd(0x10) >> 16) * 4, found = 0;
++    for (unsigned count = 0; ext && count < 16; ++count) {
++        if ((ext & 3) || ext < 0x20 || ext > 0xff0) { return false; }
++        uint32_t cap = rd(ext), range = rd(ext + 8);
++        if ((cap & 255) == 1) { return false; } /* Unimplemented legacy ownership. */
++        if ((cap & 255) == 2 && rd(ext + 4) == 0x20425355 && (cap >> 24) == 2) {
++            if (found || ((range >> 8) & 255) != 1 || !(range & 255) || (range & 255) > ports) { return false; }
++            found = range & 255;
++        }
++        unsigned next = ((cap >> 8) & 255) * 4;
++        if (!next) { ext = 0; break; }
++        if (ext + next <= ext || ext + next > 0xff0) { return false; }
++        ext += next;
++    }
++    if (ext || !found) { return false; }
++    *selected = found; return true;
++}
++bool DaliXHCI::initialize(unsigned usbPort) {
++    uint32_t cap = rd(0), hcc = rd(0x10), hcs = rd(4);
++    op = cap & 255; contextBytes = (hcc & 4) ? 64 : 32;
++    doors = rd(0x14); runtime = rd(0x18);
++    if (op < 0x20 || op > 0x80 || (op & 3) || (cap >> 16) < 0x100 ||
++        (cap >> 16) > 0x120 || !(hcc & 1) || !(hcc & 8) ||
++        !usbPort || usbPort > (hcs >> 24) || (hcs & 255) < 1 ||
++        doors < 0x20 || doors > 0xfc0 || (doors & 3) ||
++        runtime < 0x20 || runtime > 0xfa0 || (runtime & 31) ||
++        op + 0x400 + (hcs >> 24) * 16 > 0x1000 || rd(op) != 0 ||
++        (rd(op + 4) & 0x801) != 1) { return false; }
++    port = usbPort;
++    wr(op, 2); /* Host controller reset only after halt, no DMA published. */
++    if (!wait(op, 2, 0, 1000) || !wait(op + 4, 0x800, 0, 1000) || !(rd(op + 8) & 1)) { return false; }
++    unsigned scratch = ((rd(8) >> 27) & 31) | (((rd(8) >> 21) & 31) << 5);
++    if (scratch > 32 || !allocate()) { return false; }
++    auto *dcbaa = reinterpret_cast<uint64_t *>(bytes);
++    if (scratch) {
++        dcbaa[0] = physical + 0x8000;
++        auto *array = reinterpret_cast<uint64_t *>(bytes + 0x8000);
++        for (unsigned n = 0; n < scratch; ++n) { array[n] = physical + 0x20000 + n * 0x1000; }
++    }
++    auto *erst = reinterpret_cast<uint64_t *>(bytes + 0x3000);
++    erst[0] = physical + 0x2000; erst[1] = 256;
++    publish(); dmaPublished = true;
++    wr64(op + 0x30, physical); wr64(op + 0x18, (physical + 0x1000) | 1);
++    wr(runtime + 0x20, 0); /* IRQ disabled: event ring is polled. */
++    wr(runtime + 0x28, 1); wr64(runtime + 0x30, physical + 0x3000);
++    wr64(runtime + 0x38, physical + 0x2000); wr(op + 0x38, 1);
++    wr(op, 1); running = true;
++    if (!wait(op + 4, 1, 0, 1000) || !command(23, 0, 0, 0)) { return false; }
++    ops.log("DALI XHCI: running AC64=1 context=%u arena=%llx bytes=%u\n", contextBytes, physical, arenaBytes);
++    unsigned reg = op + 0x400 + (port - 1) * 16;
++    constexpr uint32_t neutral = 0x4e00ffe9U; /* RO/RWS, no RW1C/reset/strobe. */
++    uint32_t value = rd(reg);
++    if (value == ~0U || (value & 8)) { return false; }
++    wr(reg, (value & neutral) | 0x200);
++    IOSleep(20);
++    if (!wait(reg, 1, 1, 2000)) { ops.log("DALI XHCI: no USB2 attachment\n"); return false; }
++    for (unsigned n = 0; n < 10; ++n) {
++        if (!live() || (rd(reg) & 9) != 1) { return false; }
++        IOSleep(10); /* USB2 connection debounce, independent of Type-C debounce. */
++    }
++    value = rd(reg); wr(reg, (value & neutral) | 0x200 | 16); /* USB2 reset. */
++    if (!wait(reg, 16, 0, 1000) || !(rd(reg) & 2)) { return false; }
++    unsigned speed = (rd(reg) >> 10) & 15;
++    if (speed != 1 && speed != 3) { return false; } /* FS or HS; no LS MSC. */
++    return true;
++}
++
++bool DaliXHCI::control(uint8_t requestType, uint8_t request, uint16_t value,
++    uint16_t index, void *buffer, unsigned length, unsigned *actual) {
++    if (length > dataBytes || (length && !buffer) || !slot || !live()) { return false; }
++    bool input = requestType & 0x80;
++    /* Keep each control TD in one segment. First TRB stays unavailable until
++     * data/status are complete, even if a running controller prefetches it.
++     */
++    while (controlRing.index > 252) {
++        if (!submitTRB(controlRing, 0, 0, 8U << 10)) { return false; }
++    }
++    uint64_t setup = requestType | (uint64_t(request) << 8) | (uint64_t(value) << 16) |
++        (uint64_t(index) << 32) | (uint64_t(length) << 48);
++    if (length && !input) { memcpy(bytes + dataOffset, buffer, length); }
++    uint32_t trt = length ? (input ? 3U : 2U) : 0;
++    uint64_t setupTRB = submitTRB(controlRing, setup, 8,
++        (2U << 10) | (1U << 6) | (trt << 16), false);
++    if (!setupTRB) { return false; }
++    uint64_t dataTRB = 0;
++    if (length) {
++        dataTRB = submitTRB(controlRing, physical + dataOffset, length,
++            (3U << 10) | (input ? (1U << 16) | 4U : 0));
++        if (!dataTRB) { return false; }
++    }
++    uint64_t statusTRB = submitTRB(controlRing, 0, 0,
++        (4U << 10) | ioc | ((!length || !input) ? 1U << 16 : 0));
++    if (!statusTRB) { return false; }
++    publish();
++    auto *first = reinterpret_cast<volatile TRB *>(bytes + setupTRB - physical);
++    first->control ^= 1U;
++    publish(); wr(doors + slot * 4, 1);
++    unsigned residual = 0;
++    if (!completion(statusTRB, 1, false, &residual, 1000, dataTRB) || residual > length) { return false; }
++    unsigned received = length - residual;
++    consume();
++    if (input && received) { memcpy(buffer, bytes + dataOffset, received); }
++    if (actual) { *actual = received; }
++    return true;
++}
++bool DaliXHCI::bulk(bool input, void *buffer, unsigned length, unsigned *actual) {
++    unsigned endpoint = input ? epIn : epOut;
++    Ring &ring = input ? inRing : outRing;
++    if (!endpoint || !buffer || !length || length > dataBytes || !live()) { return false; }
++    if (!input) { memcpy(bytes + dataOffset, buffer, length); }
++    uint64_t trb = submitTRB(ring, physical + dataOffset, length,
++        (1U << 10) | ioc | (input ? 4U : 0));
++    if (!trb) { return false; }
++    publish(); wr(doors + slot * 4, endpoint);
++    unsigned residual = 0;
++    if (!completion(trb, endpoint, input, &residual, 1500) || residual > length) { return false; }
++    unsigned transferred = length - residual;
++    consume(); if (input && transferred) { memcpy(buffer, bytes + dataOffset, transferred); }
++    if (actual) { *actual = transferred; }
++    return true;
++}
++bool DaliXHCI::configureEndpoints(unsigned configValue) {
++    auto *input = reinterpret_cast<uint32_t *>(bytes + 0x4000);
++    bzero(input, 0x1000);
++    input[1] = 1U | (1U << epIn) | (1U << epOut);
++    unsigned highest = epIn > epOut ? epIn : epOut;
++    /* Keep the addressed Slot Context; update only Context Entries. */
++    auto *output = reinterpret_cast<uint32_t *>(bytes + 0x9000);
++    consume(); memcpy(bytes + 0x4000 + contextBytes, output, contextBytes);
++    auto *slotCtx = reinterpret_cast<uint32_t *>(bytes + 0x4000 + contextBytes);
++    slotCtx[0] = (slotCtx[0] & ~(31U << 27)) | (highest << 27);
++    unsigned endpoints[] = {epIn, epOut};
++    for (unsigned ep : endpoints) {
++        auto *ctx = reinterpret_cast<uint32_t *>(bytes + 0x4000 + contextBytes * (ep + 1));
++        unsigned packet = ep == epIn ? inPacket : outPacket;
++        uint64_t dequeue = physical + (ep == epIn ? inRing.offset : outRing.offset);
++        ctx[1] = (3U << 1) | ((ep == epIn ? 6U : 2U) << 3) | (packet << 16);
++        ctx[2] = uint32_t(dequeue) | 1; ctx[3] = uint32_t(dequeue >> 32);
++        ctx[4] = packet; /* Average TRB Length. */
++    }
++    publish();
++    if (!command(12, physical + 0x4000, 0, slot << 24)) { return false; }
++    return control(0, 9, uint16_t(configValue), 0, nullptr, 0);
++}
++bool DaliXHCI::enumerate() {
++    unsigned speed = (rd(op + 0x400 + (port - 1) * 16) >> 10) & 15;
++    if (!command(9, 0, 0, 0, &slot) || slot != 1) { return false; }
++    auto *dcbaa = reinterpret_cast<uint64_t *>(bytes);
++    dcbaa[slot] = physical + 0x9000;
++    auto *input = reinterpret_cast<uint32_t *>(bytes + 0x4000);
++    input[1] = 3;
++    auto *slotCtx = reinterpret_cast<uint32_t *>(bytes + 0x4000 + contextBytes);
++    slotCtx[0] = (speed << 20) | (1U << 27); slotCtx[1] = port << 16;
++    auto *ep0 = reinterpret_cast<uint32_t *>(bytes + 0x4000 + contextBytes * 2);
++    unsigned packet = speed == 3 ? 64 : 8;
++    ep0[1] = (3U << 1) | (4U << 3) | (packet << 16);
++    ep0[2] = uint32_t(physical + controlRing.offset) | 1;
++    ep0[3] = uint32_t((physical + controlRing.offset) >> 32); ep0[4] = 8;
++    publish();
++    if (!command(11, physical + 0x4000, 0, slot << 24)) { return false; }
++    uint8_t device[18] = {}; unsigned got = 0;
++    if (!control(0x80, 6, 0x100, 0, device, 8, &got) || got != 8 ||
++        device[0] != 18 || device[1] != 1 || device[4] == 9) { return false; }
++    unsigned maxPacket = device[7];
++    if (maxPacket != 8 && maxPacket != 16 && maxPacket != 32 && maxPacket != 64) { return false; }
++    if (speed == 3 && maxPacket != 64) { return false; }
++    if (maxPacket != packet) {
++        bzero(input, 0x1000); input[1] = 2;
++        consume(); memcpy(ep0, bytes + 0x9000 + contextBytes, contextBytes);
++        ep0[1] = (ep0[1] & 0xffff) | (maxPacket << 16);
++        publish();
++        if (!command(13, physical + 0x4000, 0, slot << 24)) { return false; }
++    }
++    if (!control(0x80, 6, 0x100, 0, device, sizeof(device), &got) || got != sizeof(device)) { return false; }
++    uint8_t config[1024] = {};
++    if (!device[17] || !control(0x80, 6, 0x200, 0, config, 9, &got) || got != 9 || config[1] != 2) { return false; }
++    unsigned total = le16(config + 2);
++    if (total < 9 || total > sizeof(config) || !config[5] ||
++        !control(0x80, 6, 0x200, 0, config, total, &got) || got != total) { return false; }
++    bool candidate = false, found = false;
++    unsigned bulkCount = 0;
++    for (unsigned offset = 0; offset < total;) {
++        unsigned length = config[offset];
++        if (length < 2 || length > total - offset) { return false; }
++        const uint8_t *d = config + offset;
++        if (d[1] == 4) {
++            if (candidate && bulkCount == 2 && epIn && epOut) { found = true; break; }
++            if (length < 9) { return false; }
++            candidate = d[3] == 0 && d[4] == 2 && d[5] == 8 && d[6] == 6 && d[7] == 0x50;
++            bulkCount = 0; epIn = epOut = 0;
++            if (candidate) { interface = d[2]; }
++        } else if (d[1] == 5 && candidate) {
++            if (length < 7 || (d[3] & 3) != 2 || (d[2] & 0x70) || !(d[2] & 15)) { return false; }
++            unsigned mps = le16(d + 4);
++            if (!mps || (mps & (mps - 1)) || (speed == 3 ? mps != 512 : mps > 64)) { return false; }
++            unsigned dci = (d[2] & 15) * 2 + ((d[2] & 0x80) ? 1 : 0);
++            if (d[2] & 0x80) { if (epIn) { return false; } epIn = dci; inPacket = mps; }
++            else { if (epOut) { return false; } epOut = dci; outPacket = mps; }
++            ++bulkCount;
++        }
++        offset += length;
++    }
++    found = found || (candidate && bulkCount == 2 && epIn && epOut);
++    if (!found || !configureEndpoints(config[5])) { return false; }
++    ops.log("DALI USB: device=%04x:%04x speed=%u BOT interface=%u ep=%u/%u\n",
++        le16(device + 8), le16(device + 10), speed, interface, epIn, epOut);
++    uint8_t inquiry[36] = {}, cdb[16] = {0x12, 0, 0, 0, 36};
++    if (!scsi(cdb, 6, inquiry, sizeof(inquiry)) || (inquiry[0] & 31) != 0) { return false; }
++    bool ready = false;
++    for (unsigned attempt = 0; attempt < 3; ++attempt) {
++        bzero(cdb, sizeof(cdb)); bool checkCondition = false;
++        if (scsi(cdb, 6, nullptr, 0, &checkCondition)) { ready = true; break; }
++        if (!checkCondition || __atomic_load_n(&faulted, __ATOMIC_ACQUIRE)) { return false; }
++        uint8_t sense[18] = {}; cdb[0] = 3; cdb[4] = sizeof(sense);
++        if (!scsi(cdb, 6, sense, sizeof(sense)) || ((sense[2] & 15) != 2 && (sense[2] & 15) != 6)) { return false; }
++        IOSleep(100);
++    }
++    if (!ready) { return false; }
++    uint8_t capacity[8] = {}; bzero(cdb, sizeof(cdb)); cdb[0] = 0x25;
++    if (!scsi(cdb, 10, capacity, sizeof(capacity))) { return false; }
++    uint32_t last = be32(capacity); blockBytes = be32(capacity + 4);
++    if (last == ~0U || blockBytes < 512 || blockBytes > 4096 || (blockBytes & (blockBytes - 1))) { return false; }
++    blockCount = uint64_t(last) + 1; configured = true;
++    ops.log("DALI MSC: ready blocks=%llu sector=%u; SCSI writes disabled\n", blockCount, blockBytes);
++    return true;
++}
++bool DaliXHCI::scsi(const uint8_t *cdb, unsigned cdbBytes, void *buffer,
++    unsigned length, bool *checkCondition) {
++    if (checkCondition) { *checkCondition = false; }
++    if (!cdb || !cdbBytes || cdbBytes > 16 || length > dataBytes) { return false; }
++    /* Strict read-only command set; no arbitrary CDB passthrough. */
++    if (cdb[0] != 0 && cdb[0] != 3 && cdb[0] != 0x12 && cdb[0] != 0x25 && cdb[0] != 0x28) { return false; }
++    uint8_t cbw[31] = {}, csw[13] = {};
++    put32(cbw, 0x43425355); if (!++tag) { ++tag; } put32(cbw + 4, tag);
++    put32(cbw + 8, length); cbw[12] = length ? 0x80 : 0;
++    cbw[14] = uint8_t(cdbBytes); memcpy(cbw + 15, cdb, cdbBytes);
++    unsigned actual = 0, dataActual = 0;
++    if (!bulk(false, cbw, sizeof(cbw), &actual) || actual != sizeof(cbw)) { return false; }
++    if (length && !bulk(true, buffer, length, &dataActual)) { return false; }
++    if (!bulk(true, csw, sizeof(csw), &actual) || actual != sizeof(csw) ||
++        le32(csw) != 0x53425355 || le32(csw + 4) != tag || le32(csw + 8) > length ||
++        dataActual + le32(csw + 8) != length || csw[12] > 1) { fail(); return false; }
++    if (csw[12] == 1) { if (checkCondition) { *checkCondition = true; } return false; }
++    return true;
++}
++bool DaliXHCI::readBlocks(uint64_t lba, unsigned count, void *destination) {
++    if (!ready() || !count || count > 65535 || count > dataBytes / blockBytes ||
++        lba >= blockCount || count > blockCount - lba || lba > 0xffffffffULL) { return false; }
++    uint8_t cdb[10] = {0x28}; putBE32(cdb + 2, uint32_t(lba));
++    cdb[7] = uint8_t(count >> 8); cdb[8] = uint8_t(count);
++    if (scsi(cdb, sizeof(cdb), destination, count * blockBytes)) { return true; }
++    fail(); return false;
++}
++bool DaliXHCI::read(uint64_t offset, size_t length, void *destination) {
++    if (!ready() || !destination || !length || offset > capacity() || length > capacity() - offset ||
++        !blockBytes) { return false; }
++    startedMs = milliseconds(); operationBudgetMs = 3000;
++    auto *target = static_cast<uint8_t *>(destination);
++    while (length) {
++        if (offset % blockBytes || length < blockBytes) {
++            uint8_t sector[4096] = {};
++            unsigned within = unsigned(offset % blockBytes), amount = blockBytes - within;
++            if (amount > length) { amount = unsigned(length); }
++            if (!readBlocks(offset / blockBytes, 1, sector)) { return false; }
++            memcpy(target, sector + within, amount);
++            offset += amount; target += amount; length -= amount; continue;
++        }
++        unsigned amount = length > dataBytes ? dataBytes : unsigned(length);
++        amount -= amount % blockBytes;
++        if (!readBlocks(offset / blockBytes, amount / blockBytes, target)) { return false; }
++        offset += amount; target += amount; length -= amount;
++    }
++    return true;
++}
++bool DaliXHCI::findHFS(uint64_t *first, uint64_t *length) {
++    if (!first || !length || !ready()) { return false; }
++    uint8_t sector[4096] = {};
++    if (!read(0, blockBytes, sector)) { return false; }
++    uint64_t candidates[5] = {0}, sizes[5] = {capacity()}; unsigned count = 1;
++    if (sector[510] == 0x55 && sector[511] == 0xaa) {
++        for (unsigned i = 0; i < 4; ++i) {
++            const uint8_t *entry = sector + 446 + 16 * i;
++            uint64_t lba = le32(entry + 8), blocks = le32(entry + 12);
++            /* The existing stick's MBR type was retained when HFSX was written
++             * into sdc1. Validate filesystem contents, not the stale FAT type.
++             */
++            if (entry[4] && entry[4] != 0xee && entry[4] != 5 && entry[4] != 0x0f &&
++                blocks && lba < blockCount && blocks <= blockCount - lba) {
++                candidates[count] = lba * blockBytes; sizes[count++] = blocks * blockBytes;
++            }
++        }
++    }
++    for (unsigned i = 0; i < count; ++i) {
++        uint64_t offset = candidates[i] + 1024;
++        if (sizes[i] < 2048 || offset < candidates[i]) { continue; }
++        uint64_t aligned = offset & ~(uint64_t(blockBytes) - 1);
++        if (!read(aligned, blockBytes, sector)) { return false; }
++        const uint8_t *header = sector + offset - aligned;
++        uint16_t signature = (uint16_t(header[0]) << 8) | header[1];
++        uint16_t version = (uint16_t(header[2]) << 8) | header[3];
++        uint32_t allocation = be32(header + 40), total = be32(header + 44);
++        if ((signature != 0x482b || version != 4) && (signature != 0x4858 || version != 5)) { continue; }
++        if (!(be32(header + 4) & 0x100)) { continue; } /* Require clean unmount; no replay writes. */
++        if (allocation < 512 || (allocation & (allocation - 1)) || !total ||
++            uint64_t(allocation) * total > sizes[i]) { continue; }
++        *first = candidates[i]; *length = uint64_t(allocation) * total;
++        ops.log("DALI ROOT: HFS volume signature=%04x offset=%llu bytes=%llu\n", signature, *first, *length);
++        return true;
++    }
++    return false;
++}
++bool DaliXHCI::start(const DaliXHCIOps &callbacks, unsigned maxMilliseconds) {
++    if (memory || !callbacks.read || !callbacks.write || !callbacks.alive || !callbacks.log ||
++        maxMilliseconds < 1000 || maxMilliseconds > 12000) { return false; }
++    ops = callbacks; operationBudgetMs = maxMilliseconds; startedMs = milliseconds();
++    unsigned selected = 0;
++    if (!usb2Port(&selected) || !initialize(selected) || !enumerate()) {
++        fail(); ops.log("DALI XHCI: start failed; shutdown required\n"); return false;
++    }
++    return true;
++}
++bool DaliXHCI::stop() {
++    configured = false;
++    if (!dmaPublished && !running) { return true; }
++    /* Cleanup must run after live()/budget failure. Never free device-visible
++     * allocations until halt AND reset prove the controller cannot use them.
++     */
++    uint32_t cmd = rd(op);
++    if (cmd == ~0U) { return false; }
++    wr(op, cmd & ~1U);
++    bool halted = false;
++    for (unsigned i = 0; i < 1000; ++i) {
++        uint32_t status = rd(op + 4);
++        if (status != ~0U && (status & 1)) { halted = true; break; }
++        IOSleep(1);
++    }
++    if (!halted) { ops.log("DALI XHCI: halt failed; DMA memory pinned\n"); return false; }
++    running = false; wr(op, 2);
++    for (unsigned i = 0; i < 1000; ++i) {
++        uint32_t command = rd(op), status = rd(op + 4);
++        if (command != ~0U && status != ~0U && !(command & 2) && !(status & 0x800)) {
++            dmaPublished = false;
++            ops.log("DALI XHCI: stopped/reset; DMA ownership returned\n"); return true;
++        }
++        IOSleep(1);
++    }
++    ops.log("DALI XHCI: reset failed; DMA memory pinned\n"); return false;
++}
++DaliXHCI::~DaliXHCI() {
++    if (memory && !dmaPublished && !running) {
++        if (arenaMap) { arenaMap->release(); }
++        if (prepared) { memory->complete(kIODirectionInOut); }
++        memory->release();
++    } /* Else intentionally pin; caller must retain platform resources too. */
++}
++#endif
+--- /dev/null
++++ b/bsd/sys/dali_usb_disk.h
+@@ -0,0 +1,17 @@
++#ifndef DALI_USB_DISK_H
++#define DALI_USB_DISK_H
++#include <sys/types.h>
++#ifdef __cplusplus
++extern "C" {
++#endif
++typedef int (*dali_usb_read_fn)(void *, uint64_t, size_t, void *);
++/* Caller retains context until detach completes. Read callback is serialized;
++ * it must not acquire the platform source lock (source cleanup may detach).
++ */
++int dali_usb_disk_supply(void *, dali_usb_read_fn, uint64_t, uint64_t);
++void dali_usb_disk_detach(void *);
++dev_t dali_usb_disk_root(void);
++#ifdef __cplusplus
++}
++#endif
++#endif
+--- /dev/null
++++ b/bsd/dev/dali_usb_disk.c
+@@ -0,0 +1,150 @@
++/* Read-only BSD disk bridge for the directly attached Dali USB BOT medium.
++ * The exposed disk is one content-validated HFS/HFSX partition, never the
++ * phone's UFS. Geometry is fixed at512 logical bytes. No write passthrough.
++ */
++#include <pexpert/arm64/board_config.h>
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++#include <sys/param.h>
++#include <sys/systm.h>
++#include <sys/conf.h>
++#include <sys/buf.h>
++#include <sys/disk.h>
++#include <sys/fcntl.h>
++#include <sys/stat.h>
++#include <sys/uio.h>
++#include <sys/malloc.h>
++#include <sys/dali_usb_disk.h>
++#include <miscfs/devfs/devfs.h>
++#include <kern/locks.h>
++#include <kern/kalloc.h>
++
++static LCK_GRP_DECLARE(du_group, "dali_usb_disk");
++static LCK_MTX_DECLARE(du_lock, &du_group);
++static void *du_context;
++static dali_usb_read_fn du_read;
++static uint64_t du_first, du_bytes;
++static int du_major = -1, du_cmajor = -1;
++static void *du_node, *du_raw;
++
++static int du_open(dev_t dev, int flags, int type, struct proc *p) {
++    (void)type; (void)p;
++    if (minor(dev) || (flags & FWRITE)) { return (flags & FWRITE) ? EROFS : ENXIO; }
++    lck_mtx_lock(&du_lock); int error = du_context && du_read ? 0 : ENXIO;
++    lck_mtx_unlock(&du_lock); return error;
++}
++static int du_close(dev_t dev, int flags, int type, struct proc *p) {
++    (void)dev; (void)flags; (void)type; (void)p; return 0;
++}
++static void du_strategy(struct buf *bp) {
++    uint64_t offset; int error = 0; caddr_t address = NULL;
++    buf_setresid(bp, buf_count(bp));
++    if (minor(buf_device(bp)) || buf_blkno(bp) < 0) { error = ENXIO; goto done; }
++    if (!(buf_flags(bp) & B_READ)) { error = EROFS; goto done; }
++    if ((uint64_t)buf_blkno(bp) > UINT64_MAX / DEV_BSIZE) { error = EINVAL; goto done; }
++    offset = (uint64_t)buf_blkno(bp) * DEV_BSIZE;
++    if (buf_map(bp, &address)) { error = EIO; goto done; }
++    lck_mtx_lock(&du_lock);
++    if (!du_context || !du_read) { error = ENXIO; }
++    else if (offset > du_bytes || buf_count(bp) > du_bytes - offset) { error = EINVAL; }
++    else if (buf_count(bp)) { error = du_read(du_context, du_first + offset, buf_count(bp), address); }
++    lck_mtx_unlock(&du_lock);
++    buf_unmap(bp);
++    if (!error) { buf_setresid(bp, 0); }
++done:
++    if (error) { buf_seterror(bp, error); }
++    buf_biodone(bp);
++}
++static int du_ioctl(dev_t dev, u_long command, caddr_t data, int flag, struct proc *p) {
++    (void)flag; (void)p;
++    if (minor(dev)) { return ENXIO; }
++    int error = 0;
++    lck_mtx_lock(&du_lock);
++    if (!du_context) { error = ENXIO; goto done; }
++    switch (command) {
++    case DKIOCGETBLOCKSIZE: case DKIOCGETPHYSICALBLOCKSIZE:
++        *(uint32_t *)data = DEV_BSIZE; break;
++    case DKIOCSETBLOCKSIZE:
++        error = *(uint32_t *)data == DEV_BSIZE ? 0 : EINVAL; break;
++    case DKIOCGETBLOCKCOUNT: *(uint64_t *)data = du_bytes / DEV_BSIZE; break;
++    case DKIOCGETBASE: *(uint64_t *)data = 0; break;
++    case DKIOCISWRITABLE: case DKIOCGETFEATURES: *(uint32_t *)data = 0; break;
++    case DKIOCISFORMATTED: *(uint32_t *)data = 1; break;
++    case DKIOCGETMAXBYTECOUNTREAD: *(uint64_t *)data = 65536; break;
++    case DKIOCGETMAXBLOCKCOUNTREAD: *(uint64_t *)data = 128; break;
++    case DKIOCGETMAXSEGMENTCOUNTREAD: *(uint64_t *)data = 1; break;
++    case DKIOCSYNCHRONIZECACHE: case DKIOCSYNCHRONIZE: break;
++    default: error = ENOTTY; break;
++    }
++done:
++    lck_mtx_unlock(&du_lock); return error;
++}
++static int du_size(dev_t dev) {
++    if (minor(dev)) { return -1; }
++    lck_mtx_lock(&du_lock);
++    uint64_t count = du_context ? du_bytes / DEV_BSIZE : 0;
++    lck_mtx_unlock(&du_lock);
++    return count > INT_MAX ? INT_MAX : (int)count;
++}
++static int du_raw_read(dev_t dev, struct uio *uio, int flags) {
++    (void)flags;
++    if (minor(dev) || uio_offset(uio) < 0 || uio_resid(uio) < 0) { return EINVAL; }
++    uint8_t *buffer = NULL; int error = 0;
++    buffer = kalloc_data(4096, Z_WAITOK);
++    if (!buffer) { return ENOMEM; }
++    while (uio_resid(uio)) {
++        uint64_t offset = (uint64_t)uio_offset(uio);
++        size_t amount = uio_resid(uio) > 4096 ? 4096 : (size_t)uio_resid(uio);
++        lck_mtx_lock(&du_lock);
++        if (!du_context || !du_read) { error = ENXIO; }
++        else if (offset > du_bytes) { error = EINVAL; }
++        else {
++            if (amount > du_bytes - offset) { amount = (size_t)(du_bytes - offset); }
++            if (amount) { error = du_read(du_context, du_first + offset, amount, buffer); }
++        }
++        lck_mtx_unlock(&du_lock);
++        if (error || !amount) { break; }
++        error = uiomove((caddr_t)buffer, (int)amount, uio);
++        if (error) { break; }
++    }
++    kfree_data(buffer, 4096); return error;
++}
++static int du_raw_write(dev_t dev, struct uio *uio, int flags) {
++    (void)dev; (void)uio; (void)flags; return EROFS;
++}
++static const struct bdevsw du_bdev = {
++    .d_open = du_open, .d_close = du_close, .d_strategy = du_strategy,
++    .d_ioctl = du_ioctl, .d_dump = eno_dump, .d_psize = du_size, .d_type = D_DISK
++};
++static const struct cdevsw du_cdev = {
++    .d_open = du_open, .d_close = du_close, .d_read = du_raw_read, .d_write = du_raw_write,
++    .d_ioctl = du_ioctl, .d_stop = eno_stop, .d_reset = eno_reset, .d_ttys = NULL,
++    .d_select = eno_select, .d_mmap = eno_mmap, .d_strategy = eno_strat,
++    .d_reserved_1 = eno_getc, .d_reserved_2 = eno_putc, .d_type = D_DISK
++};
++int dali_usb_disk_supply(void *context, dali_usb_read_fn read, uint64_t first, uint64_t bytes) {
++    if (!context || !read || !bytes || (first % DEV_BSIZE) || (bytes % DEV_BSIZE) || first > UINT64_MAX - bytes) { return EINVAL; }
++    lck_mtx_lock(&du_lock);
++    int error = du_context ? EBUSY : 0;
++    if (!error) { du_context = context; du_read = read; du_first = first; du_bytes = bytes; }
++    lck_mtx_unlock(&du_lock); return error;
++}
++void dali_usb_disk_detach(void *context) {
++    lck_mtx_lock(&du_lock);
++    if (du_context == context) { du_context = NULL; du_read = NULL; }
++    lck_mtx_unlock(&du_lock);
++}
++dev_t dali_usb_disk_root(void) {
++    dev_t result = NODEV;
++    lck_mtx_lock(&du_lock);
++    if (!du_context || !du_read) { goto done; }
++    if (du_major < 0) { du_major = bdevsw_add(-1, &du_bdev); }
++    if (du_major < 0) { goto done; }
++    if (du_cmajor < 0) { du_cmajor = cdevsw_add_with_bdev(-1, &du_cdev, du_major); }
++    if (du_cmajor < 0) { goto done; }
++    if (!du_node) { du_node = devfs_make_node(makedev(du_major, 0), DEVFS_BLOCK, UID_ROOT, GID_OPERATOR, 0440, "du0"); }
++    if (!du_raw) { du_raw = devfs_make_node(makedev(du_cmajor, 0), DEVFS_CHAR, UID_ROOT, GID_OPERATOR, 0440, "rdu0"); }
++    if (du_node && du_raw) { result = makedev(du_major, 0); }
++done:
++    lck_mtx_unlock(&du_lock); return result;
++}
++#endif
+--- a/bsd/sys/Makefile
++++ b/bsd/sys/Makefile
+@@ -172,6 +172,7 @@
+ # Installs header file for Apple internal use for kernel extensions -
+ #	  $(DSTROOT)/System/Library/Frameworks/Kernel.framework/PrivateHeaders
+ PRIVATE_KERNELFILES = \
++	dali_usb_disk.h \
+ 	acct.h \
+ 	codesign.h \
+ 	cprotect.h \
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -105,6 +105,7 @@
+ 
+ bsd/dev/memdev.c			standard
+ bsd/dev/sweet_ufs.c			standard
++bsd/dev/dali_usb_disk.c			standard
+ bsd/dev/sweet_sample.c			standard
+ bsd/dev/sweet_keys.c			standard
+ bsd/dev/sweet_touch.c			standard
+--- a/iokit/conf/files.arm64
++++ b/iokit/conf/files.arm64
+@@ -27,3 +27,4 @@
+ iokit/Kernel/arm/DaliI2C5.cpp                                    optional iokitcpp
+ iokit/Kernel/arm/DaliUSBPower.cpp                                optional iokitcpp
+ iokit/Kernel/arm/DaliUSBHost.cpp                                 optional iokitcpp
++iokit/Kernel/arm/DaliXHCI.cpp                                    optional iokitcpp
+--- a/iokit/Kernel/arm/DaliUSBHost.h
++++ b/iokit/Kernel/arm/DaliUSBHost.h
+@@ -1,5 +1,6 @@
+ #ifndef DALI_USB_HOST_H
+ #define DALI_USB_HOST_H
++#include <stdint.h>
+ /* Caller holds the DaliUSBPower lock after debounced source attachment and
+  * a fresh 4.4..5.5V ADC. Uses only live-DT-validated MTU3 v2/always-on VUSB33
+  * policy. Any host resources acquired are released before return when asleep.
+@@ -7,4 +8,9 @@
+ void dali_usb_host_observe(bool hwrscsV2, bool vusbAlwaysOn, bool nativePhyValidated);
+ /* Replay saved diagnostic text after source cleanup, under the same lock. */
+ void dali_usb_host_report();
++/* Integrated worker owns clocks/PHY/DMA through detach and controller stop. */
++bool dali_usb_host_launch(bool, bool, bool, bool dmaValidated);
++bool dali_usb_host_stop();
++bool dali_usb_host_active();
++bool dali_usb_host_set_calibration(const uint32_t *config, unsigned words);
+ #endif
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -1,14 +1,15 @@
+-/* Dali USB host power-up and bounded xHCI capability observation, not an
+- * xHCI driver. Primary source: MiCode device modules e45c319 and live Dali
+- * FDT. Acquire the audited MTU3 v2 SPM request, pulse IP reset, release only
+- * host PDN, and read capabilities only after clock-ready status. Then restore
+- * host/device PDN and release SPM. Optional U2 port0 and USB2 PP probes;
+- * firmware trims preserved; no xHCI engine, IRQ or DMA programming.
++/* Dali MTU3 platform ownership and optional read-only polling USB host.
++ * Primary source: MiCode device modules e45c319 and live Dali FDT.
++ * DMA stops/resets before PHY, clocks or resource gates are released.
+  */
+ #include <pexpert/arm64/board_config.h>
+ #if defined(SWEET)
+ #include "DaliUSBHost.h"
++#include "DaliXHCI.h"
+ #include "DaliPMIF.h"
++#include <sys/dali_usb_disk.h>
++#include <sys/errno.h>
++#include <kern/thread.h>
+ #include <IOKit/IOLib.h>
+ #include <IOKit/IOMemoryDescriptor.h>
+ #include <machine/machine_routines.h>
+@@ -16,7 +17,11 @@
+ #include <libkern/libkern.h>
+ 
+ namespace {
+-/* Called and reported under the caller's existing DaliUSBPower lock.
++bool hostRunning = false, hostStopRequested = true, hostDMAValidated = false;
++bool hostLaunchHwrscs = false, hostLaunchVusb = false, hostLaunchNative = false;
++bool hostCalibrationValid = false;
++uint32_t hostTerm = 0, hostImpn = 0, hostImpp = 0, hostSW = 0;
++/* Written by one host worker; report only after that worker has joined.
+  * Keep only diagnostic text in fixed memory; replay never touches MMIO.
+  */
+ struct U2Report {
+@@ -190,22 +195,25 @@
+ }
+ 
+ /* SoC XSphy basic power/mode controls from the Dali vendor driver. Retain
+- * firmware efuse/eye trims and do not touch frequency-meter or repeater power.
++ * firmware trims in observation mode; integrated mode applies validated
++ * per-device software trims and the native frequency-meter sequence.
+  * Every allowed field has a pre-write snapshot and exact masked rollback.
+  */
+ class ScopedU2Phy {
+     struct Field { uint32_t offset, mask, saved; bool dirty; };
+     static constexpr uint32_t dtm0Mask = (1U << 26) | (1U << 23) | (0x1fU << 17) |
+         (0xfU << 10) | (3U << 6) | (3U << 4) | (1U << 3) | (1U << 2);
+-    Field fields[10] = {
++    Field fields[14] = {
+         {0x000, 0xffffff00U, 0, false}, {0x004, 1U << 16, 0, false},
+-        {0x300, (7U << 24) | (1U << 5), 0, false},
++        {0x300, (7U << 24) | (1U << 5) | 2U, 0, false},
+         {0x310, 7U << 8, 0, false},
+         {0x318, (3U << 30) | (1U << 25) | (1U << 23) | (1U << 20), 0, false},
+         {0x320, 3U << 8, 0, false}, /* XSP_U2PHYACR4 GPIO, distinct from FS_CR0x310. */
+-        {0x344, 1U << 5, 0, false}, {0x364, 3U << 18, 0, false},
++        {0x344, (1U << 5) | (31U << 8), 0, false}, {0x364, 3U << 18, 0, false},
+         {0x368, dtm0Mask, 0, false},
+-        {0x36c, (1U << 16) | (1U << 9) | (1U << 5) | (1U << 4) | 6U, 0, false}
++        {0x36c, (1U << 16) | (1U << 9) | (1U << 5) | (1U << 4) | 6U, 0, false},
++        {0x340, 0x01ff0070U, 0, false}, {0x314, 0xf000U, 0, false},
++        {0x100, 0x01ffffffU, 0, false}, {0x110, 1U << 8, 0, false}
+     };
+     WriteMapping phy;
+     bool saved = false;
+@@ -225,8 +233,32 @@
+         }
+         return false;
+     }
++    bool calibrateSlew() {
++        /* Native26MHz/coefficient17 frequency meter, no forced eye value in DT.
++         * Never adopt an active meter; all owned fields have rollback state.
++         */
++        if ((phy.read(0x100) & (1U << 24)) || (phy.read(0x110) & (1U << 8)) ||
++            (phy.read(0x314) & (1U << 15))) { return false; }
++        bool ok = change(0x314, 1U << 15, 1U << 15);
++        IODelay(1);
++        ok = ok && change(0x110, 1U << 8, 1U << 8) &&
++            change(0x100, 0xffffffU, 1024) && change(0x100, 1U << 24, 1U << 24);
++        bool valid = false;
++        for (unsigned n = 0; ok && n < 20; ++n) {
++            if (phy.read(0x110) & 1) { valid = true; break; }
++            IODelay(10);
++        }
++        uint32_t fm = valid ? phy.read(0x10c) : 0;
++        bool stopped = change(0x100, 1U << 24, 0);
++        stopped = change(0x110, 1U << 8, 0) && stopped;
++        uint32_t slew = fm && fm != ~0U ? (((26U * 17U * 1024U) / fm) + 500U) / 1000U : 3;
++        ok = ok && stopped && slew <= 7 && change(0x314, 7U << 12, slew << 12);
++        bool oscillatorOff = change(0x314, 1U << 15, 0);
++        u2Log("DALI PHY: slew calibration ready=%u valid=%u value=%u\n", ok && oscillatorOff, valid, slew);
++        return ok && oscillatorOff;
++    }
+ public:
+-    bool powerOn() {
++    bool powerOn(bool calibrated = false) {
+         if (!phy.open(0x16730000, 0x400)) { return false; }
+         for (auto &field : fields) {
+             field.saved = phy.read(field.offset);
+@@ -236,6 +268,13 @@
+             u2Log("DALI PHY: UART ownership rejected; untouched\n"); return false;
+         }
+         saved = true;
++        if (calibrated) {
++            if (!hostCalibrationValid ||
++                (hostTerm && !change(0x340, 15U << 16, hostTerm << 16)) ||
++                (hostImpn && !change(0x340, 31U << 20, hostImpn << 20)) ||
++                (hostImpp && !change(0x344, 31U << 8, hostImpp << 8)) ||
++                (!hostSW && !change(0x340, 0x70, 0x70))) { return false; }
++        }
+         bool ok = change(0x318, 1U << 23, 0) && change(0x300, 1U << 5, 1U << 5);
+         ok = ok && change(0x344, 1U << 5, 1U << 5);
+         if (ok) { IODelay(250); }
+@@ -255,6 +294,9 @@
+             change(0x004, 1U << 16, 1U << 16) && change(0x000, 0xffffff00U, 0x1e1e1900U) &&
+             change(0x310, 7U << 8, 7U << 8) &&
+             change(0x36c, (1U << 9) | 2U, 1U << 9);
++        if (calibrated) {
++            ok = ok && (hostSW || change(0x300, 2U, 0)) && calibrateSlew();
++        }
+         u2Log("DALI PHY: power/mode ready=%u dtm=%08x/%08x acr=%08x/%08x pll=%08x\n",
+             ok, phy.read(0x368), phy.read(0x36c), phy.read(0x300), phy.read(0x318), phy.read(0x364));
+         return ok;
+@@ -291,17 +333,27 @@
+         values[0], values[1], values[2], values[3], values[4], values[5], values[6]);
+ }
+ 
+-/* MT6379 chip74 normal-mode basic power controls. This is deliberately not
+- * the efuse/default/host-eye calibration path. Keep all trims untouched.
+- * Each PMIF write is limited to a saved control field, including rollback.
++/* MT6379 chip74 normal-mode power with optional native host calibration.
++ * Calibration reads efuse shadow bytes; never programs any fuse. Every
++ * changed operational register is snapshotted and restored on shutdown.
+  */
+ class ScopedRepeater {
+     struct Field { uint16_t reg; uint8_t mask, saved; bool dirty; };
+-    Field fields[8] = {
++    Field fields[27] = {
+         {0xd00, 1, 0, false}, {0xd03, 3, 0, false},
+-        {0xd12, 0x20, 0, false}, {0xd34, 1, 0, false},
+-        {0xd89, 0x80, 0, false}, {0xd8b, 0x20, 0, false},
+-        {0xd92, 7, 0, false}, {0xd94, 2, 0, false}
++        {0xd12, 0x2d, 0, false}, {0xd34, 1, 0, false},
++        {0xd89, 0xc0, 0, false}, {0xd8b, 0x20, 0, false},
++        {0xd92, 7, 0, false}, {0xd94, 2, 0, false},
++        {0xd13, 0x78, 0, false}, {0xd21, 0x80, 0, false},
++        {0xd22, 0xf0, 0, false}, {0xd11, 0x3f, 0, false},
++        {0xd1a, 0x0f, 0, false}, {0xd28, 0xf0, 0, false},
++        {0xd29, 0x1f, 0, false}, {0xd2a, 0x1f, 0, false},
++        {0xd30, 0x7f, 0, false}, {0xd24, 0x77, 0, false},
++        {0xd14, 7, 0, false}, {0xd27, 0xc0, 0, false},
++        {0xd20, 4, 0, false}, {0xd8a, 7, 0, false},
++        {0xd35, 6, 0, false}, {0xd31, 0xff, 0, false},
++        {0xd10, 0x70, 0, false}, {0xd18, 0xff, 0, false},
++        {0xd1b, 0x7f, 0, false}
+     };
+     bool saved = false;
+     uint32_t status = 0;
+@@ -338,8 +390,55 @@
+         IODelay(300);
+         return ok;
+     }
++    bool calibrate() {
++        /* Exact e45c319 >=E3 normal path plus Dali live-DT host properties.
++         * Read all calibration inputs before any calibration write.
++         */
++        uint8_t e[7] = {};
++        const uint16_t regs[] = {0x323, 0x324, 0x325, 0x326, 0x327, 0x381, 0x382};
++        for (unsigned i = 0; i < 7; ++i) { if (!read(regs[i], &e[i])) { return false; } }
++        uint8_t intr = 0, term = 0;
++        if (!read(0xd11, &intr) || !read(0xd1a, &term)) { return false; }
++        intr &= 0x3f; term &= 15;
++        bool ok = true;
++        /* Vendor top81/82 contains one-bit enables: only observed ones are set. */
++        const uint16_t targets[] = {0xd12, 0xd12, 0xd12, 0xd13, 0xd13, 0xd13, 0xd13,
++            0xd21, 0xd22, 0xd22, 0xd22, 0xd22};
++        const uint8_t sourceMasks[] = {0x40, 0x20, 0x10, 8, 4, 2, 1, 0x10, 8, 4, 2, 1};
++        const uint8_t targetMasks[] = {1, 8, 4, 0x40, 0x20, 0x10, 8, 0x80, 0x80, 0x40, 0x20, 0x10};
++        for (unsigned i = 0; i < 12 && ok; ++i) {
++            if (e[i < 7 ? 5 : 6] & sourceMasks[i]) {
++                ok = change(targets[i], targetMasks[i], targetMasks[i]);
++            }
++        }
++        ok = ok && change(0xd89, 0x40, 0x40);
++        if (e[0] & 0x3f) { intr = e[0] & 0x3f; ok = ok && change(0xd11, 0x3f, intr); }
++        if (e[1] & 15) { term = e[1] & 15; ok = ok && change(0xd1a, 15, term); }
++        if (e[2] & 0xf8) { ok = ok && change(0xd29, 31, e[2] >> 3); }
++        if (e[3] & 0xf8) { ok = ok && change(0xd2a, 31, e[3] >> 3); }
++        if (e[1] & 0xf0) { ok = ok && change(0xd28, 0xf0, e[1]); }
++        if ((e[4] & 0x7f) || (e[2] & 7) || (e[3] & 7)) {
++            ok = ok && change(0xd30, 0x7f, e[4]) &&
++                change(0xd24, 7, e[2]) && change(0xd24, 0x70, (e[3] & 7) << 4);
++        }
++        /* Native defaults, oscillator bias and IBAND precede power-on. */
++        ok = ok && change(0xd18, 0xf0, 0x60) && change(0xd14, 7, 7) &&
++            change(0xd27, 0xc0, 0) && change(0xd20, 4, 4) &&
++            change(0xd8a, 7, 3) && change(0xd35, 6, 6) &&
++            change(0xd24, 0x10, 0x10) && change(0xd31, 0xff, 0x52);
++        /* Live Dali host: VRT2, SQTH0, DISC13, PE2, EQ4, INTR+3, TERM-2.
++         * Vendor falls back to the unshifted calibration when offset overflows.
++         */
++        uint8_t hostIntr = intr <= 60 ? intr + 3 : intr;
++        uint8_t hostTerm = term >= 2 ? term - 2 : term;
++        ok = ok && change(0xd10, 0x70, 0x20) && change(0xd18, 0xff, 0xd0) &&
++            change(0xd1b, 0x7f, 0x24) && change(0xd11, 0x3f, hostIntr) &&
++            change(0xd1a, 15, hostTerm);
++        u2Log("DALI RPTR: native host calibration ready=%u; efuse shadow read-only\n", ok);
++        return ok;
++    }
+ public:
+-    bool powerOn() {
++    bool powerOn(bool calibrated = false) {
+         uint8_t chip = 0, reset = 0;
+         if (!read(0, &chip) || chip != 0x74 || !read(0xd91, &reset) || reset != 0) {
+             u2Log("DALI RPTR: chip/reset guard rejected chip=%02x reset=%02x; untouched\n", chip, reset);
+@@ -361,7 +460,8 @@
+         saved = true;
+         bool ok = change(0xd92, 7, 7) && change(0xd94, 2, 2);
+         ok = ok && off();
+-        /* Normal power-on in vendor >=E3 path; retain calibration registers. */
++        ok = ok && (!calibrated || calibrate());
++        /* Normal power-on in vendor >=E3 path. */
+         ok = ok && change(0xd12, 0x20, 0x20) && change(0xd89, 0x80, 0x80) &&
+             change(0xd8b, 0x20, 0) && change(0xd00, 1, 1);
+         if (ok) { IODelay(100); }
+@@ -377,8 +477,8 @@
+         uint8_t bg = 0, osc = 0;
+         bool got = read(0xd00, &bg) && read(0xd03, &osc);
+         ok = ok && got && (bg & 1) && (osc & 3) == 2;
+-        u2Log("DALI RPTR: basic power ready=%u chip=%02x d00=%02x d03=%02x trims preserved\n",
+-            ok, chip, bg, osc);
++        u2Log("DALI RPTR: basic power ready=%u chip=%02x d00=%02x d03=%02x calibrated=%u\n",
++            ok, chip, bg, osc, calibrated);
+         return ok;
+     }
+     bool restore() {
+@@ -395,111 +495,59 @@
+     }
+ };
+ 
+-/* Identify the sole USB2 port from Supported Protocol capabilities. Never
+- * infer xHCI port order from the physical IPPC U2/U3 numbering.
+- */
+-unsigned usb2ProtocolPort(const ReadMapping &xhci, unsigned ports) {
+-    uint32_t hcc = xhci.read(0x10);
+-    unsigned offset = (hcc >> 16) * 4U, seen = 0, u2 = 0, u3 = 0;
+-    bool ended = false;
+-    if (ports != 2 || hcc == ~0U || !(hcc & (1U << 3))) { return 0; }
+-    for (unsigned i = 0; i < 16; ++i) {
+-        if (offset < 0x500 || offset > 0xff0 || (offset & 3)) { return 0; }
+-        uint32_t header = xhci.read(offset);
+-        if (!header || header == ~0U) { return 0; }
+-        unsigned id = header & 0xff, next = (header >> 8) & 0xff;
+-        /* No BIOS/OS legacy owner may be present. Do not alter ownership. */
+-        if (id == 1 && (header & 0x01010000U)) {
+-            u2Log("DALI PP: legacy owner present raw=%08x; skipped\n", header); return 0;
+-        }
+-        if (id == 2) {
+-            uint32_t name = xhci.read(offset + 4), info = xhci.read(offset + 8);
+-            unsigned major = header >> 24, minor = (header >> 16) & 0xff;
+-            unsigned first = info & 0xff, count = (info >> 8) & 0xff;
+-            u2Log("DALI PP: protocol rev=%u.%u first=%u count=%u raw=%08x\n",
+-                major, minor, first, count, info);
+-            if (name != 0x20425355U || !first || count != 1 || first > ports ||
+-                (seen & (1U << (first - 1)))) { return 0; }
+-            seen |= 1U << (first - 1);
+-            if (major == 2 && !u2) { u2 = first; }
+-            else if (major == 3 && !u3) { u3 = first; }
+-            else { return 0; }
+-        }
+-        if (!next) { ended = true; break; }
+-        offset += next * 4U;
+-    }
+-    return ended && seen == 3 && u2 && u3 ? u2 : 0;
+-}
+-
+ bool hostStillHalted(const WriteMapping &ip, const ReadMapping &xhci, unsigned op) {
+     uint32_t s1 = ip.read(0x10), s2 = ip.read(0x14), status = xhci.read(op + 4);
+     return s1 != ~0U && s2 != ~0U && (s1 & 0xd01U) == 0xd01U && (s2 & 1U) &&
+         xhci.read(op) == 0 && status != ~0U && (status & 0x801U) == 1U;
+ }
+ 
+-/* Linux6.6 xhci_port_state_to_neutral / xhci_set_port_power: preserve RO
+- * and ordinary RW bits, zero RW1C/reset/strobe bits. Only change PP; never
+- * issue a port reset or start the engine. Return ownership restoration.
+- */
+-bool observePortPower(const WriteMapping &ip, const ReadMapping &xhci,
+-    unsigned op, unsigned ports) {
+-    unsigned port = usb2ProtocolPort(xhci, ports);
+-    if (!port || !hostStillHalted(ip, xhci, op)) {
+-        u2Log("DALI PP: protocol/clock/halted guard rejected; untouched\n"); return true;
+-    }
+-    unsigned offset = op + 0x400U + (port - 1) * 0x10U;
+-    uint32_t saved = xhci.read(offset);
+-    constexpr uint32_t power = 1U << 9;
+-    constexpr uint32_t neutral = (1U << 0) | (1U << 3) | (0xfU << 10) | (1U << 30) |
+-        (0xfU << 5) | power | (3U << 14) | (7U << 25);
+-    constexpr uint32_t controls = power | (3U << 14) | (7U << 25);
+-    if (saved == ~0U || (saved & (power | 2U | 8U | 16U | (1U << 31)))) {
+-        u2Log("DALI PP: entry rejected port=%u raw=%08x; untouched\n", port, saved); return true;
+-    }
+-    /* Writable mapping exposes only this one PORTSC register. */
+-    WriteMapping portsc;
+-    if (!portsc.open(0x16700000ULL + offset, 4)) {
+-        u2Log("DALI PP: PORTSC mapping failed; untouched\n"); return true;
+-    }
+-    uint32_t wanted = (saved & neutral) | power;
+-    portsc.write(0, wanted);
+-    uint32_t after = portsc.read(0);
+-    bool enabled = after != ~0U && (after & controls) == ((saved & controls) | power);
+-    u2Log("DALI PP: enable port=%u saved=%08x want=%08x read=%08x match=%u\n",
+-        port, saved, wanted, after, enabled);
+-    for (unsigned sample = 0; enabled && sample < 3; ++sample) {
+-        IOSleep(100); /* USB2 root-hub power-good minimum is20ms. */
+-        if (!hostStillHalted(ip, xhci, op)) {
+-            u2Log("DALI PP: observation stopped clock/engine changed\n"); break;
+-        }
+-        uint32_t sc = portsc.read(0);
+-        if (sc == ~0U || !(sc & power) || (sc & 8U)) {
+-            u2Log("DALI PP: observation stopped port=%u raw=%08x\n", port, sc); break;
+-        }
+-        u2Log("DALI PP: sample=%u port=%u raw=%08x pp=%u ccs=%u ped=%u speed=%u pls=%u\n",
+-            sample, port, sc, (sc >> 9) & 1, sc & 1, (sc >> 1) & 1,
+-            (sc >> 10) & 15, (sc >> 5) & 15);
+-    }
+-    uint32_t current = portsc.read(0);
+-    if (current == ~0U || !hostStillHalted(ip, xhci, op)) {
+-        u2Log("DALI PP: restore guard failed; reboot required\n"); return false;
+-    }
+-    /* Preserve live RO/RW state while restoring the PP bit we own. */
+-    portsc.write(0, (current & neutral & ~power) | (saved & power));
+-    uint32_t restored = portsc.read(0);
+-    bool matched = restored != ~0U && (restored & controls) == (saved & controls);
+-    u2Log("DALI PP: restore port=%u saved=%08x read=%08x match=%u\n",
+-        port, saved, restored, matched);
+-    return matched;
+-}
+-
+-/* Return whether the original U2 port state is intact, including skips.
+- * This is the MTU3 host-enable port RMW followed by its inverse. The xHCI
+- * engine stays halted. Optional native PHY control fields are snapshotted;
+- * the PP probe switches only the protocol-selected USB2 PORTSC power bit.
+- */
++/* DMA must stop/reset before releasing PHY and platform clocks. */
++bool integratedStorage(WriteMapping &ip, unsigned op, bool rootMode) {
++    if (!hostDMAValidated) { u2Log("DALI XHCI: DMA policy unverified; engine untouched\n"); return true; }
++    struct Cookie { WriteMapping *ip; WriteMapping *controller; unsigned op; };
++    WriteMapping registers;
++    if (!registers.open(0x16700000, 0x1000)) { return true; }
++    Cookie cookie{&ip, &registers, op};
++    DaliXHCIOps callbacks{};
++    callbacks.cookie = &cookie;
++    callbacks.read = [](void *p, unsigned offset) { return static_cast<Cookie *>(p)->controller->read(offset); };
++    callbacks.write = [](void *p, unsigned offset, uint32_t v) { static_cast<Cookie *>(p)->controller->write(offset, v); };
++    callbacks.alive = [](void *p) {
++        auto *c = static_cast<Cookie *>(p);
++        if (__atomic_load_n(&hostStopRequested, __ATOMIC_ACQUIRE)) { return false; }
++        uint32_t s1 = c->ip->read(0x10), s2 = c->ip->read(0x14);
++        if (s1 == ~0U || s2 == ~0U || (s1 & 0xd01) != 0xd01 || !(s2 & 1)) { return false; }
++        uint8_t power = 0, otg = 0, fault = 0; uint32_t status = 0;
++        return dali_pmif_transfer(14, 0x41e, &power, false, &status) &&
++            dali_pmif_transfer(14, 0x108, &otg, false, &status) &&
++            dali_pmif_transfer(14, 0x41f, &fault, false, &status) &&
++            (power & 4) && !(power & 0x63) && (otg & 1) && !fault;
++    };
++    callbacks.log = u2Log;
++    DaliXHCI controller;
++    bool success = controller.start(callbacks);
++    uint64_t first = 0, length = 0;
++    if (success) { success = controller.findHFS(&first, &length); }
++    if (success && rootMode) {
++        auto reader = [](void *p, uint64_t off, size_t size, void *data) {
++            return static_cast<DaliXHCI *>(p)->read(off, size, data) ? 0 : EIO;
++        };
++        success = dali_usb_disk_supply(&controller, reader, first, length) == 0;
++        if (success) {
++            u2Log("DALI ROOT: read-only USB partition available; source health monitoring active\n");
++            while (controller.sourceHealthy()) { IOSleep(100); }
++        }
++        /* Wait for any serialized block read before the stack object dies. */
++        dali_usb_disk_detach(&controller);
++    }
++    bool stopped = controller.stop();
++    u2Log("DALI XHCI: integrated result=%u stopped=%u\n", success, stopped);
++    return stopped;
++}
++
+ bool observeU2Port(WriteMapping &ip, const ReadMapping &xhci,
+-    unsigned op, unsigned ports, bool powerProbe, bool phyProbe, bool repeaterProbe) {
++    unsigned op, unsigned ports, bool powerProbe, bool phyProbe, bool repeaterProbe,
++    bool engineProbe, bool rootMode) {
+     u2Report.reached = true;
+     uint32_t saved = ip.read(0x50), u3 = ip.read(0x30);
+     uint32_t cmd = xhci.read(op), sts = xhci.read(op + 4);
+@@ -532,9 +580,9 @@
+             savedCK = ip.read(0x9c);
+             nativeReady = savedCK != ~0U && hostStillHalted(ip, xhci, op);
+             if (nativeReady) {
+-                nativeReady = (!repeaterProbe || nativeRepeater.powerOn()) &&
++                nativeReady = (!repeaterProbe || nativeRepeater.powerOn(engineProbe)) &&
+                     hostStillHalted(ip, xhci, op);
+-                nativeReady = nativeReady && nativePhy.powerOn() && hostStillHalted(ip, xhci, op);
++                nativeReady = nativeReady && nativePhy.powerOn(engineProbe) && hostStillHalted(ip, xhci, op);
+                 if (nativeReady) {
+                     uint32_t roleBefore = ip.read(0x50);
+                     nativeReady = roleBefore == enabled && ip.read(0x9c) == savedCK;
+@@ -575,7 +623,10 @@
+                     sample, port + 1, sc, sc & 1U, (sc >> 1) & 1U, (sc >> 10) & 0xfU);
+             }
+         }
+-        if (powerProbe && nativeReady) { ppRestored = observePortPower(ip, xhci, op, ports); }
++        if (engineProbe && nativeReady) { ppRestored = integratedStorage(ip, op, rootMode); }
++        else if (powerProbe) {
++            u2Log("DALI PP: halted PORTSC writes disabled; integrated engine required\n");
++        }
+     }
+     bool phyRestored = true;
+     if (phyProbe && ready) {
+@@ -593,9 +644,14 @@
+             u2Log("DALI PHY: restore guard failed; reboot required\n");
+         }
+     }
+-    /* Reverse native PHY power order. PMIF rollback does not depend on MAC
+-     * clocks: also run if the SoC-PHY restore guard failed.
++    /* A failed controller halt/reset pins its DMA arena and platform clocks.
++     * Keep PHY/repeater stable until reboot; the power owner still shuts VBUS
++     * off. Never gate a controller that may still own bus transactions.
+      */
++    if (!ppRestored) {
++        u2Log("DALI HOST: DMA shutdown unconfirmed; retaining platform resources\n");
++        return false;
++    }
+     bool repeaterRestored = !repeaterProbe || nativeRepeater.restore();
+     /* Disable/power down the port before the existing host-PDN handshake.
+      * Never release the SPM request if this exact restoration fails.
+@@ -611,20 +667,24 @@
+ void dali_usb_host_observe(bool hwrscsV2, bool vusbAlwaysOn, bool nativePhyValidated)
+ {
+     if (!ml_get_interrupts_enabled() || ml_at_interrupt_context()) { return; }
+-    int portProbe = 0, powerProbe = 0, phyProbe = 0, repeaterProbe = 0;
++    int portProbe = 0, powerProbe = 0, phyProbe = 0, repeaterProbe = 0, engineProbe = 0, rootMode = 0;
+     PE_parse_boot_argn("daliusbport", &portProbe, sizeof(portProbe));
+     PE_parse_boot_argn("daliusbpp", &powerProbe, sizeof(powerProbe));
+     PE_parse_boot_argn("daliusbphy", &phyProbe, sizeof(phyProbe));
+     PE_parse_boot_argn("daliusbrptr", &repeaterProbe, sizeof(repeaterProbe));
++    PE_parse_boot_argn("daliusbengine", &engineProbe, sizeof(engineProbe));
++    PE_parse_boot_argn("daliusbroot", &rootMode, sizeof(rootMode));
+     if ((portProbe != 0 && portProbe != 1) || (powerProbe != 0 && powerProbe != 1) ||
+         (phyProbe != 0 && phyProbe != 1) || (powerProbe && !portProbe) ||
+         (phyProbe && (!powerProbe || !nativePhyValidated)) ||
+-        (repeaterProbe != 0 && repeaterProbe != 1) || (repeaterProbe && !phyProbe)) { return; }
++        (repeaterProbe != 0 && repeaterProbe != 1) || (repeaterProbe && !phyProbe) ||
++        (engineProbe != 0 && engineProbe != 1) || (rootMode != 0 && rootMode != 1) ||
++        (engineProbe && (!repeaterProbe || !hostDMAValidated)) || (rootMode && !engineProbe)) { return; }
+     bzero(&u2Report, sizeof(u2Report));
+     u2Report.called = true;
+     u2Report.requested = portProbe == 1;
+-    u2Log("DALI HOST: guarded MTU3 v2 host power-up begin; U2 probe=%u PP=%u PHY=%u no DMA\n",
+-        portProbe, powerProbe, phyProbe);
++    u2Log("DALI HOST: guarded MTU3 v2 host power-up begin; U2=%u PHY=%u engine=%u root=%u\n",
++        portProbe, phyProbe, engineProbe, rootMode);
+     ReadMapping spm, bus, vlp, top;
+     if (!spm.open(0x1c004000, 0x1000) || !bus.open(0x1c00d000, 0x1000) ||
+         !vlp.open(0x1c016000, 0x1000) || !top.open(0x10000000, 0x800)) {
+@@ -791,14 +851,15 @@
+                     cmd, sts, xhci.read(op + 8));
+                 if (portProbe == 1) {
+                     portRestored = observeU2Port(ip, xhci, op, ports,
+-                        powerProbe == 1, phyProbe == 1, repeaterProbe == 1);
++                        powerProbe == 1, phyProbe == 1, repeaterProbe == 1, engineProbe == 1, rootMode == 1);
+                 }
+             } else { kprintf("DALI HOST: xHCI capability bounds rejected\n"); }
+         }
+     }
+-    /* U2 port was restored before returning host/device PDN and SPM.
+-     * No xHCI engine, IRQ or DMA action.
+-     */
++    if (!portRestored) {
++        u2Log("DALI HOST: platform cleanup refused; reboot required\n"); return;
++    }
++    /* Controller DMA was stopped/reset before U2/PHY restoration. */
+     ip.write(4, ctrl1);
+     ip.write(8, ctrl2);
+     /* Keep reset released until the IP sleep handshake completes. */
+@@ -823,4 +884,40 @@
+     kprintf("%s", u2Report.text);
+     kprintf("DALI U2 REPORT: end; saved text only, no hardware access\n");
+ }
++
++namespace {
++void hostWorker(void *, wait_result_t) {
++    dali_usb_host_observe(hostLaunchHwrscs, hostLaunchVusb, hostLaunchNative);
++    __atomic_store_n(&hostRunning, false, __ATOMIC_RELEASE);
++    thread_terminate(current_thread());
++}
++}
++bool dali_usb_host_set_calibration(const uint32_t *c, unsigned words) {
++    if (!c || words != 5 || c[0] != 1 || c[1] > 15 || c[2] > 31 ||
++        c[3] > 31 || c[4] > 255 || dali_usb_host_active()) { return false; }
++    hostTerm = c[1]; hostImpn = c[2]; hostImpp = c[3]; hostSW = c[4];
++    hostCalibrationValid = true; return true;
++}
++bool dali_usb_host_launch(bool hwrscs, bool vusb, bool native, bool dma) {
++    bool expected = false;
++    if (!dma || !native || !hostCalibrationValid || !__atomic_compare_exchange_n(&hostRunning, &expected, true,
++        false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) { return false; }
++    hostLaunchHwrscs = hwrscs; hostLaunchVusb = vusb; hostLaunchNative = native;
++    hostDMAValidated = dma;
++    __atomic_store_n(&hostStopRequested, false, __ATOMIC_RELEASE);
++    thread_t worker = THREAD_NULL;
++    if (kernel_thread_start(hostWorker, nullptr, &worker) != KERN_SUCCESS) {
++        __atomic_store_n(&hostRunning, false, __ATOMIC_RELEASE); return false;
++    }
++    thread_deallocate(worker); return true;
++}
++bool dali_usb_host_active() { return __atomic_load_n(&hostRunning, __ATOMIC_ACQUIRE); }
++bool dali_usb_host_stop() {
++    __atomic_store_n(&hostStopRequested, true, __ATOMIC_RELEASE);
++    for (unsigned i = 0; i < 4000; ++i) {
++        if (!dali_usb_host_active()) { return true; }
++        IOSleep(1);
++    }
++    kprintf("DALI XHCI: worker shutdown timeout; reboot required\n"); return false;
++}
+ #endif
+--- a/iokit/Kernel/arm/DaliUSBPower.h
++++ b/iokit/Kernel/arm/DaliUSBPower.h
+@@ -2,8 +2,8 @@
+ #define DALI_USB_POWER_H
+ #include <IOKit/IOLib.h>
+ /* Single built-in Dali client. Tick/finish serialize through an owned lock.
+- * Diagnostic 5V/default-current source and scoped host/PHY setup; no PD,
+- * VCONN, xHCI engine or DMA.
++ * Default-current source with independent health monitoring of the optional
++ * read-only host worker. No PD or VCONN negotiation.
+  */
+ class DaliUSBPower {
+     IOLock *lock = nullptr;
+@@ -19,6 +19,7 @@
+     bool adcFault = false;
+     bool hostObserve = false, hostHwrscsV2 = false, hostVusbAlwaysOn = false;
+     bool hostNativePhyValidated = false;
++    bool hostEngine = false, hostRoot = false, hostDMAValidated = false;
+     unsigned adcReports = 0, previousADCmv = 0;
+     uint64_t startedMs = 0, stateStartedMs = 0;
+     bool roleTouched = false, chargerTouched = false, cpAttempted = false;
+@@ -35,7 +36,7 @@
+     bool tickLocked();
+ public:
+     bool init(bool observeHost = false, bool hwrscsV2 = false, bool vusbAlwaysOn = false,
+-        bool nativePhyValidated = false);
++        bool nativePhyValidated = false, bool dmaValidated = false);
+     bool tick();
+     void finish(const char *reason);
+     void release();
+--- a/iokit/Kernel/arm/DaliUSBPower.cpp
++++ b/iokit/Kernel/arm/DaliUSBPower.cpp
+@@ -10,6 +10,7 @@
+ #include "DaliPMIF.h"
+ #include "DaliI2C5.h"
+ #include <machine/machine_routines.h>
++#include <pexpert/pexpert.h>
+ 
+ static uint64_t physicalMs()
+ {
+@@ -254,6 +255,11 @@
+     if (state == Finished) { return; }
+     unsigned endingState = (unsigned)state;
+     state = Finished; /* Never rearm automatically after detach/error. */
++    /* Worker read callbacks never take this power lock. Stop publication and
++     * wait for outstanding reads/controller reset before removing its source.
++     * Even a failed join must not prevent electrical source shutdown.
++     */
++    bool hostJoined = !hostEngine || dali_usb_host_stop();
+     kprintf("DALI OTG: ending tick=%u state=%u touched role=%u cp=%u charger=%u tcpc=%u\n",
+         ticks, endingState, roleTouched, cpAttempted, chargerTouched, tcpcTouched);
+     bool chargerOK = true, cpOK = true, roleOK = true, tcpcOK = true;
+@@ -313,8 +319,8 @@
+         !cpAttempted ? "untouched" : cpOK ? "restored" : "FAILED",
+         !roleTouched ? "untouched" : roleOK ? "restored" : "FAILED", mv, measured, otg);
+     kprintf("DALI ADC: final status=%s\n", adcFault ? "FAILED; reboot required" : "no ADC error recorded");
+-    if (!chargerOK || !cpOK || !roleOK || !tcpcOK || adcFault) { kprintf("DALI OTG: cleanup incomplete; reboot required\n"); }
+-    if (hostObserve) { dali_usb_host_report(); }
++    if (!chargerOK || !cpOK || !roleOK || !tcpcOK || adcFault || !hostJoined) { kprintf("DALI OTG: cleanup incomplete; reboot required\n"); }
++    if (hostObserve && hostJoined) { dali_usb_host_report(); }
+ }
+ 
+ bool DaliUSBPower::tickLocked()
+@@ -323,7 +329,8 @@
+     ++ticks; ++stateTicks;
+     uint64_t now = physicalMs();
+     if (!startedMs) { startedMs = stateStartedMs = now; }
+-    if (now - startedMs >= 60000) { finishLocked("total60s lease"); return false; }
++    bool rootSession = hostRoot && hostEngine && state == Powered && dali_usb_host_active();
++    if (!rootSession && now - startedMs >= 60000) { finishLocked("total60s lease"); return false; }
+     uint8_t cc = 0, power = 0, otg = 0;
+     unsigned mv = 0;
+     if (!snapshot(&cc, &power, &otg, &mv)) { finishLocked("status/fault error"); return false; }
+@@ -403,7 +410,12 @@
+         if ((power & 4) && mv >= 4400 && mv <= 5500) {
+             state = Powered; stateTicks = 0; stateStartedMs = physicalMs();
+             kprintf("DALI OTG: VBUS valid %umV; connector source confirmed, USB host not started\n", mv);
+-            if (hostObserve) {
++            if (hostEngine) {
++                if (!dali_usb_host_launch(hostHwrscsV2, hostVusbAlwaysOn,
++                    hostNativePhyValidated, hostDMAValidated)) {
++                    finishLocked("host launch failed"); return false;
++                }
++            } else if (hostObserve) {
+                 dali_usb_host_observe(hostHwrscsV2, hostVusbAlwaysOn, hostNativePhyValidated);
+             }
+         } else if (now - stateStartedMs >= 1000) {
+@@ -411,13 +423,16 @@
+         }
+     } else if (mv < 4400 || !(power & 4)) {
+         finishLocked("VBUS dropped"); return false;
+-    } else if (now - stateStartedMs >= 15000) {
++    } else if (hostEngine && !dali_usb_host_active()) {
++        finishLocked("host worker ended"); return false;
++    } else if (!hostRoot && now - stateStartedMs >= 15000) {
+         finishLocked("15s source lease expired"); return false;
+     }
+     return true;
+ }
+ 
+-bool DaliUSBPower::init(bool observeHost, bool hwrscsV2, bool vusbAlwaysOn, bool nativePhyValidated)
++bool DaliUSBPower::init(bool observeHost, bool hwrscsV2, bool vusbAlwaysOn,
++    bool nativePhyValidated, bool dmaValidated)
+ {
+     uint64_t frequency;
+     __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(frequency));
+@@ -426,6 +441,14 @@
+     hostHwrscsV2 = hwrscsV2;
+     hostVusbAlwaysOn = vusbAlwaysOn;
+     hostNativePhyValidated = nativePhyValidated;
++    int engine = 0, root = 0;
++    PE_parse_boot_argn("daliusbengine", &engine, sizeof(engine));
++    PE_parse_boot_argn("daliusbroot", &root, sizeof(root));
++    if ((engine != 0 && engine != 1) || (root != 0 && root != 1) ||
++        (root && !engine) || (engine && (!observeHost || !nativePhyValidated || !dmaValidated))) {
++        return false;
++    }
++    hostEngine = engine == 1; hostRoot = root == 1; hostDMAValidated = dmaValidated;
+     lock = IOLockAlloc();
+     return lock != nullptr;
+ }
+--- a/iokit/Kernel/arm/DaliUSBPMIC.cpp
++++ b/iokit/Kernel/arm/DaliUSBPMIC.cpp
+@@ -1,13 +1,14 @@
+ /* Dali native USB platform: shared PMIF observations by default; separately
+  * opt-in bounded Type-C source diagnostic via daliotg=1.
+  * MT6379 tcpc_mt6379.c maps standard TCPCI00xx registers to PMIC04xx.
+- * Optional scoped SoC PHY setup; no xHCI/USB-storage engine is started.
++ * Optional integrated read-only host requires a separately audited DMA policy.
+  */
+ #include <pexpert/arm64/board_config.h>
+ #if defined(SWEET)
+ #include "DaliPMIF.h"
+ #include "DaliI2C5.h"
+ #include "DaliUSBPower.h"
++#include "DaliUSBHost.h"
+ #include <IOKit/IOService.h>
+ #include <IOKit/IOLib.h>
+ #include <IOKit/IOWorkLoop.h>
+@@ -167,8 +168,34 @@
+             /* Live SID/base, observed chip revision, control-only policy version. */
+             if (config[0] != 14 || config[1] != 0xd00 || config[2] != 0x74 || config[3] != 1) { return false; }
+         } else if (repeater != 0) { return false; }
++        int engine = 0, root = 0;
++        PE_parse_boot_argn("daliusbengine", &engine, sizeof(engine));
++        PE_parse_boot_argn("daliusbroot", &root, sizeof(root));
++        bool dmaValidated = false;
++        if ((root != 0 && root != 1) || (root && engine != 1)) { return false; }
++        if (engine == 1 && repeater == 1 && observeHost) {
++            /* This property is deliberately absent from existing shim trees.
++             * Version1: 48-bit physical identity DMA, uncached CPU mapping.
++             * Set only after reference DMA/IOMMU ownership is established;
++             * AC64 and an absent FDT iommus property alone are insufficient.
++             */
++            OSData *dma = OSDynamicCast(OSData, provider->getProperty("host-dma-policy"));
++            uint32_t policy[4] = {};
++            if (dma && dma->getLength() == sizeof(policy)) {
++                memcpy(policy, dma->getBytesNoCopy(), sizeof(policy));
++                dmaValidated = policy[0] == 1 && policy[1] == 48 && policy[2] == 1 && policy[3] == 1;
++            }
++            if (!dmaValidated) {
++                kprintf("DALI XHCI: physical DMA policy unverified; engine refused\n"); return false;
++            }
++            OSData *cal = OSDynamicCast(OSData, provider->getProperty("host-u2-calibration"));
++            uint32_t values[5] = {};
++            if (!cal || cal->getLength() != sizeof(values)) { return false; }
++            memcpy(values, cal->getBytesNoCopy(), sizeof(values));
++            if (!dali_usb_host_set_calibration(values, 5)) { return false; }
++        } else if (engine != 0) { return false; }
+         if (!sourceRequested || !source.init(observeHost, hostHwrscsV2, hostVusbAlwaysOn,
+-            nativePhyValidated)) { return false; }
++            nativePhyValidated, dmaValidated)) { return false; }
+     } else if (otg != 0) { return false; }
+     workLoop = IOWorkLoop::workLoop();
+     timer = IOTimerEventSource::timerEventSource(this, timerAction);
+@@ -180,7 +207,7 @@
+     }
+     setProperty("diagnostic-only", true);
+     setProperty("programs-vbus", sourceRequested);
+-    if (sourceRequested) { kprintf("DALI OTG: bounded source mode requested; no xHCI/USB storage\n"); }
++    if (sourceRequested) { kprintf("DALI OTG: guarded source mode requested\n"); }
+     registerService();
+     timer->setTimeoutMS(1000);
+     return true;
+--- a/iokit/bsddev/IOKitBSDInit.cpp
++++ b/iokit/bsddev/IOKitBSDInit.cpp
+@@ -58,6 +58,9 @@
+ #include <uuid/uuid.h>
+ #include <sys/vnode_internal.h>
+ #include <sys/mount.h>
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++#include <sys/dali_usb_disk.h>
++#endif
+ #include <corecrypto/ccsha2.h>
+ 
+ // how long to wait for matching root device, secs
+@@ -702,6 +705,27 @@
+ 	matching = NULL;
+ 
+ 	SWEET_ROOT_LOG("IOBSD wait returned\n");
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	int usbRoot = 0;
++	PE_parse_boot_argn("daliusbroot", &usbRoot, sizeof(usbRoot));
++	if (usbRoot == 1) {
++		/* Explicit USB root selection never falls back to RAM/UFS. Registration
++		 * happens here after BSD/devfs init, not in the early IOKit worker.
++		 */
++		for (unsigned attempt = 0; attempt < 600; ++attempt) {
++			dev_t usb = dali_usb_disk_root();
++			if (usb != NODEV) {
++				*root = usb; *oflags = 0;
++				strlcpy(rootName, "du0", rootNameSize);
++				IOLog("DALI ROOT: selected read-only du0 major=%d\n", major(usb));
++				return kIOReturnSuccess;
++			}
++			IOSleep(100);
++		}
++		IOLog("DALI ROOT: USB root unavailable; refusing fallback\n");
++		return kIOReturnNotFound;
++	}
++#endif
+ 	if (mountAttempts++) {
+ 		IOLog("mount(%d) failed\n", mountAttempts);
+ 		IOSleep( 5 * 1000 );
+--- a/bsd/vfs/vfs_subr.c
++++ b/bsd/vfs/vfs_subr.c
+@@ -1264,7 +1264,9 @@
+ 		 */
+ 		{
+ 			uint32_t rootrw = 0;
+-			if (PE_parse_boot_argn("rootrw", &rootrw, sizeof(rootrw)) && rootrw) {
++			uint32_t usbroot = 0;
++			PE_parse_boot_argn("daliusbroot", &usbroot, sizeof(usbroot));
++			if (usbroot != 1 && PE_parse_boot_argn("rootrw", &rootrw, sizeof(rootrw)) && rootrw) {
+ 				mp->mnt_flag &= ~MNT_RDONLY;
+ 			}
+ 		}
