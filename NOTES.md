@@ -1,3 +1,9 @@
+## Current: verified USB PMIC trial pair; fresh preflight pending (2026-10-21)
+
+CI39544763251 SUCCESS6960bca; actual18/18sourcebytesmatchlocalcompiled, nativePMIF/RTC/USBPMICsymbols/stringsandcounterverified. Durableignoredpair `shim/out-dali/usbpmic-39544763251/`: unchangedprovenbootddfbc184..., newinit_bootfbafad1c9142197c653bd9d54421dabf6ff7441acbc56f7dd3f39bed252166e6, kernel588e1e5435386c27b1941087e0c927607f03983a1e3af0a4eb073aa1973ff13d. Payload29233424/11segments,ADT7636withUSBPMIC/RTC/CPU/GIC/WDT, same12MiBrootat2024d0000, argsadddaliusb=1. Fullheaders/segments/entry/RAM/LZ4CPIO/8MiBAVB/hostoriginalchecksPASS. NewRTC/sharedPMIF/USBPMICcandidatehardwareUNVERIFIED. No USBhost/storageimplementationyet.
+
+FreshphysicalAndroidpreflightisbeingrun beforetemporarytrial. Ontrialmanualfastbootreturn immediatelyusepair/device_pair.py recover thenAndroidboot/verify fullphysicaloriginalboot_b/init_boot_bSHA256. Restorebackups `backup/dali-25060RK16C-pairtest-20261020/`. Pairmanifestauthoritative; no trialwriteasofthisentry. Finite120sWDTlease retained; no userdata/internalUFS/GPTchanges. USB16GiBmediaalreadyverified/backedup; nativeAndroidhost+5V/480Mbpsstickproven.
+
 ## Current: native OTG proven on Android; first XNU USB platform patch prepared (2026-10-21)
 
 Androidcapture complete/retrievedignored `research/dali-usb-root/android-host`: host+source, regulator5V/1.4A, VBUS~5.003V, DataTraveler1f75:0903 at480Mbps, disk249905152sectors/partitionstart2048size249903071matcheswrittenUSB. HostIPPC CTRL1=0/CTRL2=1/STS101013f0f/U3CTRL20c/U2CTRLa4c. ActualMT6379+XSphyproviders; noNXPprovider. USBmedia16GiB directreadbackverified; no handsetbootwrites.
