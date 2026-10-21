@@ -1,0 +1,153 @@
+--- a/iokit/Kernel/arm/DaliUSBHost.h
++++ b/iokit/Kernel/arm/DaliUSBHost.h
+@@ -5,4 +5,6 @@
+  * policy. Any host resources acquired are released before return when asleep.
+  */
+ void dali_usb_host_observe(bool hwrscsV2, bool vusbAlwaysOn);
++/* Replay saved diagnostic text after source cleanup, under the same lock. */
++void dali_usb_host_report();
+ #endif
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -12,8 +12,36 @@
+ #include <IOKit/IOMemoryDescriptor.h>
+ #include <machine/machine_routines.h>
+ #include <pexpert/pexpert.h>
++#include <libkern/libkern.h>
+ 
+ namespace {
++/* Called and reported under the caller's existing DaliUSBPower lock.
++ * Keep only diagnostic text in fixed memory; replay never touches MMIO.
++ */
++struct U2Report {
++    char text[2048];
++    unsigned size;
++    bool called, requested, reached, truncated;
++};
++U2Report u2Report = {};
++
++void u2Log(const char *format, ...) {
++    char line[256];
++    va_list args;
++    va_start(args, format);
++    int length = vsnprintf(line, sizeof(line), format, args);
++    va_end(args);
++    if (length < 0) { u2Report.truncated = true; return; }
++    kprintf("%s", line);
++    if ((unsigned)length >= sizeof(line) ||
++        (unsigned)length >= sizeof(u2Report.text) - u2Report.size) {
++        u2Report.truncated = true; return;
++    }
++    memcpy(u2Report.text + u2Report.size, line, (unsigned)length);
++    u2Report.size += (unsigned)length;
++    u2Report.text[u2Report.size] = 0;
++}
++
+ class ReadMapping {
+     IOMemoryDescriptor *memory = nullptr;
+     IOMemoryMap *map = nullptr;
+@@ -166,12 +194,13 @@
+  */
+ bool observeU2Port(WriteMapping &ip, const ReadMapping &xhci,
+     unsigned op, unsigned ports) {
++    u2Report.reached = true;
+     uint32_t saved = ip.read(0x50), u3 = ip.read(0x30);
+     uint32_t cmd = xhci.read(op), sts = xhci.read(op + 4);
+     if (saved == ~0U || u3 == ~0U || (saved & 3U) != 3U ||
+         (u3 & 3U) != 3U || !(ip.read(8) & 1U) || cmd != 0U ||
+         sts == ~0U || !(sts & 1U) || ip.read(0x24) != 0x101U) {
+-        kprintf("DALI U2: entry rejected port=%08x U3=%08x cmd=%08x sts=%08x\n",
++        u2Log("DALI U2: entry rejected port=%08x U3=%08x cmd=%08x sts=%08x\n",
+             saved, u3, cmd, sts);
+         return true; /* No port was changed. */
+     }
+@@ -183,31 +212,31 @@
+     uint32_t enabled = ip.read(0x50);
+     bool control = enabled == wanted;
+     bool ready = control && waitBits(ip, 0x14, 1U, 1U, 100, 100);
+-    kprintf("DALI U2: enable saved=%08x want=%08x read=%08x ctrl=%u\n",
++    u2Log("DALI U2: enable saved=%08x want=%08x read=%08x ctrl=%u\n",
+         saved, wanted, enabled, control);
+-    kprintf("DALI U2: MAC ready=%u sts=%08x/%08x\n",
++    u2Log("DALI U2: MAC ready=%u sts=%08x/%08x\n",
+         ready, ip.read(0x10), ip.read(0x14));
+     if (ready) {
+         ReadMapping phy;
+         if (phy.open(0x16730000, 0x400)) {
+-            kprintf("DALI U2: PHY acr0=%08x acr4=%08x acr6=%08x dcr1=%08x\n",
++            u2Log("DALI U2: PHY acr0=%08x acr4=%08x acr6=%08x dcr1=%08x\n",
+                 phy.read(0x300), phy.read(0x310), phy.read(0x318), phy.read(0x364));
+-            kprintf("DALI U2: PHY dtm0=%08x dtm1=%08x reserve=%08x/%08x ref=%08x\n",
++            u2Log("DALI U2: PHY dtm0=%08x dtm1=%08x reserve=%08x/%08x ref=%08x\n",
+                 phy.read(0x368), phy.read(0x36c), phy.read(0x330), phy.read(0x334),
+                 phy.read(0x344));
+-        } else { kprintf("DALI U2: PHY mapping failed\n"); }
++        } else { u2Log("DALI U2: PHY mapping failed\n"); }
+         for (unsigned sample = 0; sample < 3; ++sample) {
+             if (sample) { IOSleep(100); }
+             if ((ip.read(0x10) & 0xd01U) != 0xd01U || !(ip.read(0x14) & 1U) ||
+                 xhci.read(op) != 0U || !(xhci.read(op + 4) & 1U)) {
+-                kprintf("DALI U2: observation stopped clock/engine state changed\n"); break;
++                u2Log("DALI U2: observation stopped clock/engine state changed\n"); break;
+             }
+             for (unsigned port = 0; port < ports; ++port) {
+                 uint32_t sc = xhci.read(op + 0x400U + port * 0x10U);
+                 if (sc == ~0U) {
+-                    kprintf("DALI U2: PORTSC read invalid port=%u\n", port + 1); break;
++                    u2Log("DALI U2: PORTSC read invalid port=%u\n", port + 1); break;
+                 }
+-                kprintf("DALI U2: PORTSC sample=%u port=%u raw=%08x ccs=%u ped=%u speed=%u\n",
++                u2Log("DALI U2: PORTSC sample=%u port=%u raw=%08x ccs=%u ped=%u speed=%u\n",
+                     sample, port + 1, sc, sc & 1U, (sc >> 1) & 1U, (sc >> 10) & 0xfU);
+             }
+         }
+@@ -218,7 +247,7 @@
+     ip.write(0x50, saved);
+     uint32_t after = ip.read(0x50);
+     bool restored = after == saved;
+-    kprintf("DALI U2: restore want=%08x read=%08x match=%u\n", saved, after, restored);
++    u2Log("DALI U2: restore want=%08x read=%08x match=%u\n", saved, after, restored);
+     return restored;
+ }
+ }
+@@ -229,6 +258,9 @@
+     int portProbe = 0;
+     PE_parse_boot_argn("daliusbport", &portProbe, sizeof(portProbe));
+     if (portProbe != 0 && portProbe != 1) { return; }
++    bzero(&u2Report, sizeof(u2Report));
++    u2Report.called = true;
++    u2Report.requested = portProbe == 1;
+     kprintf("DALI HOST: guarded MTU3 v2 host power-up begin; U2 probe=%u no DMA\n", portProbe);
+     ReadMapping spm, bus, vlp, top;
+     if (!spm.open(0x1c004000, 0x1000) || !bus.open(0x1c00d000, 0x1000) ||
+@@ -410,10 +442,19 @@
+     bool released = portRestored && asleep && releaseResourcesAndRestore(ip, requestGates,
+         oldRequest, oldAck, savedGates, ctrl0);
+     bool controlsRestored = ip.read(0) == ctrl0 && ip.read(4) == ctrl1 && ip.read(8) == ctrl2;
+-    kprintf("DALI HOST: host handoff cleaned sleep=%u ctrl=%u SPM/gates/force=%u U2=%u\n",
++    u2Log("DALI HOST: host handoff cleaned sleep=%u ctrl=%u SPM/gates/force=%u U2=%u\n",
+         asleep, controlsRestored, released, portRestored);
+     if (!asleep || !released) {
+         kprintf("DALI HOST: cleanup incomplete; reboot required\n");
+     }
+ }
++
++void dali_usb_host_report()
++{
++    if (!u2Report.called || !u2Report.requested) { return; }
++    kprintf("DALI U2 REPORT: saved results begin reached=%u truncated=%u\n",
++        u2Report.reached, u2Report.truncated);
++    kprintf("%s", u2Report.text);
++    kprintf("DALI U2 REPORT: end; saved text only, no hardware access\n");
++}
+ #endif
+--- a/iokit/Kernel/arm/DaliUSBPower.cpp
++++ b/iokit/Kernel/arm/DaliUSBPower.cpp
+@@ -314,6 +314,7 @@
+         !roleTouched ? "untouched" : roleOK ? "restored" : "FAILED", mv, measured, otg);
+     kprintf("DALI ADC: final status=%s\n", adcFault ? "FAILED; reboot required" : "no ADC error recorded");
+     if (!chargerOK || !cpOK || !roleOK || !tcpcOK || adcFault) { kprintf("DALI OTG: cleanup incomplete; reboot required\n"); }
++    if (hostObserve) { dali_usb_host_report(); }
+ }
+ 
+ bool DaliUSBPower::tickLocked()

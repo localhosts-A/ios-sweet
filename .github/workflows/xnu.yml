@@ -192,6 +192,9 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U2: MAC ready='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U2: PORTSC sample='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U2: restore want='
+          grep -Fq 'if (hostObserve) { dali_usb_host_report(); }' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U2 REPORT: saved results begin'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U2 REPORT: end; saved text only, no hardware access'
 
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: PWR dp='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: AC64='
