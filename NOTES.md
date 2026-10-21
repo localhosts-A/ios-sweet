@@ -6,7 +6,7 @@ Full original init_boot_b thenboot_b immediately recovered, Android completed/ro
 
 During local edit /tmp tmpfs filled, truncating the extracted working DaliXHCI.cpp. Moved generated old /tmp/dali-xnu-run39480488397 to ignored research/dali-usb-root/ci-artifacts/retired-tmp, freeing393MiB; restored cpp byte-for-byte from verified CI0120 source (header unchanged checked), then reapplied diagnostics. Require exact patch replay/source comparison beforebuild. No repository or phone artifact was truncated. Initial multi-file patch also had a nonmatching out-of-order context; corrected.
 
-Patch0121 adds these bounded read-only diagnostics plus8192byte report capacity; native actual ARM64 XHCI/Host2/2 compilePASS. Exact actualCI0120+0121 patch replay3/3 byte-identical;95positive workflow sourceassertionsPASS. Earlier cachePA/scalarDMA protections unchanged. No hardware fix claimed; fullCI pending. No new phone writes since recovery.
+Patch0121/source05a3941 pushed; fullCI39645079678 building. Adds bounded read-only diagnostics plus8192byte report capacity; native actual ARM64 XHCI/Host2/2 compilePASS. Exact actualCI0120+0121 patch replay3/3 byte-identical;95positive workflow sourceassertionsPASS. Earlier cachePA/scalarDMA protections unchanged. No hardware fix claimed; fullCI/actual32source+linkedmarkers/instructionaudit/package pending. Nextpairusb-noop-event-39645079678; no new phone writes since recovery.
 
 ## Historical scalar DMA trial (recovered)
 
