@@ -1,0 +1,111 @@
+--- a/iokit/Kernel/arm/DaliXHCI.h
++++ b/iokit/Kernel/arm/DaliXHCI.h
+@@ -14,7 +14,10 @@
+     unsigned dmaAddressBits; /* Audited device AND parent-bus limit. */
+     uint32_t (*read)(void *, unsigned);
+     void (*write)(void *, unsigned, uint32_t);
+-    bool (*alive)(void *); /* source/clock/removal guard, must not reenter */
++    /* Reset-ready bits may be asserted only during our bounded HC reset.
++     * Supply, stop and underlying clock guards remain mandatory then too.
++     */
++    bool (*alive)(void *, bool controllerResetPending);
+     void (*log)(const char *, ...);
+ };
+ 
+@@ -36,7 +39,7 @@
+     uint64_t startedMs = 0;
+     const char *startupStage = "idle";
+     bool dmaPublished = false, running = false, faulted = false, configured = false;
+-    bool prepared = false;
++    bool prepared = false, controllerResetPending = false;
+     void fail() { __atomic_store_n(&faulted, true, __ATOMIC_RELEASE); }
+     Ring commandRing{0x1000, 0, 1}, controlRing{0x5000, 0, 1};
+     Ring inRing{0x6000, 0, 1}, outRing{0x7000, 0, 1};
+@@ -68,7 +71,7 @@
+     bool read(uint64_t byteOffset, size_t length, void *destination);
+     bool findHFS(uint64_t *firstByte, uint64_t *length);
+     bool ready() const { return configured && !__atomic_load_n(&faulted, __ATOMIC_ACQUIRE); }
+-    bool sourceHealthy() const { return ready() && ops.alive(ops.cookie); }
++    bool sourceHealthy() const { return ready() && ops.alive(ops.cookie, false); }
+     uint64_t capacity() const { return blockCount * blockBytes; }
+     uint32_t sectorSize() const { return blockBytes; }
+ };
+--- a/iokit/Kernel/arm/DaliXHCI.cpp
++++ b/iokit/Kernel/arm/DaliXHCI.cpp
+@@ -45,7 +45,7 @@
+ }
+ bool DaliXHCI::live() {
+     if (__atomic_load_n(&faulted, __ATOMIC_ACQUIRE)) { return false; }
+-    bool healthy = ops.alive(ops.cookie);
++    bool healthy = ops.alive(ops.cookie, controllerResetPending);
+     uint64_t elapsed = milliseconds() - startedMs;
+     if (!healthy || elapsed > operationBudgetMs) {
+         ops.log("DALI XHCI: guard stage=%s healthy=%u elapsed=%llu budget=%u\n",
+@@ -238,9 +238,19 @@
+         op + 0x400 + (hcs >> 24) * 16 > 0x1000 || command != 0 ||
+         (status & 0x801) != 1) { return false; }
+     port = usbPort;
++    /* Prove the normal ready/supply state before issuing a reset. While
++     * HCRST/CNR are being polled, reset-deasserted indications are not an
++     * invariant. Do not exempt power/fault/stop or stable source clocks.
++     */
++    startupStage = "pre-reset-health";
++    if (!live()) { return false; }
+     startupStage = "controller-reset";
++    controllerResetPending = true;
+     wr(op, 2); /* Host controller reset only after halt, no DMA published. */
+-    if (!wait(op, 2, 0, 1000) || !wait(op + 4, 0x800, 0, 1000) || !(rd(op + 8) & 1)) { return false; }
++    if (!wait(op, 2, 0, 1000) || !wait(op + 4, 0x800, 0, 1000)) { return false; }
++    controllerResetPending = false;
++    startupStage = "post-reset-health";
++    if (!live() || !(rd(op + 8) & 1)) { return false; }
+     unsigned scratch = ((rd(8) >> 27) & 31) | (((rd(8) >> 21) & 31) << 5);
+     startupStage = "arena-allocation";
+     ops.log("DALI XHCI: reset complete pages=%08x scratch=%u\n", rd(op + 8), scratch);
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -514,16 +514,37 @@
+     callbacks.dmaAddressBits = hostDMAAddressBits;
+     callbacks.read = [](void *p, unsigned offset) { return static_cast<Cookie *>(p)->controller->read(offset); };
+     callbacks.write = [](void *p, unsigned offset, uint32_t v) { static_cast<Cookie *>(p)->controller->write(offset, v); };
+-    callbacks.alive = [](void *p) {
++    callbacks.alive = [](void *p, bool resetPending) {
+         auto *c = static_cast<Cookie *>(p);
+-        if (__atomic_load_n(&hostStopRequested, __ATOMIC_ACQUIRE)) { return false; }
++        if (__atomic_load_n(&hostStopRequested, __ATOMIC_ACQUIRE)) {
++            u2Log("DALI XHCI: health rejected stop requested reset=%u\n", resetPending); return false;
++        }
+         uint32_t s1 = c->ip->read(0x10), s2 = c->ip->read(0x14);
+-        if (s1 == ~0U || s2 == ~0U || (s1 & 0xd01) != 0xd01 || !(s2 & 1)) { return false; }
++        /* IPPC bit11 is XHCI_RST_B_STS, STS2 bit0 is U2 MAC reset-B.
++         * They are readiness indications, not supply-clock invariants while
++         * software itself asserts HCRST. PLL/REF/SYS125 stay required. The
++         * full readiness mask is required again before allocating DMA.
++         */
++        uint32_t mask = resetPending ? 0x501U : 0xd01U;
++        if (s1 == ~0U || s2 == ~0U || (s1 & mask) != mask || (!resetPending && !(s2 & 1))) {
++            u2Log("DALI XHCI: health rejected clocks reset=%u sts=%08x/%08x mask=%08x\n",
++                resetPending, s1, s2, mask); return false;
++        }
+         uint8_t power = 0, otg = 0, fault = 0; uint32_t status = 0;
+-        return dali_pmif_transfer(14, 0x41e, &power, false, &status) &&
+-            dali_pmif_transfer(14, 0x108, &otg, false, &status) &&
+-            dali_pmif_transfer(14, 0x41f, &fault, false, &status) &&
+-            (power & 4) && !(power & 0x63) && (otg & 1) && !fault;
++        const uint16_t regs[] = {0x41e, 0x108, 0x41f};
++        uint8_t *values[] = {&power, &otg, &fault};
++        for (unsigned i = 0; i < 3; ++i) {
++            if (!dali_pmif_transfer(14, regs[i], values[i], false, &status)) {
++                u2Log("DALI XHCI: health rejected PMIF reset=%u reg=%04x status=%08x\n",
++                    resetPending, regs[i], status); return false;
++            }
++        }
++        bool healthy = (power & 4) && !(power & 0x63) && (otg & 1) && !fault;
++        if (!healthy) {
++            u2Log("DALI XHCI: health rejected supply reset=%u power=%02x otg=%02x fault=%02x\n",
++                resetPending, power, otg, fault);
++        }
++        return healthy;
+     };
+     callbacks.log = u2Log;
+     DaliXHCI controller;

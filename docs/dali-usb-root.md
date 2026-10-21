@@ -82,6 +82,16 @@ Patch0116 records the exact startup stage, capability/offset values, reset
 wait failures and DMA allocation/mapping rejection. It preserves existing
 hardware guards; this diagnostic change does not establish a fix.
 
+The next diagnostic boot localized rejection to the health callback while
+waiting for controller reset, before DMA publication. Patch0117 separates
+reset-ready status from supply health: full readiness is required before
+HCRST and again after HCRST/CNR clear, before DMA allocation. Only during
+that bounded reset wait may xHCI/U2 MAC reset-ready bits be low; PLL, REF and
+SYS125 status, source/fault/stop checks remain required. Rejection now logs
+the precise clock/status, PMIF register failure or supply values. The photo
+does not establish which old callback subcondition failed, and the change
+still needs hardware verification.
+
 ## Primary references
 
 - [Intel xHCI1.22 specification](https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/extensible-host-controler-interface-usb-xhci.pdf), sections4/5/6.
