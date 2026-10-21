@@ -5,7 +5,7 @@ import struct
 from pathlib import Path
 
 
-def inspect(path):
+def inspect(path, symbol='_sweet_boot_counter_ms'):
     data = path.read_bytes()
     magic, cpu, _, _, commands, _, _, _ = struct.unpack_from('<8I', data)
     if magic != 0xfeedfacf or cpu != 0x100000c:
@@ -33,9 +33,9 @@ def inspect(path):
             continue
         name = strings[nameoff:].split(b'\0', 1)[0]
         entries.append((name, section, address))
-    matches = [entry for entry in entries if entry[0] == b'_sweet_boot_counter_ms']
+    matches = [entry for entry in entries if entry[0] == symbol.encode('ascii')]
     if len(matches) != 1:
-        raise ValueError('expected one defined counter helper')
+        raise ValueError(f'expected one defined counter helper: {symbol}')
     _, section, address = matches[0]
     end = min((value for _, sec, value in entries
                if sec == section and value > address), default=address + 128)
@@ -54,11 +54,14 @@ def inspect(path):
     if not (counter and frequency and barriers and
             min(barriers) < min(counter) < min(frequency)):
         raise ValueError('counter helper lacks ordered ISB / CNTPCT_EL0 / CNTFRQ_EL0 reads')
-    print(f'{path.name}: counter helper at {address:#x}, {len(code)} bytes; '
+    print(f'{path.name}: {symbol} at {address:#x}, {len(code)} bytes; '
           'ISB and both counter/frequency reads verified')
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('kernel', type=Path)
-    inspect(parser.parse_args().kernel)
+    parser.add_argument('--symbol', default='_sweet_boot_counter_ms',
+                        help='exact Mach-O symbol of the counter helper')
+    args = parser.parse_args()
+    inspect(args.kernel, args.symbol)

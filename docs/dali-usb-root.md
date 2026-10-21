@@ -138,6 +138,20 @@ bytes. Diagnostics never acknowledge controller status or relax command,
 DMA, power or reset checks. The full enumeration/storage path remains enabled
 after a valid No-op; this change does not claim to fix the failure.
 
+## Darwin inline assembly counter correction
+
+The diagnostic image printed an enormous command duration without entering
+the event wait. Its actual xHCI command disassembly contained ISB but no
+counter or frequency reads. The combined inline assembly used semicolons,
+which the Darwin AArch64 assembler treats as comments; both output values
+were undefined. This invalidated all xHCI local deadlines and budgets.
+
+Patch0122 separates the ISB/MRS/MRS instructions with newlines in a noinline
+local timer helper and uses quotient/remainder millisecond conversion.
+The artifact inspector now checks this exact helper's opcodes as well as
+the existing boot counter. The correction preserves bounded waits and
+hardware guards. It is not yet proof of DMA completion or USB storage reads.
+
 ## Primary references
 
 - [Intel xHCI1.22 specification](https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/extensible-host-controler-interface-usb-xhci.pdf), sections4/5/6.
@@ -147,3 +161,4 @@ after a valid No-op; this change does not claim to fix the failure.
 - Native XNU IOBufferMemoryDescriptor/IOMemoryDescriptor, BSD memdev and
   HFS sources in the exact CI build tree.
 - [Arm DC ZVA instruction](https://support.arm.com/documentation/ddi0601/2024-06/AArch64-Instructions/DC-ZVA--Data-Cache-Zero-by-VA?lang=en), Device-memory alignment fault semantics.
+- [LLVM Darwin AArch64 assembler syntax](https://llvm.org/docs/doxygen/AArch64MCAsmInfo_8cpp_source.html), semicolon comment marker.

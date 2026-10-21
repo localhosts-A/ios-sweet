@@ -1,4 +1,14 @@
-## Current: No-op diagnostic trial started; original restoration pending (2026-10-22)
+## Current: xHCI timer assembler bug confirmed; originals recovered and verified (2026-10-22)
+
+Photo IMG_20261022_014841.jpg: No-openqueuepa2055e1000/raw0/0/0/5c01; predoorbellcmd1/sts0/CRCR0/0/DCBAA055e0000/2/cfg1; eventringallzero/ERST055e2000/2/100/0. Command-ms13835058516861012992, failedstageNoop elapsed1005/published1running1, noeventpollrejected/timeout/rawrejection line. Later explicitUSBrootwait bdevvpfailedopen @vfs_subr2168 at~97s is secondary afterrootunavailable. Allstop/reset/ownedcleanup reported1. No successfulNoOP/USB/MSC/root.
+
+Exact actualCI0121 command disassembly shows each old milliseconds() emits ISB but NO MRS, then divides undefined oldregistervalues. Original combined inlineasm `isb; mrs ...; mrs ...` uses Darwin semicoloncomment; LLVM AArch64MCAsmInfoDarwin source defines CommentString=';' (https://llvm.org/docs/doxygen/AArch64MCAsmInfo_8cpp_source.html). Thus original xHCI deadlines/guardelapsed were invalid and may skip command loop. Separatebootcounterhelper has correct52byte ISB/MRS/MRS and Ttimestamps; priorcountergate onlycheckedthathelper, missinginlinedxHCItimer.
+
+Fulloriginalinit_boot_bthenboot_b recovered immediately. FirstAndroidverify raced boot_completedempty; repeatPASS root/dali/model/_b/completed/fullphysicalsizesSHA256. Currentusb-noop-event-39645079678 manifestoriginals_verified; NO ACTIVE TRIAL/PENDING RESTORATION. Logsrun39645079678-recover.log/-verify.log. Patch0122 uses distinct noinline xHCImilliseconds with newline-separatedISB/MRS/MRS, memoryclobber and quotient/remainder conversion; no dependence on DEVELOPMENT-onlysharedhelper. NativeactualXHCI1/1compilePASS, newlocal52bytehelperopcodeinspectionPASS. Extendexistinginspect-boot-counter.py --symbol andworkflowcheckactualxHCIhelperaswell. Exactreplay/fullCI/package pending; no newphonewrites ormanualtrialthisround.
+
+User asks whetherUdiskreadable: answered no; no capacity/sectorread/MSCproof, currentfixonlytimer. Do notclaimUSBsuccess.
+
+## Historical No-op diagnostic trial (recovered)
 
 User requestscontinue after verifiedNoopdiagnosticcandidate. Current usb-noop-event-39645079678 trialhelper completed: immediate Android root/dali/model/_b/completed/fullphysicaloriginalsizesSHA256PASS; fastbootidentity/unlocked/slot/sizes andhostoriginal+candidatehashesPASS. Temporary init_boot_b thenboot_b flashedOKAY/rebootrequested. Authoritative manifesttrial_rebooted. CURRENT ORIGINAL RESTORATION PENDING; priororiginals_verifiedhistoricalonly. Log research/dali-usb-root/ci-artifacts/run39645079678-trial.log.
 

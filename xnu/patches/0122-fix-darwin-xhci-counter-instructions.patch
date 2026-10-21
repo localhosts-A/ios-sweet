@@ -1,0 +1,21 @@
+--- a/iokit/Kernel/arm/DaliXHCI.cpp
++++ b/iokit/Kernel/arm/DaliXHCI.cpp
+@@ -13,10 +13,15 @@
+ namespace {
+ constexpr unsigned arenaBytes = 0x40000, dataOffset = 0x10000, dataBytes = 0x10000;
+ constexpr uint32_t cycle = 1, ioc = 1U << 5;
+-uint64_t milliseconds() {
++__attribute__((noinline)) uint64_t milliseconds() {
++    /* Darwin's assembler treats ';' as a comment, so the former combined
++     * asm emitted only ISB and left both outputs undefined. Keep a distinct
++     * helper whose actual ISB/MRS sequence is checked after link.
++     */
+     uint64_t count, hz;
+-    __asm__ volatile("isb; mrs %0, cntpct_el0; mrs %1, cntfrq_el0" : "=r"(count), "=r"(hz));
+-    return hz ? count / (hz / 1000) : 0;
++    __asm__ volatile("isb\n\tmrs %0, cntpct_el0\n\tmrs %1, cntfrq_el0"
++        : "=r"(count), "=r"(hz) :: "memory");
++    return hz ? (count / hz) * 1000 + ((count % hz) * 1000) / hz : 0;
+ }
+ void publish() { __asm__ volatile("dsb oshst" ::: "memory"); }
+ void consume() { __asm__ volatile("dmb oshld" ::: "memory"); }
