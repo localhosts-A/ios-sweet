@@ -47,12 +47,17 @@ Existing shim trees intentionally omit both of these required properties:
 
 | Property | uint32 words | Required evidence |
 | --- | --- | --- |
-| host-dma-policy | version1, address bits48, identity1, uncached1 | Native host DMA address/mapping and IOMMU ownership audit |
+| host-dma-policy | version1, audited address bits32..36, identity1, uncached1 | Native host DMA address/mapping and IOMMU ownership audit |
 | host-u2-calibration | version1, HSRX_TERM, HSTX_IMPN, HSTX_IMPP, silicon SW revision | Read-only native nvmem/chip metadata for this phone |
 
 AC64 capability and absence of an FDT iommus property do not establish
 identity DMA. The current code refuses engine startup without these
 properties. Do not insert guessed values to bypass the gate.
+
+The live ancestor soc dma-ranges covers the first64GiB with equal bus/physical
+base0, so the platform refuses widths above36 bits even though xHCI advertises
+AC64. The allocator applies the audited physical-address mask and64KiB
+alignment before publishing any DMA address. The device mask may be narrower.
 
 The next device interaction is read-only Android metadata collection, followed
 by completing the address/calibration audit and candidate packaging. It is

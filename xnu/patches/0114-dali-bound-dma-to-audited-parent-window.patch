@@ -1,0 +1,111 @@
+--- a/iokit/Kernel/arm/DaliUSBHost.h
++++ b/iokit/Kernel/arm/DaliUSBHost.h
+@@ -13,4 +13,5 @@
+ bool dali_usb_host_stop();
+ bool dali_usb_host_active();
+ bool dali_usb_host_set_calibration(const uint32_t *config, unsigned words);
++bool dali_usb_host_set_dma_policy(const uint32_t *config, unsigned words);
+ #endif
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -21,6 +21,7 @@
+ bool hostLaunchHwrscs = false, hostLaunchVusb = false, hostLaunchNative = false;
+ bool hostCalibrationValid = false;
+ uint32_t hostTerm = 0, hostImpn = 0, hostImpp = 0, hostSW = 0;
++unsigned hostDMAAddressBits = 0;
+ /* Written by one host worker; report only after that worker has joined.
+  * Keep only diagnostic text in fixed memory; replay never touches MMIO.
+  */
+@@ -510,6 +511,7 @@
+     Cookie cookie{&ip, &registers, op};
+     DaliXHCIOps callbacks{};
+     callbacks.cookie = &cookie;
++    callbacks.dmaAddressBits = hostDMAAddressBits;
+     callbacks.read = [](void *p, unsigned offset) { return static_cast<Cookie *>(p)->controller->read(offset); };
+     callbacks.write = [](void *p, unsigned offset, uint32_t v) { static_cast<Cookie *>(p)->controller->write(offset, v); };
+     callbacks.alive = [](void *p) {
+@@ -892,6 +894,12 @@
+     thread_terminate(current_thread());
+ }
+ }
++bool dali_usb_host_set_dma_policy(const uint32_t *c, unsigned words) {
++    /* Live ancestor soc dma-ranges maps only the first64GiB (36 address bits). */
++    if (!c || words != 4 || c[0] != 1 || c[1] < 32 || c[1] > 36 ||
++        c[2] != 1 || c[3] != 1 || dali_usb_host_active()) { return false; }
++    hostDMAAddressBits = c[1]; return true;
++}
+ bool dali_usb_host_set_calibration(const uint32_t *c, unsigned words) {
+     if (!c || words != 5 || c[0] != 1 || c[1] > 15 || c[2] > 31 ||
+         c[3] > 31 || c[4] > 255 || dali_usb_host_active()) { return false; }
+@@ -900,7 +908,8 @@
+ }
+ bool dali_usb_host_launch(bool hwrscs, bool vusb, bool native, bool dma) {
+     bool expected = false;
+-    if (!dma || !native || !hostCalibrationValid || !__atomic_compare_exchange_n(&hostRunning, &expected, true,
++    if (!dma || !native || !hostCalibrationValid || !hostDMAAddressBits ||
++        !__atomic_compare_exchange_n(&hostRunning, &expected, true,
+         false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) { return false; }
+     hostLaunchHwrscs = hwrscs; hostLaunchVusb = vusb; hostLaunchNative = native;
+     hostDMAValidated = dma;
+--- a/iokit/Kernel/arm/DaliUSBPMIC.cpp
++++ b/iokit/Kernel/arm/DaliUSBPMIC.cpp
+@@ -175,7 +175,7 @@
+         if ((root != 0 && root != 1) || (root && engine != 1)) { return false; }
+         if (engine == 1 && repeater == 1 && observeHost) {
+             /* This property is deliberately absent from existing shim trees.
+-             * Version1: 48-bit physical identity DMA, uncached CPU mapping.
++             * Version1: audited address width, physical identity DMA, uncached CPU.
+              * Set only after reference DMA/IOMMU ownership is established;
+              * AC64 and an absent FDT iommus property alone are insufficient.
+              */
+@@ -183,7 +183,7 @@
+             uint32_t policy[4] = {};
+             if (dma && dma->getLength() == sizeof(policy)) {
+                 memcpy(policy, dma->getBytesNoCopy(), sizeof(policy));
+-                dmaValidated = policy[0] == 1 && policy[1] == 48 && policy[2] == 1 && policy[3] == 1;
++                dmaValidated = dali_usb_host_set_dma_policy(policy, 4);
+             }
+             if (!dmaValidated) {
+                 kprintf("DALI XHCI: physical DMA policy unverified; engine refused\n"); return false;
+--- a/iokit/Kernel/arm/DaliXHCI.h
++++ b/iokit/Kernel/arm/DaliXHCI.h
+@@ -11,6 +11,7 @@
+  */
+ struct DaliXHCIOps {
+     void *cookie;
++    unsigned dmaAddressBits; /* Audited device AND parent-bus limit. */
+     uint32_t (*read)(void *, unsigned);
+     void (*write)(void *, unsigned, uint32_t);
+     bool (*alive)(void *); /* source/clock/removal guard, must not reenter */
+--- a/iokit/Kernel/arm/DaliXHCI.cpp
++++ b/iokit/Kernel/arm/DaliXHCI.cpp
+@@ -63,9 +63,10 @@
+     /* One uncached mapping avoids cache-line sharing with device-written TRBs.
+      * No synthetic IOVA: physical address is permitted only by platform policy.
+      */
+-    memory = IOBufferMemoryDescriptor::inTaskWithOptions(kernel_task,
++    uint64_t limit = (1ULL << ops.dmaAddressBits) - 1;
++    memory = IOBufferMemoryDescriptor::inTaskWithPhysicalMask(kernel_task,
+         kIODirectionInOut | kIOMemoryPhysicallyContiguous | kIOMemoryMapperNone |
+-        kIOMapInhibitCache, arenaBytes, 0x10000);
++        kIOMapInhibitCache, arenaBytes, limit & ~0xffffULL);
+     if (!memory || memory->prepare(kIODirectionInOut) != kIOReturnSuccess) { return false; }
+     prepared = true;
+     IOByteCount length = 0;
+@@ -73,7 +74,7 @@
+     arenaMap = memory->map(kIOMapAnywhere | kIOMapInhibitCache);
+     bytes = arenaMap ? reinterpret_cast<uint8_t *>(arenaMap->getVirtualAddress()) : nullptr;
+     if (!physical || (physical & 0xffff) || length < arenaBytes || !bytes ||
+-        physical > ((1ULL << 48) - arenaBytes)) { return false; }
++        physical > limit - (arenaBytes - 1)) { return false; }
+     bzero(bytes, arenaBytes);
+     Ring *rings[] = {&commandRing, &controlRing, &inRing, &outRing};
+     for (Ring *r : rings) {
+@@ -473,6 +474,7 @@
+ }
+ bool DaliXHCI::start(const DaliXHCIOps &callbacks, unsigned maxMilliseconds) {
+     if (memory || !callbacks.read || !callbacks.write || !callbacks.alive || !callbacks.log ||
++        callbacks.dmaAddressBits < 32 || callbacks.dmaAddressBits > 48 ||
+         maxMilliseconds < 1000 || maxMilliseconds > 12000) { return false; }
+     ops = callbacks; operationBudgetMs = maxMilliseconds; startedMs = milliseconds();
+     unsigned selected = 0;
