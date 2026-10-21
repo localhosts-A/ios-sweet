@@ -165,12 +165,19 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI ADC: failed channel='
           grep -Fq 'dali_usb_host_observe(hostHwrscsV2, hostVusbAlwaysOn);' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
           grep -Fq 'PE_parse_boot_argn("daliusbhost"' xnu/iokit/Kernel/arm/DaliUSBPMIC.cpp
+          grep -Fq 'hostRanges[6] != 0x16790000 || hostRanges[7] != 0x100' xnu/iokit/Kernel/arm/DaliUSBPMIC.cpp
           grep -Fq 'domainReady(dp, false) && domainReady(p0, true)' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           grep -Fq 'phy.read(0x300), phy.read(0x318), phy.read(0x368), phy.read(0x36c)' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
-          grep -Fq 'setResources(ip, oldRequest, false)' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'kHwrscsForceMask = 0x7f00U' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'kHwrscsPmicMask = 0x80U' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'kRequestGateOffsets[8]' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'releaseResourcesAndRestore(ip, requestGates,' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           grep -Fq 'if (clockReady) {' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: PHY reads skipped U2 MAC reset status'
           grep -Fq 'host-hwrscs-version' xnu/iokit/Kernel/arm/DaliUSBPMIC.cpp
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: SPM force='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: SPM state unsupported req='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: REQ_GATE unlock/readback failed restore='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: SPM v2 request ACK timeout'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: powered clocks='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: host handoff cleaned sleep='

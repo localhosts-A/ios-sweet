@@ -1,0 +1,200 @@
+diff --git a/iokit/Kernel/arm/DaliUSBHost.cpp b/iokit/Kernel/arm/DaliUSBHost.cpp
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -79,14 +79,53 @@
+     return false;
+ }
+ 
+-bool setResources(WriteMapping &ip, uint32_t saved, bool on) {
+-    constexpr uint32_t requestMask = 0x5f; /* MTU3 v2: SRC/INFRA/APSRC/VRF18/EMI */
+-    uint32_t value = ip.read(0xe0);
+-    if (value == ~0U) { return false; }
+-    value = (value & ~requestMask) | (on ? requestMask : (saved & requestMask));
++constexpr uint32_t kHwrscsRequestMask = 0x5fU;
++constexpr uint32_t kHwrscsPmicMask = 0x80U; /* vendor-owned; preserve */
++constexpr uint32_t kHwrscsForceMask = 0x7f00U;
++constexpr uint32_t kRequestGateOffsets[8] = {
++    0x70, 0x74, 0x78, 0x7c, 0x80, 0x84, 0x88, 0x8c
++};
++
++bool setRequestGates(WriteMapping &gate, const uint32_t *saved, bool enable) {
++    bool ok = true;
++    for (unsigned i = 0; i < 8; ++i) {
++        const uint32_t offset = kRequestGateOffsets[i];
++        uint32_t current = gate.read(offset);
++        if (current == ~0U) { ok = false; continue; }
++        uint32_t value = (current & ~0xfU) | (enable ? 0xfU : (saved[i] & 0xfU));
++        gate.write(offset, value);
++        uint32_t after = gate.read(offset);
++        if (after == ~0U || (after & 0xfU) != (value & 0xfU) ||
++            (after & ~0xfU) != (current & ~0xfU)) { ok = false; }
++    }
++    return ok;
++}
++
++bool restoreSpmAndGates(WriteMapping &ip, WriteMapping &gate,
++    uint32_t oldRequest, uint32_t oldAck, const uint32_t *savedGates) {
++    uint32_t current = ip.read(0xe0);
++    if (current == ~0U) { return false; }
++    uint32_t value = (current & ~(kHwrscsForceMask | kHwrscsRequestMask)) |
++        (oldRequest & (kHwrscsForceMask | kHwrscsRequestMask));
+     ip.write(0xe0, value);
+-    uint32_t expected = on ? requestMask : (saved & requestMask);
+-    return waitBits(ip, 0xe8, requestMask, expected, 200, 100);
++    bool ack = waitBits(ip, 0xe8, kHwrscsRequestMask,
++        oldAck & kHwrscsRequestMask, 200, 100);
++    uint32_t after = ip.read(0xe0);
++    bool control = after != ~0U &&
++        (after & (kHwrscsForceMask | kHwrscsRequestMask)) ==
++        (oldRequest & (kHwrscsForceMask | kHwrscsRequestMask));
++    return ack && control && setRequestGates(gate, savedGates, false);
++}
++
++bool releaseResourcesAndRestore(WriteMapping &ip, WriteMapping &gate,
++    uint32_t oldRequest, uint32_t oldAck, const uint32_t *savedGates) {
++    uint32_t current = ip.read(0xe0);
++    if (current == ~0U) { return false; }
++    uint32_t off = current & ~(kHwrscsForceMask | kHwrscsRequestMask);
++    ip.write(0xe0, off);
++    if (!waitBits(ip, 0xe8, kHwrscsRequestMask,
++            oldAck & kHwrscsRequestMask, 200, 100)) { return false; }
++    return restoreSpmAndGates(ip, gate, oldRequest, oldAck, savedGates);
+ }
+ }
+ 
+@@ -120,9 +159,9 @@
+     if (!ao.open(0x16790000, 0x100)) {
+         kprintf("DALI HOST: USB AO mapping failed\n"); return;
+     }
+-    uint32_t gate = ao.read(0);
+-    kprintf("DALI HOST: USB AO gate=%08x\n", gate);
+-    if (gate & 0x13U) {
++    uint32_t usbAoGate = ao.read(0);
++    kprintf("DALI HOST: USB AO gate=%08x\n", usbAoGate);
++    if (usbAoGate & 0x13U) {
+         kprintf("DALI HOST: MAC/PHY reads skipped gated USB0\n"); return;
+     }
+     ReadMapping ippc;
+@@ -147,19 +186,49 @@
+         kprintf("DALI HOST: policy/identity/controller ownership rejected\n"); return;
+     }
+     uint32_t oldRequest = ippc.read(0xe0), oldAck = ippc.read(0xe8);
+-    if ((oldRequest & 0x7f00U) || (oldRequest & 0x5fU) || (oldAck & 0x5fU)) {
+-        kprintf("DALI HOST: pre-existing SPM request/owner rejected\n"); return;
+-    }
+-    WriteMapping ip;
+-    if (!ip.open(0x16703e00, 0x100)) {
+-        kprintf("DALI HOST: writable IPPC mapping failed\n"); return;
+-    }
+-    /* Match MTU3 HWRECS v2 sequence. One 20ms bounded SPM request. */
+-    ip.write(0xe0, oldRequest | 0x5fU);
+-    if (!waitBits(ip, 0xe8, 0x5fU, 0x5fU, 200, 100)) {
+-        ip.write(0xe0, oldRequest);
+-        (void)waitBits(ip, 0xe8, 0x5fU, 0, 200, 100);
+-        kprintf("DALI HOST: SPM v2 request ACK timeout; USB IP untouched\n"); return;
++    uint32_t forceBits = oldRequest & kHwrscsForceMask;
++    if ((oldRequest & ~(kHwrscsForceMask | kHwrscsRequestMask | kHwrscsPmicMask)) ||
++        (oldRequest & kHwrscsRequestMask) ||
++        (forceBits && forceBits != 0x1f00U) ||
++        (oldAck & kHwrscsRequestMask)) {
++        kprintf("DALI HOST: SPM state unsupported req=%08x ack=%08x\n", oldRequest, oldAck);
++        return;
++    }
++    uint32_t savedGates[8];
++    bool gatesReadable = true;
++    for (unsigned i = 0; i < 8; ++i) {
++        savedGates[i] = ao.read(kRequestGateOffsets[i]);
++        if (savedGates[i] == ~0U) { gatesReadable = false; }
++    }
++    kprintf("DALI HOST: SPM force=%08x REQ_GATE=%x/%x/%x/%x/%x/%x/%x/%x\n",
++        forceBits, savedGates[0], savedGates[1], savedGates[2], savedGates[3],
++        savedGates[4], savedGates[5], savedGates[6], savedGates[7]);
++    if (!gatesReadable) {
++        kprintf("DALI HOST: SPM request gates unreadable; controller untouched\n"); return;
++    }
++    WriteMapping requestGates, ip;
++    if (!requestGates.open(0x16790000, 0x100) || !ip.open(0x16703e00, 0x100)) {
++        kprintf("DALI HOST: writable gate/IPPC mapping failed; controller untouched\n"); return;
++    }
++    bool snapshotStable = ip.read(0xe0) == oldRequest && ip.read(0xe8) == oldAck;
++    for (unsigned i = 0; i < 8; ++i) {
++        if (requestGates.read(kRequestGateOffsets[i]) != savedGates[i]) { snapshotStable = false; }
++    }
++    if (!snapshotStable) {
++        kprintf("DALI HOST: SPM/gate snapshot changed; controller untouched\n"); return;
++    }
++    /* Match the vendor v2 path: unlock request gates, then clear default
++     * MT6989+ FORCE_HW_REQ bits before requesting the six SPM resources.
++     */
++    if (!setRequestGates(requestGates, savedGates, true)) {
++        bool restored = setRequestGates(requestGates, savedGates, false);
++        kprintf("DALI HOST: REQ_GATE unlock/readback failed restore=%u\n", restored); return;
++    }
++    uint32_t requestValue = (oldRequest & ~kHwrscsForceMask) | kHwrscsRequestMask;
++    ip.write(0xe0, requestValue);
++    if (!waitBits(ip, 0xe8, kHwrscsRequestMask, kHwrscsRequestMask, 200, 100)) {
++        bool restored = restoreSpmAndGates(ip, requestGates, oldRequest, oldAck, savedGates);
++        kprintf("DALI HOST: SPM v2 request ACK timeout restore=%u\n", restored); return;
+     }
+     IODelay(2000);
+     /* MTU3 Linux driver pulses the whole IP reset, then requests host power. */
+@@ -177,9 +246,18 @@
+     if ((afterCtrl0 & 1) || (afterCtrl1 & 1) || !(afterCtrl2 & 1)) {
+         ip.write(4, ctrl1);
+         ip.write(8, ctrl2);
+-        (void)waitBits(ip, 0x10, 1U << 30, 1U << 30, 1000, 100);
+-        bool released = setResources(ip, oldRequest, false);
+-        kprintf("DALI HOST: control readback rejected; SPM restore=%u\n", released);
++        /* Keep reset released until the IP sleep handshake completes. */
++        bool pdnsRestored = ip.read(4) == ctrl1 && ip.read(8) == ctrl2;
++        bool asleep = pdnsRestored && waitBits(ip, 0x10, 1U << 30, 1U << 30, 1000, 100);
++        if (asleep) { IODelay(100); ip.write(0, ctrl0); }
++        bool controlsRestored = ip.read(0) == ctrl0 && ip.read(4) == ctrl1 && ip.read(8) == ctrl2;
++        bool released = asleep && controlsRestored && releaseResourcesAndRestore(ip, requestGates,
++            oldRequest, oldAck, savedGates);
++        kprintf("DALI HOST: control readback rejected restore=%u sleep=%u SPM=%u\n",
++            controlsRestored, asleep, released);
++        if (!asleep || !released) {
++            kprintf("DALI HOST: safe powered state retained; reboot required\n");
++        }
+         return;
+     }
+     constexpr uint32_t clockMask = 0xd01U; /* SYSPLL/REF/SYS125/XHCI */
+@@ -226,9 +304,15 @@
+      */
+     ip.write(4, ctrl1);
+     ip.write(8, ctrl2);
+-    bool asleep = waitBits(ip, 0x10, 1U << 30, 1U << 30, 1000, 100);
+-    bool released = asleep && setResources(ip, oldRequest, false);
+-    kprintf("DALI HOST: host handoff cleaned sleep=%u SPMrestore=%u\n", asleep, released);
++    /* Keep reset released until the IP sleep handshake completes. */
++    bool pdnsRestored = ip.read(4) == ctrl1 && ip.read(8) == ctrl2;
++    bool asleep = pdnsRestored && waitBits(ip, 0x10, 1U << 30, 1U << 30, 1000, 100);
++    if (asleep) { IODelay(100); ip.write(0, ctrl0); }
++    bool controlsRestored = ip.read(0) == ctrl0 && ip.read(4) == ctrl1 && ip.read(8) == ctrl2;
++    bool released = asleep && controlsRestored && releaseResourcesAndRestore(ip, requestGates,
++        oldRequest, oldAck, savedGates);
++    kprintf("DALI HOST: host handoff cleaned sleep=%u ctrl=%u SPM/gates/force=%u\n",
++        asleep, controlsRestored, released);
+     if (!asleep || !released) {
+         kprintf("DALI HOST: controller left in safe powered state; reboot required\n");
+     }
+diff --git a/iokit/Kernel/arm/DaliUSBPMIC.cpp b/iokit/Kernel/arm/DaliUSBPMIC.cpp
+--- a/iokit/Kernel/arm/DaliUSBPMIC.cpp
++++ b/iokit/Kernel/arm/DaliUSBPMIC.cpp
+@@ -124,12 +124,13 @@
+         if (observeHost) {
+             /* Exact live Dali ranges; no arbitrary physical-address boot arg. */
+             OSData *hostData = OSDynamicCast(OSData, provider->getProperty("host-observe-reg"));
+-            uint64_t hostRanges[6] = {};
++            uint64_t hostRanges[8] = {};
+             if (!hostData || hostData->getLength() != sizeof(hostRanges)) { return false; }
+             memcpy(hostRanges, hostData->getBytesNoCopy(), sizeof(hostRanges));
+             if (hostRanges[0] != 0x16700000 || hostRanges[1] != 0x1000 ||
+                 hostRanges[2] != 0x16703e00 || hostRanges[3] != 0x100 ||
+-                hostRanges[4] != 0x16730000 || hostRanges[5] != 0x400) { return false; }
++                hostRanges[4] != 0x16730000 || hostRanges[5] != 0x400 ||
++                hostRanges[6] != 0x16790000 || hostRanges[7] != 0x100) { return false; }
+         }
+         bool hostHwrscsV2 = false, hostVusbAlwaysOn = false;
+         if (observeHost) {

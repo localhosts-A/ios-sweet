@@ -277,7 +277,8 @@ def build(seed=None, qemu=False, highmem=False, dali=False):
         # 5V, USB-default500mA, observed SC8585. No external boost GPIO.
         ('otg-source-config', u32(5000000, 500000, 0x8585)),
         # Guarded MTU3 v2 host bring-up, separately enabled by daliusbhost=1.
-        ('host-observe-reg', u64(0x16700000, 0x1000, 0x16703e00, 0x100, 0x16730000, 0x400)),
+        ('host-observe-reg', u64(0x16700000, 0x1000, 0x16703e00, 0x100,
+                                 0x16730000, 0x400, 0x16790000, 0x100)),
         ('host-hwrscs-version', u32(2)),
         ('host-vusb33-always-on', u32(1)),
     ])] if dali else []
