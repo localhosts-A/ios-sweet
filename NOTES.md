@@ -1,4 +1,14 @@
-## Current: scalar DMA trial started; original restoration pending (2026-10-22)
+## Current: No-op completion failed; originals recovered and physically verified (2026-10-22)
+
+Photo IMG_20261022_012807.jpg: resetcomplete/pages1/scratch0, commandfailedtype23, startfailedstage=noop-completion elapsed0 published1/running1; stopped/reset DMAownershipreturned, integratedresult0/stopped1; PHY/UTMI/RPTR/U2/hostcleanup all1/noADCerror. Thus scalarDMAfix crossed arena allocation/clear/ringpublication/Run-wait; no successful commandcompletion or enumeration/storage/root. Current logs cannot distinguish controllerHSE/HCE, unexpected raw event or timeout; do not infer DMA-address/cablefault.
+
+Full original init_boot_b thenboot_b immediately recovered, Android completed/root/dali/model/_b/full physical sizes/SHA256 PASS. Current usb-device-dma-39642566099 manifest originals_verified; NO ACTIVE TRIAL/PENDING RESTORATION. Logs run39642566099-recover.log/-verify.log. Next consolidated diagnostic logs No-op TRB, exact eventpoll/error/timeout/rawcompletion and read-only powered CRCR/DCBAAP/ERSTSZ/ERSTBA/ERDP/IMAN plus bounded event+ERST memory readback. Full engine path/strict validation unchanged; reportcapacity8192. Nativecompile pending; fullCI/package required; no furthermanualtrialthisround.
+
+During local edit /tmp tmpfs filled, truncating the extracted working DaliXHCI.cpp. Moved generated old /tmp/dali-xnu-run39480488397 to ignored research/dali-usb-root/ci-artifacts/retired-tmp, freeing393MiB; restored cpp byte-for-byte from verified CI0120 source (header unchanged checked), then reapplied diagnostics. Require exact patch replay/source comparison beforebuild. No repository or phone artifact was truncated. Initial multi-file patch also had a nonmatching out-of-order context; corrected.
+
+Patch0121 adds these bounded read-only diagnostics plus8192byte report capacity; native actual ARM64 XHCI/Host2/2 compilePASS. Exact actualCI0120+0121 patch replay3/3 byte-identical;95positive workflow sourceassertionsPASS. Earlier cachePA/scalarDMA protections unchanged. No hardware fix claimed; fullCI pending. No new phone writes since recovery.
+
+## Historical scalar DMA trial (recovered)
 
 User requests continue after verified scalarDMA candidate. Current usb-device-dma-39642566099 trial helper completed: immediate Android root/dali/model/_b/completed/full physical original sizes/SHA256 PASS; fastboot identity/unlocked/slot/sizes and host original/candidate hashes PASS. Temporary init_boot_b then boot_b flashed OKAY; reboot requested. Authoritative manifest trial_rebooted. CURRENT ORIGINAL RESTORATION PENDING; previous originals_verified are historical only. Log research/dali-usb-root/ci-artifacts/run39642566099-trial.log.
 

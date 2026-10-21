@@ -123,6 +123,21 @@ uncached DMA policy and existing publish/consume barriers while preventing
 cache-zero instructions and widened unaligned copies. Actual DMA operation
 and USB storage are still unverified.
 
+## No-op completion diagnosis
+
+The scalar-access candidate reached ring publication and cleared HCHalted
+after Run, then failed command type23 at `noop-completion`. Halt/reset and
+owned-resource cleanup completed. This does not establish successful DMA
+command completion or USB enumeration.
+
+Patch0121 records the submitted No-op TRB, USBSTS poll rejection, event timeout
+and raw rejected completion fields. While the worker owns powered mappings,
+read-only snapshots capture command/DCBAA and interrupter/ERST/ERDP registers,
+plus the bounded current event and ERST entry. The saved report holds8192
+bytes. Diagnostics never acknowledge controller status or relax command,
+DMA, power or reset checks. The full enumeration/storage path remains enabled
+after a valid No-op; this change does not claim to fix the failure.
+
 ## Primary references
 
 - [Intel xHCI1.22 specification](https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/extensible-host-controler-interface-usb-xhci.pdf), sections4/5/6.

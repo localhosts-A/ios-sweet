@@ -1,0 +1,103 @@
+--- a/iokit/Kernel/arm/DaliXHCI.h
++++ b/iokit/Kernel/arm/DaliXHCI.h
+@@ -46,6 +46,7 @@
+     uint32_t rd(unsigned) const;
+     void wr(unsigned, uint32_t) const;
+     void wr64(unsigned, uint64_t) const;
++    void traceController(const char *);
+     bool live();
+     bool wait(unsigned, uint32_t, uint32_t, unsigned);
+     bool nextEvent(TRB *, unsigned);
+--- a/iokit/Kernel/arm/DaliXHCI.cpp
++++ b/iokit/Kernel/arm/DaliXHCI.cpp
+@@ -58,6 +58,25 @@
+ void DaliXHCI::wr64(unsigned n, uint64_t v) const {
+     wr(n, uint32_t(v)); wr(n + 4, uint32_t(v >> 32));
+ }
++void DaliXHCI::traceController(const char *reason) {
++    /* Read-only snapshot while the worker owns powered mappings. Call only
++     * after successful live(); never acknowledge status from diagnostics.
++     */
++    ops.log("DALI XHCI: state %s cmd=%08x sts=%08x crcr=%08x/%08x dcbaa=%08x/%08x cfg=%08x\n",
++        reason, rd(op), rd(op + 4), rd(op + 0x18), rd(op + 0x1c),
++        rd(op + 0x30), rd(op + 0x34), rd(op + 0x38));
++    ops.log("DALI XHCI: event regs iman=%08x imod=%08x size=%08x base=%08x/%08x deq=%08x/%08x\n",
++        rd(runtime + 0x20), rd(runtime + 0x24), rd(runtime + 0x28),
++        rd(runtime + 0x30), rd(runtime + 0x34), rd(runtime + 0x38), rd(runtime + 0x3c));
++    if (bytes && eventIndex < 256) {
++        consume();
++        auto *event = reinterpret_cast<volatile TRB *>(bytes + 0x2000) + eventIndex;
++        auto *table = reinterpret_cast<volatile uint32_t *>(bytes + 0x3000);
++        ops.log("DALI XHCI: DMA pa=%llx event=%u/%u raw=%08x/%08x/%08x/%08x erst=%08x/%08x/%08x/%08x\n",
++            physical, eventIndex, eventCycle, event->lo, event->hi, event->status, event->control,
++            table[0], table[1], table[2], table[3]);
++    }
++}
+ bool DaliXHCI::live() {
+     if (__atomic_load_n(&faulted, __ATOMIC_ACQUIRE)) { return false; }
+     bool healthy = ops.alive(ops.cookie, controllerResetPending);
+@@ -145,7 +164,11 @@
+     do {
+         if (!live()) { return false; }
+         uint32_t status = rd(op + 4);
+-        if (status == ~0U || (status & ((1U << 2) | (1U << 12)))) { fail(); return false; }
++        if (status == ~0U || (status & ((1U << 2) | (1U << 12)))) {
++            ops.log("DALI XHCI: event poll rejected sts=%08x\n", status);
++            if (status != ~0U) { traceController("event-error"); }
++            fail(); return false;
++        }
+         auto *t = reinterpret_cast<volatile TRB *>(bytes + 0x2000) + eventIndex;
+         uint32_t control = t->control;
+         if ((control & cycle) == eventCycle) {
+@@ -168,12 +191,20 @@
+         }
+         IOSleep(1);
+     } while (milliseconds() - start < ms);
++    ops.log("DALI XHCI: event timeout ms=%u index=%u cycle=%u\n", ms, eventIndex, eventCycle);
++    if (live()) { traceController("event-timeout"); }
+     return false;
+ }
+ bool DaliXHCI::command(unsigned type, uint64_t parameter, uint32_t status,
+     uint32_t flags, unsigned *resultSlot) {
+     uint64_t trb = submitTRB(commandRing, parameter, status, (type << 10) | flags);
+     if (!trb) { return false; }
++    if (type == 23) {
++        auto *entry = reinterpret_cast<volatile TRB *>(bytes + trb - physical);
++        ops.log("DALI XHCI: No-op enqueue pa=%llx raw=%08x/%08x/%08x/%08x\n",
++            trb, entry->lo, entry->hi, entry->status, entry->control);
++        traceController("before-doorbell");
++    }
+     publish(); wr(doors, 0);
+     uint64_t start = milliseconds();
+     while (milliseconds() - start < 1000) {
+@@ -182,11 +213,17 @@
+         unsigned kind = (event.control >> 10) & 63;
+         if (kind == 34) { continue; } /* PORTSC is polled; no port change ACK here. */
+         uint64_t pointer = event.lo | (uint64_t(event.hi) << 32);
+-        if (kind != 33 || pointer != trb || (event.status >> 24) != 1) { break; }
++        if (kind != 33 || pointer != trb || (event.status >> 24) != 1) {
++            ops.log("DALI XHCI: command event rejected type=%u kind=%u code=%u want=%llx raw=%08x/%08x/%08x/%08x\n",
++                type, kind, event.status >> 24, trb, event.lo, event.hi, event.status, event.control);
++            if (live()) { traceController("command-event"); }
++            break;
++        }
+         if (resultSlot) { *resultSlot = event.control >> 24; }
+         return true;
+     }
+-    fail(); ops.log("DALI XHCI: command failed type=%u\n", type); return false;
++    fail(); ops.log("DALI XHCI: command failed type=%u command-ms=%llu\n",
++        type, milliseconds() - start); return false;
+ }
+ bool DaliXHCI::completion(uint64_t pointer, unsigned endpoint, bool shortAllowed,
+     unsigned *residual, unsigned ms, uint64_t shortPointer) {
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -26,7 +26,7 @@
+  * Keep only diagnostic text in fixed memory; replay never touches MMIO.
+  */
+ struct U2Report {
+-    char text[4096];
++    char text[8192];
+     unsigned size;
+     bool called, requested, reached, truncated;
+ };

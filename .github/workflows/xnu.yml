@@ -209,6 +209,13 @@ jobs:
           grep -Fq 'usbroot != 1 && PE_parse_boot_argn("rootrw"' xnu/bsd/vfs/vfs_subr.c
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: running AC64=1'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: start failed stage='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: No-op enqueue'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: event poll rejected'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: event timeout'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: command event rejected'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: event regs'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: DMA pa='
+          grep -Fq 'char text[8192];' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: init cap='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: arena validation failed'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: health rejected clocks'
