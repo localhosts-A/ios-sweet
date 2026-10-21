@@ -140,7 +140,8 @@ All paths below are within
 
 The vendor extcon path checks `cp_master`, programs reverse charge-pump mode
 and ACDRV/gates, and controls the MT6379 regulator. The regulator enable path
-also has ADC checks and a protected charger-register sequence. The user has
+also has a protected charger-register sequence; its optional ADC guard is
+controlled by `usb-killer-detect`, which is absent from the live Dali FDT. The user has
 an ordinary phone-powered OTG adapter. Do not assume an externally powered
 hub, equate a port-power bit with connector VBUS, force source mode against
 an attached source, or reuse Qualcomm addresses.
