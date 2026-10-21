@@ -1,3 +1,19 @@
+## ACTIVE scoped CC detection wake trial — original restoration PENDING (2026-10-21)
+
+CI39556194747/7a0d69e fullverifiedpair: immediateAndroidoriginalphysicalhash/root/model/_b/completed +hostbackup/candidate +fastbootidentity/unlocked/64+8MiBsizechecksallPASS. Temporaryinit_boot_bthenboot_bflashesbothOKAY/rebootrequested. Authoritativeignored `shim/out-dali/usb-ccwake-39556194747/trial-state.json` trial_rebooted. TolduserNOWearlyswapPCtoOTGbeforeprompt, observe1minute/photoTCPC_handoff/detectionwake/CC/CP/VBUS/end/cleanup, thenmanualfastboot+PCreconnect. NewscopedTCPCshipping/osc/VBUSdetwakehardwareUNVERIFIED; priorW1C/RpworkbutCC00attachtimeout. Sourcepowerstillunproven.
+
+**RESTORE IMMEDIATELY on fastboot return** with currentpair/device_pair.py recover ABS_PAIR, fulloriginalinit_boot_bthenboot_b, AndroidbootthenverifybothphysicaloriginalSHA256. Backupdir backup/dali-25060RK16C-pairtest-20261020 intact. Previousoriginals_verifiedhistorical; currenttemporarypairNOTrestored. No userdata/GPT/Udiskwrites, noUSBPHY/xHCI/storageimplemented. TemporaryartifactspacefixedbystoringnewCIonworkdisk; currentartifactresearch/dali-usb-root/ci-artifacts/run39556194747, useworkdiskTMPDIRforfuturebuilddownloads.
+
+## Current: CC detection wake pair fully verified, trial starting (2026-10-21)
+
+CI39556194747/7a0d69e SUCCESS, cache1383/1385hits99.86%. Actual22/22sourcebytes matchlocal, linkedcounter/W1C/wake/cleanup/writefailuremarkers PASS, fullheaders/segments/entry/RAM/ADT/LZ4CPIO/AVBNONE/hostoriginalchecks PASS. Pair `shim/out-dali/usb-ccwake-39556194747/`: kernelf8fe0fb6c65d0d3cadd4a305f1aa37965e8f3f87b782a24259859f91c7af69a7, init_bootd9332de677a504a8fe8801dab1b53ffdffedbfc021e6e7ac27e76149d10f6b63, payload10656e9cd4967b57ff67c919e924761e14c854f406f14c7e282e9451cb2c1d7e. Sameboot/root/ADT/args; payload29251184/11segments, ADT7736, root2024d4000, LZ4ramdisk7553898bytes. FreshphysicalAndroidoriginalhash/device/model/_b/completed/rootpreflightPASS; trialhelperstarting, authoritativeignoredtrial-state.jsonforflashstate.
+
+Downloadsinitiallyfailed/tmpENOSPC, retriedsuccesswithTMPDIRandartifactsonignoredworkspace `research/dali-usb-root/ci-artifacts/run39556194747`. MovedcompletedCIartifactdirs39551734817/39553228931/39554602650toworkdiskretaining/tmpoldpathsymlinks; /tmpfree579MiB, no backups/rootimagesdeleted. Futureartifactdownloads/packagingusetheworkdiskTMPDIR. Maincompiletree /tmp/dali-timed-boot/buildtreeunchanged.
+
+## Current: scoped CC wake build in progress (2026-10-21)
+
+Patch0099scopedTCPCwake+cleanupcommitted/pushed7a0d69e; fullcachedCI39556194747inprogress. Candidateusb-ccwake-39556194747stagedsameboot/root/ADT/recoveryhelpers; newkernel/unverified. Currenthardwareflagsresetfalse, previousW1C/roleproofkeptseparate. Awaitactual22source/counter/newwakemarkers/fullpairchecks. OriginalsremainAndroidphysicalverified/noactivetrial.
+
 ## Current: scoped TCPC detection wake implemented; originals verified (2026-10-21)
 
 Photo142735 confirms initialfault80W1Cack/zero readback plusfixedRpandrecoveryoforiginalrole; waitingCC00timesout40s,noCP/chargerwrites. FulloriginalpairRESTORED/Androiddali/_b/completed1/root/bothphysicalSHA256VERIFIED. Noactivecustomtrial.
