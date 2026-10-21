@@ -1,3 +1,25 @@
+## ACTIVE detailed OTG status trial — original restoration PENDING (2026-10-21)
+
+CI39553228931/98f3936 fullverifiedpair: freshimmediateAndroiddali/model/_b/completed/root/fullphysicaloriginalhashes, hostoriginal/candidatehashesandfastbootidentity/unlocked/sizesallPASS. Candidateinit_boot_bthenboot_bflashesbothOKAY/rebootrequested. Authoritativeignored `shim/out-dali/usb-status-39553228931/trial-state.json` trial_rebooted. Tolduser NOWmayearlyswapPCtoOTG+Udiskbeforeprompt; observe30s/photo snapshot/readfailed/ending/end thenmanualfastbootandPCreconnect. Hardwarecause/outcomestillunknown; noguard/powersequencechangesfrompriortrial.
+
+**RESTORE IMMEDIATELY on fastboot return** with currentpair/device_pair.py recover ABS_PAIR, fulloriginalinit_boot_bthenboot_b, AndroidbootthenverifybothfullphysicaloriginalSHA256. Backups backup/dali-25060RK16C-pairtest-20261020 intact. Allpriororiginals_verifiedarehistorical; currenttemporarypairNOTrestored. No userdata/GPTwrites, noPHY/xHCI/USBstorageyet.
+
+## Current: detailed OTG pair fully verified, trial starting (2026-10-21)
+
+CI39553228931/98f3936 SUCCESS, cache1383/1385hits99.86%. Actual22/22sourcebytes exact-match, linkednewread/snapshot/endingdiagnostics andnativecounter/sharedPMIFmarkers PASS; fullheaders/segments/entry/RAM/ADT/LZ4CPIO/AVBNONE/hostoriginalchecks PASS. Pair `shim/out-dali/usb-status-39553228931/`: kernel03221876ee0e9a25ba5e7a6947616f9fb912b6d67115b0132c314198d2d898ba, init_boot75b3b58dc2d7425f22a8ace0211f8f7d91d90854fb05a5af9c71eea6b1042141, payload072db7baccf8c890d0f76cdfe082d8c8c15cf68a62c5562afb993e853fffafd1. Sameboot/root/ADT/args; payload29251056/11segments, ADT7736, root2024d4000, LZ4ramdisk7552719bytes, init_boot8MiB.
+
+FreshphysicalAndroidoriginalhash/device/model/_b/root/completedpreflightpassed; trialhelperrunning, authoritative `trial-state.json` controlswhetherpartitionswritten. Userreadytoearlyswapafterrebootconfirmation; no sourcehardwareverified. Anytemporaryflash requiresfulloriginalrecoverthenAndroidphysicalSHA256verify.
+
+## Current: diagnostic kernel complete, packaging next trial (2026-10-21)
+
+CI39553228931 SUCCESS exact98f393678bd038315c60cd357280df172a1f460b; compiler1383/1385hits99.86%,2misses. Bothkernel/buildtreedownloadscomplete; actual22source/newdiagnosticmarkers/counter/fullimagechecks running via /tmp/dali-usb-status/package.py. Durablepairusb-status-39553228931; no newtrial beforepackagecompletes. Originalpairafterphoto140006restored/AndroidphysicalSHA256verified.
+
+UserconfirmedavailablefornexttrialandclarifiedcaninsertUdisk BEFOREscreenprompt: afterconfirmedflash+reboot, may swapatlogo/redloaderbeforeXNU; keepPCconnectedthroughflash. Earlieransweraboutpre-power-onwasmisunderstanding, notrequirementtonewfirmwaresourceadoption. Newdiagnosticsonly, no guardweakening/faultclearing. Awaitactualrawstatuscause.
+
+## Current: detailed OTG status build in progress (2026-10-21)
+
+Patch0097 committed/pushed98f3936; fullcachedCI39553228931 dispatched/inprogress. Durablecandidateusb-status-39553228931 stagedsameboot/Image/baseADT/root/recoveryhelpers, nokernel/init_bootyet. Exact22source/counter/newdiagnosticmarkers/fullpairchecksrequirecompletedCIbeforetrial. Originalsremainphysicalverified/noactivetrial.
+
 ## Current: source trial rejected initial snapshot; originals verified (2026-10-21)
 
 Photo140006 shows status/fault error with valid0 and otg60, no visible Rp/source enable. Generic cleanup labels may mean untouched, not restoration after actual power. Full original pair restored, Android dali/_b/completed1/root and both full physical SHA256 VERIFIED; manifest originals_verified. No active trial. Guards remain intact.
