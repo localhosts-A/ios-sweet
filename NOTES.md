@@ -6,7 +6,9 @@ Exact actualCI0121 command disassembly shows each old milliseconds() emits ISB b
 
 Fulloriginalinit_boot_bthenboot_b recovered immediately. FirstAndroidverify raced boot_completedempty; repeatPASS root/dali/model/_b/completed/fullphysicalsizesSHA256. Currentusb-noop-event-39645079678 manifestoriginals_verified; NO ACTIVE TRIAL/PENDING RESTORATION. Logsrun39645079678-recover.log/-verify.log. Patch0122 uses distinct noinline xHCImilliseconds with newline-separatedISB/MRS/MRS, memoryclobber and quotient/remainder conversion; no dependence on DEVELOPMENT-onlysharedhelper. NativeactualXHCI1/1compilePASS, newlocal52bytehelperopcodeinspectionPASS. Extendexistinginspect-boot-counter.py --symbol andworkflowcheckactualxHCIhelperaswell. Exactreplay/fullCI/package pending; no newphonewrites ormanualtrialthisround.
 
-User asks whetherUdiskreadable: answered no; no capacity/sectorread/MSCproof, currentfixonlytimer. Do notclaimUSBsuccess.
+Patch0122/source8c6ae68 pushed; fullCI39648155558 building. ExactactualCI0121+0122replay1/1byteidentical, nativeXHCIcompile1/1+new52bytehelperorderedISB/MRS/MRS opcodePASS. Newcandidateusb-xhci-clock-39648155558 mustpassactual32sources/helpercalls+bothcounteropcode/scalarDMA/PA/package/preflight. No newphonewrites since recovery.
+
+User asks whetherUdiskreadable: answered no; no capacity/sectorread/MSCproof. User asks whytimer: explained badtimecan skipcommandwait beforeenumeration; successcriterionactualcapacity+sectorread. WirelessADBquestion answered usefulAndroidOTGnativecomparison only, currentXNUhasnoWiFi/ADB; AndroidadbdnotavailableafterXNUboot. No wirelesstransportconfigured yet. Do notclaimUSBsuccess.
 
 ## Historical No-op diagnostic trial (recovered)
 
