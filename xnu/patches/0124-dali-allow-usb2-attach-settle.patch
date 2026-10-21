@@ -1,0 +1,14 @@
+diff --git a/iokit/Kernel/arm/DaliXHCI.cpp b/iokit/Kernel/arm/DaliXHCI.cpp
+index 0000000..0000001 100644
+--- a/iokit/Kernel/arm/DaliXHCI.cpp
++++ b/iokit/Kernel/arm/DaliXHCI.cpp
+@@ -351,7 +351,8 @@
+         port, value, (value >> 9) & 1, value & 1, (value >> 5) & 15);
+     IOSleep(20);
+     startupStage = "attachment";
+-    if (!wait(reg, 1, 1, 2000)) {
++    /* Android reports this USB2 stick ~2.9s after xHCI host registration. */
++    if (!wait(reg, 1, 1, 5000)) {
+         value = rd(reg);
+         ops.log("DALI XHCI: attachment snapshot port=%u raw=%08x pp=%u ccs=%u ped=%u pls=%u speed=%u\n",
+             port, value, (value >> 9) & 1, value & 1, (value >> 1) & 1,
