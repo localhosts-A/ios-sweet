@@ -1,3 +1,8 @@
+## ACTIVE FIXED-COUNTER RAM-ROOT TRIAL (2026-10-21)
+
+- User reconnected. Fresh Android dali/25060RK16C/_b/completed1/root/64+8MiB and both physical original hashes matched; host original/candidate hashes rechecked; final counter-helper opcode inspection passed again. Fastboot product/slot/unlocked/sizes matched. CI39505675608 corrected pair init_boot_b then boot_b writes OKAY, reboot OKAY. Authoritative ignored manifest `shim/out-dali/timed-39505675608/trial-state.json` trial_rebooted. Await actual T...ms/skmem/root/optional shimWDT photo/video and auto-reset observation; first corrected runtime timing not yet verified.
+- **RESTORE PENDING:** upon user/manual fastboot return, bounded read-only reset variables then full original init_boot_b then boot_b restore from backup/dali-25060RK16C-pairtest-20261020/, reboot Android and physical root-side SHA256 verify. Recovery command helper in current pair directory explicit recover/verify modes. Earlier originals_verified manifests are historical; current physical pair is temporary. No userdata/UFS/super/GPT/watchdog writes.
+
 ## Current handoff: fixed counter images ready; device disconnected (2026-10-21)
 
 - New fixed-counter pair CI39505675608 fully verified/prepared (see below), but immediate physical preflight stopped: ADB device not found; subsequent ADB and fastboot inventories empty. **NO NEW CANDIDATE FLASH.** Authoritative fixed-pair manifest prepared_device_disconnected. User asked to reconnect USB/normal Android and reply; await connection.
