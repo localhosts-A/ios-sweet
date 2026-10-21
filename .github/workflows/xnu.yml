@@ -174,7 +174,7 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: host handoff cleaned sleep='
 
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: PWR dp='
-          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: xHCI AC64='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: AC64='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: USB reads skipped domains='
           grep -Fq 'No reset, SCL pulses, repeated attempt or DMA programming.' xnu/iokit/Kernel/arm/DaliI2C5.cpp
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI CP: SC8585 verified'
