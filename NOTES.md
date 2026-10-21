@@ -1,8 +1,14 @@
+## Current: SC8585 corrected pair verified; fresh preflight next (2026-10-21)
+
+CI39549699245 SUCCESS exact529829e, cache1383/1384hits99.93% (one miss). Actual20/20sources match local, linkedcounter/SC8585marker and fullimagechecksPASS. Durableignoredpair `shim/out-dali/cp-sc8585-39549699245/`: bootddfbc184...unchanged, init_boot0a0d70f4c7988618cd5ec8c0b68ee97c40ac4cf7c6b367da5796b5527f87baa1, kernel47b6c05ad595ba2ad4eae89082117b5d9d287076affb58f43de0df03b61f5f38. Samepayload29233632/11segments, ADT/root/args exactpreviouspair; root2024d0000. FirstcompletedID85 and actualAndroidmoduleSC8585 proven prior, newrepeatID/configreads hardwareunverified. No chargepumpconfiguration/VBUSwrites.
+
+Originalfullpair currentlyrestored/physicalverified, noactivetrial/pendingrestore. Nextfreshdevice/host/candidate/fastbootgates and authorizedtemporarypairedtrial; observe SC8585verified id/ver/ctrl/mode/present orerror, thenmanualfastbootandimmediateoriginalrecover+Androidphysicalverify. Backupsintact; no userdata/UFS/GPTchanges. Priorphoto132222withUdiskattachedisnotUSBhostbootproof.
+
 ## Current: I2C5 read succeeds; actual SC8585 ID85; originals verified (2026-10-21)
 
 Photo132222 with USBstickattached: handoff pins11007711 levelsf0e312ff mux2020202; firmwaretiming20/20 div4 io3 hs8000 start0 dma0. IDreadcompletedirq1 returned85; old SC8581 gate expected81 and correctly stopped beforeconfiguration, controller/clockrestoration logged. Memoryroot/BSD/PID1 heartbeat and90PMICsamplesnormal. NoUSBhost/5Vsourceenabled; adapterattachmentdoesnotalterfixedRd/Rd0a/CC10/power08/OTG60.
 
-**Fulloriginalpair restored+AndroidrootphysicalSHA256 VERIFIED**, manifestcp-i2c-39548280221originals_verified; noactivetrial/pendingrestore. ExactvendorSC8585file requiresID85 but driver.name=sc858x sameasSC8581; priorinferenceSC8581fromnamewaswrong. Common probed registers match; protectionfieldwidths/ADC differ, do notreuseSC8581writes. Patch0095 corrects85-onlyidentityandrepeatedstableID, retainsreadonlycommonstatus. Local2/2 actualarm64objectscompilePASS; exactbaselinepatchapplycheckpassed. Nextcachedfullbuild and source/kernel/imagechecks. Alloriginalbackupsremain; no userdata/UFS/GPTwrites.
+**Fulloriginalpair restored+AndroidrootphysicalSHA256 VERIFIED**, manifestcp-i2c-39548280221originals_verified; noactivetrial/pendingrestore. ExactvendorSC8585file requiresID85 but driver.name=sc858x sameasSC8581; priorinferenceSC8581fromnamewaswrong. LiveAndroiddriver/module resolves /sys/module/sc8585_charger, positively confirming actualmodule. Common probed registers match; protectionfieldwidths/ADC differ, do notreuseSC8581writes. Patch0095 corrects85-onlyidentityandrepeatedstableID, retainsreadonlycommonstatus. Local2/2 actualarm64objectscompilePASS; exactbaselinepatchapplycheckpassed. Committed/pushed529829e; cachedfullCI39549699245 running. Sameboot/root/ADT/args stagedshim/out-dali/cp-sc8585-39549699245, no kernel/inityet. Nextactualsource/kernel/imagechecks before anytrial. Alloriginalbackupsremain; no userdata/UFS/GPTwrites.
 
 ## Historical: I2C5 trial before verified restoration (2026-10-21)
 

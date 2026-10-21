@@ -78,7 +78,9 @@ Photo132222 with the stick attached confirms a completed native ID read
 (`irq=1`, value `85`) and scoped controller/clock restoration. The initial
 probe expected SC8581 ID81 and stopped before further reads. Both vendor
 chip drivers publish the same Linux name `sc858x`, so that name alone
-cannot identify the silicon. Patch0095 checks SC8585 ID85 twice; unknown
+cannot identify the silicon. The live Android driver module resolves to
+`sc8585_charger`, independently confirming the variant. Patch0095 checks
+SC8585 ID85 twice; unknown
 identities remain rejected. Its common status read still needs a new trial.
 SC8585 protection fields and IBUS ADC scale differ from SC8581; do not
 reuse the older chip's complete configuration.
