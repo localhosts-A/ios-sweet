@@ -1,3 +1,23 @@
+## ACTIVE guarded initial fault80 OTG trial — original restoration PENDING (2026-10-21)
+
+CI39554602650/8cfb5ef fullverifiedpair: immediateAndroidoriginalphysicalhash/root/model/_b/completed +hostbackup/candidate +fastbootidentity/unlocked/64+8MiBsizesallPASS. Temporaryinit_boot_bthenboot_bflashesbothOKAY/rebootrequested. Authoritativeignored `shim/out-dali/usb-fault80-39554602650/trial-state.json` trial_rebooted. UsertoldNOWswapPCtoOTGbeforeprompt; observe30s/photo initialfault80W1C/Rparmed/CP/VBUS/end thenmanualfastboot/PCreconnect. Hardwareack/source/cleanupoutcomeunconfirmed. OnlynewruntimehardwareoperationisguardedexactinitialW1C80oncetoreadbackzero; arbitrary/laterfaultsremainfatal.
+
+**RESTORE IMMEDIATELY on fastboot return** via currentpair/device_pair.py recover ABS_PAIR, fulloriginalinit_boot_bthenboot_b, AndroidbootthenverifyfullphysicalSHA256. Backups backup/dali-25060RK16C-pairtest-20261020 intact. Previousoriginals_verifiedarehistorical; currenttemporarypairNOTrestored. No userdata/GPT/USBmediawrites; USBhost/PHY/storageunfinished.
+
+## Current: guarded fault80 pair fully verified, trial starting (2026-10-21)
+
+CI39554602650/8cfb5ef SUCCESS, compiler1383/1385hits99.86%. Actual22/22sourcebytechecks, linkedcounter/sharedPMIF/newW1Cmarker andfullpairheaders/entry/segments/RAM/ADT/LZ4CPIO/AVBNONE/hostoriginalchecks PASS. Pair `shim/out-dali/usb-fault80-39554602650/`: kernel1d3cc49e8e1edccacf8e6ec4875e2251fcb8b8d5011475c81f6f738d107919e9, init_bootc7da7021c16efd13d778b914aa31b9a9886b74fc5f59ceb1991a597ecf40354f, payloadb97764692ca3d81a3e56dd6af3258f73174c15856ff259cd5f0ff541776951a3. Sameboot/root/ADT/args, root2024d4000; payload29251120/11segments, ADT7736, LZ4ramdisk7553089bytes.
+
+FreshAndroiddali/model/_b/completed/root/fullphysicaloriginalhashpreflightPASS. Trialhelperrunning, consultignoredtrial-state.jsonforactualflashstate; restoreafteranytemporaryflash. UserreadyforearlyOTGswapafterconfirmedrebootbeforeprompt. HardwareW1C/sourceoutcomeunconfirmed.
+
+## Current: initial fault80 kernel built, packaging (2026-10-21)
+
+CI39554602650 SUCCESS exact8cfb5ef, cache1383/1385hits99.86%; bothkernel/buildtree/logdownloadscomplete. Actual22source/counter/ackmarker/fullpairpackage running /tmp/dali-usb-fault80/package.py. Awaitpackagecompletionbeforefreshpreflight/trial. Originalsremainrestored/physicalverified,noactivetrial.
+
+## Current: guarded initial fault80 build in progress (2026-10-21)
+
+Patch0098committed/pushed8cfb5ef; fullcachedCI39554602650inprogress. Durablecandidateusb-fault80-39554602650stagedsameboot/root/baseADT/helpers; awaitkernel+actual22source/counter/ackmarker/fullimagechecks. Originalsrestored/physicalverified/noactivetrial. Nexttrialusercanearlyswapafterrebootbeforeprompt.
+
 ## Current: lone initial fault80 diagnosed; originals verified (2026-10-21)
 
 Photo141351 exactfirstsnapshot tick1/state0/CC10/power08/OTG60/fault80/raw0000/PMIF0; role/CP/charger untouched, PID1heartbeatscontinue. FulloriginalpairrestoredandAndroiddali/_b/completed1/root/bothphysicalSHA256 VERIFIED, manifestusb-status-39553228931originals_verified; noactivetrial.
