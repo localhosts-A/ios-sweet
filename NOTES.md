@@ -1,3 +1,8 @@
+## ACTIVE INIT/EXEC/PID1 DIAGNOSTIC TRIAL (2026-10-21)
+
+- Fresh immediate Android dali/model/_b/completed1/root/full original physical SHA256, host backups/candidates, fastboot product/slot/unlocked/64+8MiB all matched. CI39538593047 init-trace pair init_boot_b then boot_b writes OKAY, reboot OKAY. Authoritative ignored manifest `shim/out-dali/init-39538593047/trial-state.json` trial_rebooted. Same proven WDTshim/ADT/root/args, only new trace kernel. Await initproc/bsdinit_task/execerrno/PID1usercall lastphoto and reset behavior; manualfastboot requested. No new runtime result yet.
+- **RESTORE PENDING:** immediately on fastboot return use currentpair device_pair.py recover, then bounded Android boot wait and verify for root-side both full physical original SHA256. Full originals in backup/dali-25060RK16C-pairtest-20261020. Older originals_verified manifests historical.120s finite WDTlease retained; no userdata/UFS/GPT changes. Previous md0 mount/BSDsuccess proven; PID1execution/console unconfirmed.
+
 ## Current handoff: init/exec diagnostic pair verified (2026-10-21)
 
 - CI39538593047 SUCCESS atd291fc8, actual13/13 source files match locally compiled tree, counter/nativeWDT/init source+symbol gates pass; actual binary has bsdinit_task/execerrno/PID1syscall strings. Cache1378/1381hits99.78%,3misses. Kernel SHA8f40db7cbf345717868b947bfd3dcba640106d6c07431100214ef91913f456c5.
