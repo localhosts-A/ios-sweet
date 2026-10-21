@@ -1,3 +1,13 @@
+## Current: lone initial fault80 diagnosed; originals verified (2026-10-21)
+
+Photo141351 exactfirstsnapshot tick1/state0/CC10/power08/OTG60/fault80/raw0000/PMIF0; role/CP/charger untouched, PID1heartbeatscontinue. FulloriginalpairrestoredandAndroiddali/_b/completed1/root/bothphysicalSHA256 VERIFIED, manifestusb-status-39553228931originals_verified; noactivetrial.
+
+Primaryaudit: immutablevendorstd_tcpci_v10.h has conflicting legacybit7VCONN_OV(commentshouldnotbehere), LinuxTCPCIdefinesALL_REG_RST_TO_DEFAULTbit7andacknowledgesatinit. Vendor tcpci_alert_fault readsandwritesfaultbitsback; mt6379_fault_status_clear writesobservedstatus(W1C). Therefore do NOTclaimbit80provesphysicalreset/overvoltage. Patch0098acknowledgesonlypreciseinitiallone80once,tick1/Initial, originalRd0a, VCONN/sourceoff, onlysink/monitorpowerflags, validraw<=5.5V, no role/CP/chargertouches. Freshfaultmuststill80, exactW1C80once,readbackzero; laterfaults/repeats/allotherfaultbitsremainfatal. Existing3sample>=200msidlechecks precedeRp. No genericfaultwriteAPI/protectiondisable/thresholdchange. Local2/2actualarm64objectcompilesPASS, exactbaselineapplycheckPASS; commit/cachedCInext.
+
+## Detailed OTG photo141351: exact fault80, no source writes (2026-10-21)
+
+Photo confirms firstsnapshotREJECT tick1/state0 CC10/power08/OTG60/fault80/raw0000, PMIFstatus0. Ending tick1/state0 touchedrole0/cp0/charger0; finalalluntouchedvalid0. Thus PMIFreadscompletedandnonzeroTCPCfault80rejectsinitialsnapshot BEFORErole/CP/chargerwrites. Do notconflatewithVBUS/powerfailureoractualhardwarecleanup. Needprimaryvendorheader/TCPCdefinitionofbit7andproperacknowledgementbeforefix; no ignoringarbitraryfaultbits. Usermanualfastboot/fulloriginalpairflashesOKAY/Androidrebootrequested, physicalreadbackpending.
+
 ## ACTIVE detailed OTG status trial — original restoration PENDING (2026-10-21)
 
 CI39553228931/98f3936 fullverifiedpair: freshimmediateAndroiddali/model/_b/completed/root/fullphysicaloriginalhashes, hostoriginal/candidatehashesandfastbootidentity/unlocked/sizesallPASS. Candidateinit_boot_bthenboot_bflashesbothOKAY/rebootrequested. Authoritativeignored `shim/out-dali/usb-status-39553228931/trial-state.json` trial_rebooted. Tolduser NOWmayearlyswapPCtoOTG+Udiskbeforeprompt; observe30s/photo snapshot/readfailed/ending/end thenmanualfastbootandPCreconnect. Hardwarecause/outcomestillunknown; noguard/powersequencechangesfrompriortrial.

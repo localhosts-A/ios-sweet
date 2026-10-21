@@ -1,0 +1,64 @@
+diff --git a/iokit/Kernel/arm/DaliUSBPower.cpp b/iokit/Kernel/arm/DaliUSBPower.cpp
+--- a/iokit/Kernel/arm/DaliUSBPower.cpp
++++ b/iokit/Kernel/arm/DaliUSBPower.cpp
+@@ -68,10 +68,42 @@
+             accepted ? "accepted" : "REJECT", ticks, (unsigned)state,
+             *cc, *power, *otg, fault, raw, status);
+     }
++    if (!accepted && fault == 0x80 && !(raw & ~0x3ffU) &&
++        acknowledgeInitialFault(*power, *otg, raw)) {
++        accepted = true; /* Fault readback must be zero; next ticks recheck it. */
++    }
+     /* Vendor reads low10bits *25mV. Refuse unhandled scaling/reserved bits. */
+     if (!accepted) { return false; }
+     *mv = (raw & 0x3ffU) * 25U;
+     return true;
++}
++
++bool DaliUSBPower::acknowledgeInitialFault(uint8_t power, uint8_t otg, uint16_t raw)
++{
++    /* TCPCI fault status is W1C; vendor fault_status_clear writes its observed
++     * bits. Acknowledge only the observed lone boot-time80, once, before any
++     * role/CP/charger change. Linux names bit7 ALL_REG_RST_TO_DEFAULT; the
++     * vendor legacy header has a conflicting VCONN_OV name. Do not infer a
++     * physical reset/cause or ignore it: VCONN/source must be off and a fresh
++     * read must show precisely80 before W1C and zero afterward. Any repeat
++     * or other fault remains fatal. No general fault-register write API.
++     */
++    if (state != Initial || ticks != 1 || initialFaultAckAttempted ||
++        roleTouched || cpAttempted || chargerTouched || (otg & 1) ||
++        !(power & 8) || (power & ~0x0dU) || raw > 220) { return false; }
++    uint8_t role = 0, powerCtrl = 0, fault = 0;
++    if (!read8(0x41a, &role) || role != 0x0a ||
++        !read8(0x41c, &powerCtrl) || (powerCtrl & 1) ||
++        !read8(0x41f, &fault) || fault != 0x80) { return false; }
++    initialFaultAckAttempted = true; /* Never retry an uncertain W1C write. */
++    uint8_t ack = 0x80;
++    bool wrote = dali_pmif_transfer(14, 0x41f, &ack, true, &status);
++    IODelay(1000);
++    bool readback = read8(0x41f, &fault);
++    bool cleared = wrote && readback && !fault;
++    kprintf("DALI OTG: initial fault80 W1C %s wrote=%u read=%u fault=%02x pmif=%08x\n",
++        cleared ? "confirmed" : "FAILED", wrote, readback, fault, status);
++    return cleared;
+ }
+ 
+ bool DaliUSBPower::protectedIdle(bool idle)
+diff --git a/iokit/Kernel/arm/DaliUSBPower.h b/iokit/Kernel/arm/DaliUSBPower.h
+--- a/iokit/Kernel/arm/DaliUSBPower.h
++++ b/iokit/Kernel/arm/DaliUSBPower.h
+@@ -12,12 +12,14 @@
+     uint8_t savedCVHi = 0, savedCVLo = 0, savedCurrent = 0;
+     uint32_t status = 0;
+     unsigned readErrors = 0, snapshotReports = 0;
++    bool initialFaultAckAttempted = false;
+     uint64_t startedMs = 0, stateStartedMs = 0;
+     bool roleTouched = false, chargerTouched = false, cpAttempted = false;
+     bool read8(uint16_t reg, uint8_t *value);
+     bool write8(uint16_t reg, uint8_t value);
+     bool update(uint16_t reg, uint8_t mask, uint8_t value);
+     bool snapshot(uint8_t *cc, uint8_t *power, uint8_t *otg, unsigned *mv);
++    bool acknowledgeInitialFault(uint8_t power, uint8_t otg, uint16_t raw);
+     bool protectedIdle(bool idle);
+     bool sourceOn();
+     void finishLocked(const char *reason);

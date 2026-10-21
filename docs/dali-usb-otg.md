@@ -141,6 +141,30 @@ rejected raw TCPC snapshot, ending state/touched flags, and explicit
 lease limits remain unchanged. The exact initial rejection is still
 unknown; no faults are cleared or ignored to bypass it.
 
+### Detailed snapshot and guarded initial acknowledgement
+
+Photo141351 from CI39553228931/98f3936 shows initial tick1/state0,
+CC=`10`, power=`08`, OTG=`60`, fault=`80`, raw voltage=`0000`, PMIF=`0`.
+The service exits with all three components `untouched`. The nonzero
+fault byte is the initial blocker; no source-on or physical cleanup cycle
+occurred. Original Android boot/init_boot were fully restored and their
+complete physical SHA256 values verified after the trial.
+
+The exact vendor header calls bit7 VCONN_OV with a warning comment, while
+[Linux TCPCI](https://github.com/torvalds/linux/blob/master/include/linux/usb/tcpci.h)
+names it ALL_REG_RST_TO_DEFAULT and acknowledges it during initialization.
+This naming conflict does not establish a physical reset or overvoltage.
+The immutable [vendor fault handler](https://github.com/MiCode/mtk_kernel_device_modules/blob/e45c3199537fbba9aae5fb06c31fc8dbd3c1dcee/drivers/misc/mediatek/typec/tcpc/tcpc_mt6379.c#L1545)
+writes the observed status back (W1C).
+
+Patch0098 permits one exact `80` acknowledgement on initial tick1 only:
+original Rd/Rd, no role/CP/charger changes, VCONN and source off, only
+monitor/sink/presence power flags, valid voltage encoding no higher than
+5.5V. A fresh fault read must still be exactly `80`; one fixed W1C write
+must succeed and read back zero. It is never retried, and every later or
+additional fault remains fatal. Existing idle/CC debounce and voltage
+checks still precede source enable. Hardware acknowledgement is unverified.
+
 ## Hardware facts
 
 Live stock Android FDT, cross-checked against MiCode's device-module source
