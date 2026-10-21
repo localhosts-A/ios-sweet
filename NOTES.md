@@ -1,4 +1,10 @@
-## Current: cache PA fix built and packaged; originals verified; no active trial (2026-10-22)
+## Current: cache PA candidate trial started; original restoration pending (2026-10-22)
+
+User requests continue after cache PA candidate verification; announced early red-loader cable swap, then currentpair usb-cache-pa-39639794623 device_pair.py trial completed. Immediate Android root/dali/model/_b/completed/full physical original sizes/SHA256 PASS; fastboot identity/unlocked/slot/partition sizes and host original/candidate hashes PASS. Temporary full init_boot_b then boot_b flashed OKAY; reboot requested. Authoritative manifest trial_rebooted. CURRENT ORIGINAL RESTORATION PENDING; prior originals_verified applies only to previous trial. Log research/dali-usb-root/ci-artifacts/run39639794623-trial.log.
+
+User told swap OTG/Udisk now, photograph DALI XHCI/MSC/ROOT or panic, observe~1minute, reconnectPC/manualfastboot. Onreturn immediately use this currentpair device_pair.py recover ABS_PAIR (full originals init_boot_b then boot_b/rebootAndroid), then verify full physical original sizes/SHA256. No hardware result yet; highPAfix/DMA/Run/NoOP/enum/storage/root unverified. No GPT/userdata/Udisk writes.120s watchdog retained; original backups intact.
+
+## Cache PA candidate verification (historical preflight)
 
 Patch0119/source8fc0413 full CI39639794623 SUCCESS. Downloaded artifacts match checksums; all32 actual source files match the native compiled tree. Actual linked `_pmap_sync_page_attributes_phys` disassembly is `ubfiz x0, x0, #14, #32` before `flush_dcache`, replacing the old truncating `lsl w0, w0, #14`. This confirms the high physical address conversion is fixed in the delivered kernel. Full boot-counter, linked-marker, headers/segments/entry/RAM/ADT/CPIO/AVB/host-original packaging checks PASS.
 
