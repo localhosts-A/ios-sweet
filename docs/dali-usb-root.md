@@ -152,6 +152,24 @@ The artifact inspector now checks this exact helper's opcodes as well as
 the existing boot counter. The correction preserves bounded waits and
 hardware guards. It is not yet proof of DMA completion or USB storage reads.
 
+## PORTSC power readback and attach diagnosis
+
+The first timer-fix hardware trial reached the `attachment` stage after the
+No-op command completed, then timed out waiting for CCS on USB2 port2
+(PORTSC offset0x430). It did not enumerate the stick or issue storage reads.
+The original init_boot_b and boot_b were restored and their full physical
+hashes verified.
+
+Intel xHCI1.22 §5.4.8 defines PP as logical port power, says PP=0 suppresses
+attach/detach reporting, and requires software to confirm PP by reading it
+back after a change. USB2 PLS is undefined while PP=0. Patch0123 waits up to
+100ms for PP readback, logs powered PORTSC fields, then waits for CCS; on
+timeout it logs the final port state and read-only controller/event snapshot.
+This distinguishes a failed logical port-power transition from a port that
+is powered logically but still has no reported connection. PP readback is not
+evidence that physical VBUS reached the connector. The new candidate remains
+unbuilt/unflashed until full CI/package validation.
+
 ## Primary references
 
 - [Intel xHCI1.22 specification](https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/extensible-host-controler-interface-usb-xhci.pdf), sections4/5/6.

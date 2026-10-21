@@ -1,0 +1,31 @@
+--- a/iokit/Kernel/arm/DaliXHCI.cpp
++++ b/iokit/Kernel/arm/DaliXHCI.cpp
+@@ -338,9 +338,27 @@
+     startupStage = "port-power";
+     if (value == ~0U || (value & 8)) { return false; }
+     wr(reg, (value & neutral) | 0x200);
++    startupStage = "port-power-readback";
++    if (!wait(reg, 0x200, 0x200, 100)) {
++        value = rd(reg);
++        ops.log("DALI XHCI: port power readback failed port=%u raw=%08x pp=%u ccs=%u pls_raw=%u\n",
++            port, value, (value >> 9) & 1, value & 1, (value >> 5) & 15);
++        if (live()) { traceController("port-power"); }
++        return false;
++    }
++    value = rd(reg);
++    ops.log("DALI XHCI: port power ready port=%u raw=%08x pp=%u ccs=%u pls=%u\n",
++        port, value, (value >> 9) & 1, value & 1, (value >> 5) & 15);
+     IOSleep(20);
+     startupStage = "attachment";
+-    if (!wait(reg, 1, 1, 2000)) { ops.log("DALI XHCI: no USB2 attachment\n"); return false; }
++    if (!wait(reg, 1, 1, 2000)) {
++        value = rd(reg);
++        ops.log("DALI XHCI: attachment snapshot port=%u raw=%08x pp=%u ccs=%u ped=%u pls=%u speed=%u\n",
++            port, value, (value >> 9) & 1, value & 1, (value >> 1) & 1,
++            (value >> 5) & 15, (value >> 10) & 15);
++        if (live()) { traceController("attachment"); }
++        ops.log("DALI XHCI: no USB2 attachment\n"); return false;
++    }
+     startupStage = "debounce";
+     for (unsigned n = 0; n < 10; ++n) {
+         if (!live() || (rd(reg) & 9) != 1) { return false; }

@@ -210,6 +210,11 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: running AC64=1'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: start failed stage='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: No-op enqueue'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: port power ready'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: port power readback failed'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: attachment snapshot'
+          grep -Fq 'startupStage = "port-power-readback";' xnu/iokit/Kernel/arm/DaliXHCI.cpp
+          grep -Fq 'if (!wait(reg, 0x200, 0x200, 100))' xnu/iokit/Kernel/arm/DaliXHCI.cpp
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: event poll rejected'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: event timeout'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: command event rejected'
