@@ -1,3 +1,11 @@
+## Current: host observation pair fully verified; trial starting (2026-10-21)
+
+CI39561692789/725df01SUCCESS cache1383/1386hits99.78%. Actual24/24sourcebytes match local; linkedhost/counter/ADC/wake/W1C/cleanup markersPASS; fullheaders/entry/segments/RAM/newADT exacthostranges/LZ4CPIO/AVBNONE/hostoriginalsPASS. Pair shim/out-dali/usb-host-39561692789: kerneld0feef8faa95a2e22b70e0a5844b071030e2728ccc7f31ae10c2609a6d239a4d, init_boot34085a3e8b5d41165a32f705157110271ff17055748d3a24c4718c16a95fd737, payload4d1f02d512ab176062ef5040367ec06199f3633ec994841c52dfd4cf5732936c. Payload29251408/11segments, ADT7820, RAMrootunchanged2024d4000, ramdisk7556891. Added daliusbhost=1 andexacthost-observe-reg. NoPHY/host/DMAwrites, noUSBenum yet. Hosthardwareobservationunverified; priorbounded5Vproof separate. FreshAndroidfullphysicalpreflightstarting; consultignoredtrial-state.json for actualstate. Restorefulloriginalpairaftertemporarytrial thenAndroidphysicalverify.
+
+## Current: host observation built; final packaging (2026-10-21)
+
+Host observation CI39561692789/725df01 SUCCESS including existing diagnostic gates. Compiler cache1383/1386hits99.78%,3misses. Kernel/buildtree/log downloads complete at research/dali-usb-root/ci-artifacts/run39561692789. Packaging/24sourcebyte/counter/hostmarkers/fullpair now running /tmp/dali-usb-host/package.py withworkdiskTMPDIR. Wait success before freshAndroidphysicalpreflight/trial. Originals verified/noactivetrial.
+
 ## Current: host observation kernel build in progress (2026-10-21)
 
 Host observation patch0101 committed/pushed725df013ba9f20849d8fe54063c4866114ff45f9; fullcachedCI39561692789 in progress. Candidate shim/out-dali/usb-host-39561692789 staged exactoldboot/root/helpers andupdated verifier; regeneratebaseADT/newhost property atpackaging. Wait24sourcebyte/counter/hostmarkers/fullpairverification before freshphysicalpreflight/trial. Originals remain verified/noactivetrial.
