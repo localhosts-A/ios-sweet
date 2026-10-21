@@ -222,6 +222,15 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: health rejected AO'
           grep -Fq 'flush_dcache((vm_offset_t) ptoa_64(pp), PAGE_SIZE, TRUE);' xnu/osfmk/arm/pmap/pmap.c
           if grep -Fq 'flush_dcache((vm_offset_t) (pp << PAGE_SHIFT)' xnu/osfmk/arm/pmap/pmap.c; then exit 1; fi
+          grep -Fq 'void dmaZero(volatile void *destination, size_t length)' xnu/iokit/Kernel/arm/DaliXHCI.cpp
+          grep -Fq 'const volatile void *source, size_t length)' xnu/iokit/Kernel/arm/DaliXHCI.cpp
+          grep -Fq 'dmaZero(bytes, arenaBytes);' xnu/iokit/Kernel/arm/DaliXHCI.cpp
+          grep -Fq 'dmaCopy(bytes + dataOffset, buffer, length);' xnu/iokit/Kernel/arm/DaliXHCI.cpp
+          grep -Fq 'dmaCopy(buffer, bytes + dataOffset, received);' xnu/iokit/Kernel/arm/DaliXHCI.cpp
+          grep -Fq 'dmaCopy(buffer, bytes + dataOffset, transferred);' xnu/iokit/Kernel/arm/DaliXHCI.cpp
+          grep -Fq 'dmaCopy(ep0, bytes + 0x9000 + contextBytes, contextBytes);' xnu/iokit/Kernel/arm/DaliXHCI.cpp
+          grep -Fq 'reinterpret_cast<volatile uint64_t *>(bytes + 0x3000)' xnu/iokit/Kernel/arm/DaliXHCI.cpp
+          if grep -Eq '(bzero|memcpy)\((bytes|input|ep0)' xnu/iokit/Kernel/arm/DaliXHCI.cpp; then exit 1; fi
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: stopped/reset; DMA ownership returned'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI MSC: ready blocks='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI ROOT: selected read-only du0'

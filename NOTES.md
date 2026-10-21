@@ -1,4 +1,12 @@
-## Current: cache PA candidate trial started; original restoration pending (2026-10-22)
+## Current: DMA arena DC ZVA panic; originals recovered and physically verified (2026-10-22)
+
+Photo IMG_20261022_011333.jpg: reset complete pages1/scratch0 then Unaligned kernel data abort, PCfffffe0007b4acc4/LRfffffe0007a892dc/ESR96000061/FARfffffe50422a0040. Exact CI39639794623 disassembly maps PC to `_bzero` DC ZVA x3; LR is DaliXHCI::allocate after bzero(bytes,0x40000). Full PA now preserved (physical2055d0000). Cache-inhibited mapping uses VM_WIMG_IO/Device-GRE for DRAM, where DC ZVA faults even at aligned address. Not an incorrectly aligned arena and not evidence of USB DMA execution. No running/NoOP/MSC/root proof.
+
+Immediately recovered full original init_boot_b then boot_b, rebooted Android; completed/root/dali/model/_b/full physical sizes/SHA256 PASS. Current usb-cache-pa-39639794623 manifest originals_verified. NO ACTIVE TRIAL OR PENDING RESTORATION. Recover/verify logs run39639794623-recover.log and -verify.log. Next replace all arena bzero/memcpy with bounded volatile-byte zero/copy, make aligned context/DCBAA/ERST/ring accesses volatile scalar, retain uncached policy and handoff barriers. Nativecompile/actualinstruction/source checks and fullCI before next candidate; no new manual trial this round.
+
+Patch0120 replaces every arena clear/copy with noinline volatile byte helpers, and makes all aligned arena typed fields volatile scalar. Cached stack bzero/memcpy remain ordinary. Local actual ARM64 DaliXHCI compile1/1 PASS; disassembly shows byte strb/ldrb/sturb/ldurb loops without DC ZVA/vector/unaligned wide access in helpers. Exact actualCI0119+0120 patch replay1/1 byte-identical;94positive workflow source assertions PASS. FullCI and linked artifact instruction audit pending. Uncached mapping, highPAfix, publish/consume barriers, source/fault/stop and reset guards unchanged. No new phone writes since recovery.
+
+## Historical cache PA trial (recovered)
 
 User requests continue after cache PA candidate verification; announced early red-loader cable swap, then currentpair usb-cache-pa-39639794623 device_pair.py trial completed. Immediate Android root/dali/model/_b/completed/full physical original sizes/SHA256 PASS; fastboot identity/unlocked/slot/partition sizes and host original/candidate hashes PASS. Temporary full init_boot_b then boot_b flashed OKAY; reboot requested. Authoritative manifest trial_rebooted. CURRENT ORIGINAL RESTORATION PENDING; prior originals_verified applies only to previous trial. Log research/dali-usb-root/ci-artifacts/run39639794623-trial.log.
 

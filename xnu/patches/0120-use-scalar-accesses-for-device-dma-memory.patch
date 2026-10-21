@@ -1,0 +1,141 @@
+--- a/iokit/Kernel/arm/DaliXHCI.cpp
++++ b/iokit/Kernel/arm/DaliXHCI.cpp
+@@ -20,6 +20,21 @@
+ }
+ void publish() { __asm__ volatile("dsb oshst" ::: "memory"); }
+ void consume() { __asm__ volatile("dmb oshld" ::: "memory"); }
++/* kIOMapInhibitCache may use Device memory on ARM64. Generic bzero uses
++ * DC ZVA and memcpy may issue unaligned/vector accesses: neither is valid
++ * for this mapping. Volatile byte accesses also cover odd USB lengths.
++ * Keep publication/consumption barriers at the ownership handoff sites.
++ */
++__attribute__((noinline)) void dmaZero(volatile void *destination, size_t length) {
++    auto *target = static_cast<volatile uint8_t *>(destination);
++    for (size_t n = 0; n < length; ++n) { target[n] = 0; }
++}
++__attribute__((noinline)) void dmaCopy(volatile void *destination,
++    const volatile void *source, size_t length) {
++    auto *target = static_cast<volatile uint8_t *>(destination);
++    auto *input = static_cast<const volatile uint8_t *>(source);
++    for (size_t n = 0; n < length; ++n) { target[n] = input[n]; }
++}
+ uint16_t le16(const uint8_t *p) { return p[0] | (uint16_t(p[1]) << 8); }
+ uint32_t le32(const uint8_t *p) { return le16(p) | (uint32_t(le16(p + 2)) << 16); }
+ uint64_t le64(const uint8_t *p) { return le32(p) | (uint64_t(le32(p + 4)) << 32); }
+@@ -96,10 +111,10 @@
+         ops.log("DALI XHCI: arena validation failed pa=%llx length=%llu mapped=%u limit=%llx\n",
+             physical, uint64_t(length), bytes != nullptr, limit); return false;
+     }
+-    bzero(bytes, arenaBytes);
++    dmaZero(bytes, arenaBytes);
+     Ring *rings[] = {&commandRing, &controlRing, &inRing, &outRing};
+     for (Ring *r : rings) {
+-        auto *link = reinterpret_cast<TRB *>(bytes + r->offset) + 255;
++        auto *link = reinterpret_cast<volatile TRB *>(bytes + r->offset) + 255;
+         uint64_t target = physical + r->offset;
+         link->lo = uint32_t(target); link->hi = uint32_t(target >> 32);
+         link->control = (6U << 10) | 2U; /* Link TRB, toggle cycle; C set at wrap. */
+@@ -255,13 +270,13 @@
+     startupStage = "arena-allocation";
+     ops.log("DALI XHCI: reset complete pages=%08x scratch=%u\n", rd(op + 8), scratch);
+     if (scratch > 32 || !allocate()) { return false; }
+-    auto *dcbaa = reinterpret_cast<uint64_t *>(bytes);
++    auto *dcbaa = reinterpret_cast<volatile uint64_t *>(bytes);
+     if (scratch) {
+         dcbaa[0] = physical + 0x8000;
+-        auto *array = reinterpret_cast<uint64_t *>(bytes + 0x8000);
++        auto *array = reinterpret_cast<volatile uint64_t *>(bytes + 0x8000);
+         for (unsigned n = 0; n < scratch; ++n) { array[n] = physical + 0x20000 + n * 0x1000; }
+     }
+-    auto *erst = reinterpret_cast<uint64_t *>(bytes + 0x3000);
++    auto *erst = reinterpret_cast<volatile uint64_t *>(bytes + 0x3000);
+     erst[0] = physical + 0x2000; erst[1] = 256;
+     startupStage = "publish-rings";
+     publish(); dmaPublished = true;
+@@ -309,7 +324,7 @@
+     }
+     uint64_t setup = requestType | (uint64_t(request) << 8) | (uint64_t(value) << 16) |
+         (uint64_t(index) << 32) | (uint64_t(length) << 48);
+-    if (length && !input) { memcpy(bytes + dataOffset, buffer, length); }
++    if (length && !input) { dmaCopy(bytes + dataOffset, buffer, length); }
+     uint32_t trt = length ? (input ? 3U : 2U) : 0;
+     uint64_t setupTRB = submitTRB(controlRing, setup, 8,
+         (2U << 10) | (1U << 6) | (trt << 16), false);
+@@ -331,7 +346,7 @@
+     if (!completion(statusTRB, 1, false, &residual, 1000, dataTRB) || residual > length) { return false; }
+     unsigned received = length - residual;
+     consume();
+-    if (input && received) { memcpy(buffer, bytes + dataOffset, received); }
++    if (input && received) { dmaCopy(buffer, bytes + dataOffset, received); }
+     if (actual) { *actual = received; }
+     return true;
+ }
+@@ -339,7 +354,7 @@
+     unsigned endpoint = input ? epIn : epOut;
+     Ring &ring = input ? inRing : outRing;
+     if (!endpoint || !buffer || !length || length > dataBytes || !live()) { return false; }
+-    if (!input) { memcpy(bytes + dataOffset, buffer, length); }
++    if (!input) { dmaCopy(bytes + dataOffset, buffer, length); }
+     uint64_t trb = submitTRB(ring, physical + dataOffset, length,
+         (1U << 10) | ioc | (input ? 4U : 0));
+     if (!trb) { return false; }
+@@ -347,23 +362,23 @@
+     unsigned residual = 0;
+     if (!completion(trb, endpoint, input, &residual, 1500) || residual > length) { return false; }
+     unsigned transferred = length - residual;
+-    consume(); if (input && transferred) { memcpy(buffer, bytes + dataOffset, transferred); }
++    consume(); if (input && transferred) { dmaCopy(buffer, bytes + dataOffset, transferred); }
+     if (actual) { *actual = transferred; }
+     return true;
+ }
+ bool DaliXHCI::configureEndpoints(unsigned configValue) {
+-    auto *input = reinterpret_cast<uint32_t *>(bytes + 0x4000);
+-    bzero(input, 0x1000);
++    auto *input = reinterpret_cast<volatile uint32_t *>(bytes + 0x4000);
++    dmaZero(input, 0x1000);
+     input[1] = 1U | (1U << epIn) | (1U << epOut);
+     unsigned highest = epIn > epOut ? epIn : epOut;
+     /* Keep the addressed Slot Context; update only Context Entries. */
+-    auto *output = reinterpret_cast<uint32_t *>(bytes + 0x9000);
+-    consume(); memcpy(bytes + 0x4000 + contextBytes, output, contextBytes);
+-    auto *slotCtx = reinterpret_cast<uint32_t *>(bytes + 0x4000 + contextBytes);
++    auto *output = reinterpret_cast<volatile uint32_t *>(bytes + 0x9000);
++    consume(); dmaCopy(bytes + 0x4000 + contextBytes, output, contextBytes);
++    auto *slotCtx = reinterpret_cast<volatile uint32_t *>(bytes + 0x4000 + contextBytes);
+     slotCtx[0] = (slotCtx[0] & ~(31U << 27)) | (highest << 27);
+     unsigned endpoints[] = {epIn, epOut};
+     for (unsigned ep : endpoints) {
+-        auto *ctx = reinterpret_cast<uint32_t *>(bytes + 0x4000 + contextBytes * (ep + 1));
++        auto *ctx = reinterpret_cast<volatile uint32_t *>(bytes + 0x4000 + contextBytes * (ep + 1));
+         unsigned packet = ep == epIn ? inPacket : outPacket;
+         uint64_t dequeue = physical + (ep == epIn ? inRing.offset : outRing.offset);
+         ctx[1] = (3U << 1) | ((ep == epIn ? 6U : 2U) << 3) | (packet << 16);
+@@ -377,13 +392,13 @@
+ bool DaliXHCI::enumerate() {
+     unsigned speed = (rd(op + 0x400 + (port - 1) * 16) >> 10) & 15;
+     if (!command(9, 0, 0, 0, &slot) || slot != 1) { return false; }
+-    auto *dcbaa = reinterpret_cast<uint64_t *>(bytes);
++    auto *dcbaa = reinterpret_cast<volatile uint64_t *>(bytes);
+     dcbaa[slot] = physical + 0x9000;
+-    auto *input = reinterpret_cast<uint32_t *>(bytes + 0x4000);
++    auto *input = reinterpret_cast<volatile uint32_t *>(bytes + 0x4000);
+     input[1] = 3;
+-    auto *slotCtx = reinterpret_cast<uint32_t *>(bytes + 0x4000 + contextBytes);
++    auto *slotCtx = reinterpret_cast<volatile uint32_t *>(bytes + 0x4000 + contextBytes);
+     slotCtx[0] = (speed << 20) | (1U << 27); slotCtx[1] = port << 16;
+-    auto *ep0 = reinterpret_cast<uint32_t *>(bytes + 0x4000 + contextBytes * 2);
++    auto *ep0 = reinterpret_cast<volatile uint32_t *>(bytes + 0x4000 + contextBytes * 2);
+     unsigned packet = speed == 3 ? 64 : 8;
+     ep0[1] = (3U << 1) | (4U << 3) | (packet << 16);
+     ep0[2] = uint32_t(physical + controlRing.offset) | 1;
+@@ -397,8 +412,8 @@
+     if (maxPacket != 8 && maxPacket != 16 && maxPacket != 32 && maxPacket != 64) { return false; }
+     if (speed == 3 && maxPacket != 64) { return false; }
+     if (maxPacket != packet) {
+-        bzero(input, 0x1000); input[1] = 2;
+-        consume(); memcpy(ep0, bytes + 0x9000 + contextBytes, contextBytes);
++        dmaZero(input, 0x1000); input[1] = 2;
++        consume(); dmaCopy(ep0, bytes + 0x9000 + contextBytes, contextBytes);
+         ep0[1] = (ep0[1] & 0xffff) | (maxPacket << 16);
+         publish();
+         if (!command(13, physical + 0x4000, 0, slot << 24)) { return false; }

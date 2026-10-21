@@ -108,6 +108,21 @@ the widening precedes the shift. The locally compiled replacement contains
 checks and uncached mapping remain enabled. DMA execution and storage access
 still need hardware verification.
 
+## Device memory DMA arena accesses
+
+The next boot passed high-address cache synchronization but faulted at
+`DC ZVA x3` inside `_bzero`, called by `DaliXHCI::allocate` to clear the DMA
+arena. The address was aligned. In this XNU, `kIOMapInhibitCache` maps DRAM
+through VM_WIMG_IO as Device-GRE; DC ZVA is unsuitable for that memory type.
+
+The driver uses explicit volatile byte zero/copy helpers for all accesses
+that clear or copy arena memory, including control/bulk payloads and context
+copies. Aligned TRB/context/DCBAA/ERST fields use volatile scalar accesses.
+Cached stack buffers retain ordinary memory helpers. This preserves the
+uncached DMA policy and existing publish/consume barriers while preventing
+cache-zero instructions and widened unaligned copies. Actual DMA operation
+and USB storage are still unverified.
+
 ## Primary references
 
 - [Intel xHCI1.22 specification](https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/extensible-host-controler-interface-usb-xhci.pdf), sections4/5/6.
@@ -116,3 +131,4 @@ still need hardware verification.
   phy-mtk-mt6379-eusb2-repeater, cross-checked with this phone's live FDT.
 - Native XNU IOBufferMemoryDescriptor/IOMemoryDescriptor, BSD memdev and
   HFS sources in the exact CI build tree.
+- [Arm DC ZVA instruction](https://support.arm.com/documentation/ddi0601/2024-06/AArch64-Instructions/DC-ZVA--Data-Cache-Zero-by-VA?lang=en), Device-memory alignment fault semantics.
