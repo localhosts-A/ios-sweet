@@ -159,6 +159,10 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI OTG: TCPC detection wake'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI OTG: TCPC wake cleanup='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI OTG: write failed reg='
+          grep -Fq 'readADC(11, &pd)' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
+          grep -Fq 'update(0x155, 0x1f, savedReport)' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI ADC: PDVBUS='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI ADC: failed channel='
           grep -Fq 'No reset, SCL pulses, repeated attempt or DMA programming.' xnu/iokit/Kernel/arm/DaliI2C5.cpp
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI CP: SC8585 verified'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI I2C5: scoped controller/clock state restored'

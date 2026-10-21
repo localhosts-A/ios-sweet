@@ -1,0 +1,129 @@
+diff --git a/iokit/Kernel/arm/DaliUSBPower.cpp b/iokit/Kernel/arm/DaliUSBPower.cpp
+--- a/iokit/Kernel/arm/DaliUSBPower.cpp
++++ b/iokit/Kernel/arm/DaliUSBPower.cpp
+@@ -32,7 +32,7 @@
+     /* Whitelist only the audited role/polarity/power and charger registers. */
+     if (reg != 0x41a && reg != 0x419 && reg != 0x41c && reg != 0x108 &&
+         reg != 0x11c && reg != 0x11d && reg != 0x11e && reg != 0x135 &&
+-        reg != 0x48f && reg != 0x490 &&
++        reg != 0x48f && reg != 0x490 && reg != 0x155 &&
+         (reg < 7 || reg > 10)) { return false; }
+     uint8_t verify = 0;
+     bool wrote = dali_pmif_transfer(14, reg, &v, true, &status);
+@@ -82,7 +82,20 @@
+     }
+     /* Vendor reads low10bits *25mV. Refuse unhandled scaling/reserved bits. */
+     if (!accepted) { return false; }
+-    *mv = (raw & 0x3ffU) * 25U;
++    /* The TCPCI voltage callback is marked TODO in this vendor driver and
++     * reads zero on Dali despite VBUS-present. Measure the real PDVBUS ADC.
++     * CHGVIN is also sampled for comparison (stock Dali charger uses it).
++     */
++    unsigned pd = 0, chg = 0;
++    if (!readADC(11, &pd) || !readADC(1, &chg)) { return false; }
++    if (!adcReports || ticks % 10 == 0 ||
++        pd > previousADCmv + 100 || previousADCmv > pd + 100) {
++        ++adcReports;
++        kprintf("DALI ADC: PDVBUS=%umV CHGVIN=%umV TCPCI=%umV tick=%u\n",
++            pd, chg, (raw & 0x3ffU) * 25U, ticks);
++    }
++    previousADCmv = pd;
++    *mv = pd; /* Voltage limits are unchanged and use a fresh physical ADC. */
+     return true;
+ }
+ 
+@@ -112,6 +125,64 @@
+     kprintf("DALI OTG: initial fault80 W1C %s wrote=%u read=%u fault=%02x pmif=%08x\n",
+         cleared ? "confirmed" : "FAILED", wrote, readback, fault, status);
+     return cleared;
++}
++
++bool DaliUSBPower::readADC(unsigned channel, unsigned *mv)
++{
++    /* MiCode e45c319 mt6379-adc.c and mediatek,mt6379_adc.h:
++     * SID14 CONFG2=14f low5 oneshot/channel; report mux155, BE16 at156/157.
++     * PDVBUS=11, CHGVIN=1; raw unit1mV (IIO processed scale1000 to uV).
++     * This power client's lock owns the whole conversion/mux interval; no
++     * other native ADC client exists. RTC SID9 may interleave PMIF transfers.
++     * Never change ADC_CONFG1/VBATMON/ZCV, calibrations or protections.
++     */
++    if (adcFault || !mv || (channel != 1 && channel != 11)) { return false; }
++    uint8_t config = 0, savedReport = 0;
++    if (!read8(0x14f, &config) || !read8(0x155, &savedReport) || config != 0) {
++        adcFault = true;
++        kprintf("DALI ADC: idle guard failed channel=%u cfg=%02x pmif=%08x\n",
++            channel, config, status);
++        return false;
++    }
++    const char *phase = "trigger";
++    uint8_t request = (uint8_t)channel;
++    bool ok = dali_pmif_transfer(14, 0x14f, &request, true, &status);
++    bool reportTouched = false, restored = true;
++    uint16_t wire = 0;
++    if (ok) {
++        IOSleep(5); /* Vendor conversion minimum4.4ms. */
++        phase = "conversion";
++        bool idle = false;
++        for (unsigned i = 0; i < 10; ++i) {
++            if (!read8(0x14f, &config)) { break; }
++            if (config == 0) { idle = true; break; }
++            IODelay(100);
++        }
++        ok = idle; /* No cancel/reset/retry on an uncertain conversion. */
++    }
++    if (ok) {
++        phase = "report select";
++        reportTouched = true; /* Dirty before any possible mux write. */
++        ok = update(0x155, 0x1f, (uint8_t)channel);
++    }
++    if (ok) {
++        IOSleep(1);
++        phase = "report data";
++        ok = dali_pmif_read16(14, 0x156, &wire, &status);
++    }
++    if (reportTouched) {
++        restored = update(0x155, 0x1f, savedReport);
++    }
++    unsigned value = ((wire & 0xffU) << 8) | (wire >> 8);
++    if (!ok || !restored || value > 30000) {
++        adcFault = true; /* Permanent refusal for this diagnostic boot. */
++        kprintf("DALI ADC: failed channel=%u phase=%s cfg=%02x raw=%u mux=%s pmif=%08x\n",
++            channel, phase, config, value,
++            !reportTouched ? "untouched" : restored ? "restored" : "FAILED", status);
++        return false;
++    }
++    *mv = value;
++    return true;
+ }
+ 
+ bool DaliUSBPower::wakeDetection()
+@@ -240,7 +311,8 @@
+         reason, !chargerTouched ? "untouched" : chargerOK ? "restored" : "FAILED",
+         !cpAttempted ? "untouched" : cpOK ? "restored" : "FAILED",
+         !roleTouched ? "untouched" : roleOK ? "restored" : "FAILED", mv, measured, otg);
+-    if (!chargerOK || !cpOK || !roleOK || !tcpcOK) { kprintf("DALI OTG: cleanup incomplete; reboot required\n"); }
++    kprintf("DALI ADC: final status=%s\n", adcFault ? "FAILED; reboot required" : "no ADC error recorded");
++    if (!chargerOK || !cpOK || !roleOK || !tcpcOK || adcFault) { kprintf("DALI OTG: cleanup incomplete; reboot required\n"); }
+ }
+ 
+ bool DaliUSBPower::tickLocked()
+diff --git a/iokit/Kernel/arm/DaliUSBPower.h b/iokit/Kernel/arm/DaliUSBPower.h
+--- a/iokit/Kernel/arm/DaliUSBPower.h
++++ b/iokit/Kernel/arm/DaliUSBPower.h
+@@ -15,6 +15,8 @@
+     bool initialFaultAckAttempted = false;
+     uint8_t savedSys1 = 0, savedSys2 = 0;
+     bool tcpcTouched = false;
++    bool adcFault = false;
++    unsigned adcReports = 0, previousADCmv = 0;
+     uint64_t startedMs = 0, stateStartedMs = 0;
+     bool roleTouched = false, chargerTouched = false, cpAttempted = false;
+     bool read8(uint16_t reg, uint8_t *value);
+@@ -22,6 +24,7 @@
+     bool update(uint16_t reg, uint8_t mask, uint8_t value);
+     bool snapshot(uint8_t *cc, uint8_t *power, uint8_t *otg, unsigned *mv);
+     bool acknowledgeInitialFault(uint8_t power, uint8_t otg, uint16_t raw);
++    bool readADC(unsigned channel, unsigned *mv);
+     bool wakeDetection();
+     bool protectedIdle(bool idle);
+     bool sourceOn();

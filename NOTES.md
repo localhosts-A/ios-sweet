@@ -1,3 +1,15 @@
+## Current: native VBUS ADC path implemented, originals verified (2026-10-21)
+
+AndroidnormalIIOdriverreferencewhilePCattached: device2MT6379ADC channel1CHGVINraw4661/scale1000, channel11PDVBUSraw4647/scale1000; boot_completed1. LiveDaliADCno replace-chgvin, chargeruses1. Thus channelindex/endian/mVunitsprimarysourceplusstockmeasurementsconfirmed. TCPCIvoltagecallbackhasTODOandnative0 despiteCC02/power0c.
+
+Patch0100nativePDVBUS11+CHGVIN1oneshotsinsideexistingpowerlock, SID14CONFG2=14f requiresidleexact0, triggeronly1/11, sleep5ms+bounded10x100uspolltoidle, REPORT_CH155low5select/save/restore, wait1ms, BE16at156/157 rawmV. NoCONFG1/VBATMON/ZCV/protectionchanges. Conversion/mux/readbackfailureslatchADCrefusalforboot; sourceoffstillindependent. FreshPDVBUSvalueusedforsameabsence/rise/high/lowguards,CHGVINandlegacyTCPCIloggedforcomparison. No threshold/leaseweakening. Final2/2actualarm64objectcompilesPASS/exactbaselineapplycheckPASS; commit/fullCI/hardwareverificationnext. Fulloriginalpairremainsrestored/physicalverified,noactivetrial.
+
+## Current: CC wake/attach/source sequence works; voltage reader unresolved, originals verified (2026-10-21)
+
+Photo144332 inspectedupright: initialW1Cconfirmed; TCPChandoffSYS1=12/SYS2=03,wakeSYS1=32/SYS2=03; fixedRp, SC8585idle85/a0/control00/mode00/present08, reverse1:1/manualACDRVprepareverified. 5V500mAOTGenablereadback, tick10/state2 CC02,power0c (VBUSpresent+detect), OTG61, VBUSrawreader0mV, role05/sys132/sys203. Endingstate2 then **VBUS rise timeout**, NOTsource_status_invalid. CleanupSC8585beforestatecontrol20/mode06/present70, restoreverified/I2Cscopedrestore, TCPCwakecleanuprestored; charger/CP/rolerestored, final0mVvalid1OTG60. Thus nativeCCwake/attach/controlsequencing+registercleanupwork; no independent5Vmeasurement/USBhostproof. Do NOTmisreadpower0c as0a; rawTCPCvoltagereaderalwayszero.
+
+Fulloriginalinit_boot_bthenboot_brestoredOKAY, Androiddali/_b/completed1/root andbothfullphysicaloriginalSHA256 VERIFIED. Noactivecustomtrial/pendingrestore. PrimaryMT6379get_vbus_voltageexplicitTODO(low10bits*25), needauditrealchargerIIOADC(VBUS/VUSB) beforeconcludingactualboostfailureorlooseningvoltageguard. NextnativeADCobservationpathwithexactvendorregs/scaling/serialization/cleanup; actualsource5Vstillunconfirmed.
+
 ## ACTIVE scoped CC detection wake trial — original restoration PENDING (2026-10-21)
 
 CI39556194747/7a0d69e fullverifiedpair: immediateAndroidoriginalphysicalhash/root/model/_b/completed +hostbackup/candidate +fastbootidentity/unlocked/64+8MiBsizechecksallPASS. Temporaryinit_boot_bthenboot_bflashesbothOKAY/rebootrequested. Authoritativeignored `shim/out-dali/usb-ccwake-39556194747/trial-state.json` trial_rebooted. TolduserNOWearlyswapPCtoOTGbeforeprompt, observe1minute/photoTCPC_handoff/detectionwake/CC/CP/VBUS/end/cleanup, thenmanualfastboot+PCreconnect. NewscopedTCPCshipping/osc/VBUSdetwakehardwareUNVERIFIED; priorW1C/RpworkbutCC00attachtimeout. Sourcepowerstillunproven.

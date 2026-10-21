@@ -184,6 +184,34 @@ read/write/cleanup is reported explicitly. This does not program PD,
 DRP toggling, USB PHY, thresholds, resets or protection masks. Whether
 this explains the open CC observation is still hardware-unverified.
 
+### CC wake and source control verified; TCPCI voltage remains zero
+
+Photo144332 from CI39556194747/7a0d69e confirms SYSCTRL1 `12` to `32`,
+SYSCTRL2 `03`, CC=`02`, successful SC8585 reverse1:1/manual preparation
+and MT6379 OTG enable. During voltage rise, TCPCI power=`0c` (VBUS presence
+and detection enabled), OTG=`61`, but its voltage register still reads0mV.
+The exact ending is `VBUS rise timeout`. Charger, CP, role and detection
+control restoration were logged and original Android partitions physically
+restored and hash-verified afterward. This is source-control proof, not
+an independently measured5V or USB enumeration milestone.
+
+The vendor TCPCI voltage callback is marked TODO. The actual
+[MT6379 IIO ADC driver](https://github.com/MiCode/mtk_kernel_device_modules/blob/e45c3199537fbba9aae5fb06c31fc8dbd3c1dcee/drivers/iio/adc/mt6379-adc.c)
+uses single conversions at14f, report selector155, and a big-endian16-bit
+result at156/157. Voltage raw units are mV. Dali's live DT has no
+`replace-chgvin`; its charger consumes channel1 CHGVIN. Channel11 is
+PDVBUS at the Type-C side. On original Android with PC power, ordinary
+IIO reads returned CHGVIN4661mV and PDVBUS4647mV, both scale1000 to uV.
+
+Patch0100 samples both channels under the native power client's lock.
+Only idle conversions are adopted; conversion completion is bounded,
+the prior report selector is restored, and any failure permanently
+blocks ADC reuse until reboot. Battery monitoring, ZCV and protection
+configuration are untouched. PDVBUS supplies the existing absence/rise/
+high/low voltage guards, with the same thresholds and lease; CHGVIN and
+legacy TCPCI values are logged for comparison. The native ADC path is
+hardware-unverified until its next trial.
+
 ## Hardware facts
 
 Live stock Android FDT, cross-checked against MiCode's device-module source
