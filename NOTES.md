@@ -1,4 +1,14 @@
-## ACTIVE USB PMIC TRIAL — original restoration PENDING (2026-10-21)
+## Current: USB PMIC read-only stage verified; originals restored (2026-10-21)
+
+Photo125352 confirms native shared-PMIF MT6379 status sampling through sample90 and `bounded read-only capture ended`, without visible transaction errors. All reported snapshots: role=0a, cc=10, power=08, otg=60, vrt=14, rx=60. Memory md0 mount/BSD init/custom static PID1 exec and 24-byte heartbeat writes still work after RTC migration. Passing BSD clock initialization supports shared RTC operation; explicit hardware UTC banner is absent from this photo, so UTC accuracy was not independently rechecked. Actual OTG attachment during this trial is unconfirmed; no XNU USB enumeration/host/root support claimed.
+
+Vendor TCPCI header: role0a has DRP disabled and Rd/Rd; CC10 reports both CC status fields zero and no toggling; power08 has VBUS detection enabled but VBUS-present/source flags clear. Charger TOP2=60 has OTG enable bit0 clear. Raw reports do not measure physical connector voltage. `bounded ... ended` is the intentional 90-sample limit, not an error or proof kernel stopped. Latest rows are at TOP after framebuffer wrap; lower PID1 rows are older.
+
+**Original restoration and physical readback VERIFIED:** helper recover restored full init_boot_b then boot_b; Android boot_completed1/root/dali/slot_b and both full physical SHA256 match original backups. Authoritative ignored `shim/out-dali/usbpmic-39544763251/trial-state.json` = originals_verified, USBPMIC/sharedPMIF/root/PID1 flags recorded. No active trial/pending restore. No userdata/UFS/GPT changes. USB16GiB media remains written/readback verified with original file+metadata backup.
+
+Next: native board I2C5/SC858x charge-pump transport and Type-C/VBUS/repeater/XSphy host transitions, then xHCI DMA/BOT/read-only block root. Preserve safe attach/source detection, charger ADC/protected sequence and cleanup. Current driver only reads PMIC peripherals. Source patch0093 built at6960bca, CI39544763251; no rebuild or trial needed just to interpret this photo.
+
+## Historical: USB PMIC trial before verified recovery (2026-10-21)
 
 Currentpair `shim/out-dali/usbpmic-39544763251/`, manifest **trial_rebooted**. FreshimmediateAndroidoriginalphysical64+8MiBhashes/root/model/slot/completed +hostbackup/candidate +fastbootidentity/unlocked/sizesallverified. CI39544763251 readonlyUSBPMIC/sharedPMIFRTC pairinit_boot_b thenboot_bwritesOKAY/rebootOKAY. UseraskedDaliRTC/PMIF/USBPMICTCPCID+rolephotos, optionalOTG20sec, thenmanualfastbootandreconnectPC. No hardwareoutcomeyet. USBhost/storageNOTimplemented.
 

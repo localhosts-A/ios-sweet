@@ -10,13 +10,40 @@ controller. A root image on a USB stick alone does not add this support.
 The first native platform stage now shares PMIF channel2 between RTC and USB
 under one transaction lock. `daliusb=1` enables an MT6379 identity check and
 a bounded read-only Type-C/charger/repeater status service. It does not
-switch roles, enable connector power or touch a gated xHCI block. Local
-compilation has passed; hardware verification of this new stage is pending.
+switch roles, enable connector power or touch a gated xHCI block. The first hardware trial completed all 90 status samples without a visible
+transaction error; the memory-root static PID1 also continued to run.
+The original boot/init_boot partitions were then restored and their full
+physical SHA256 values verified from rooted Android.
 
 The intended path is the phone's internal boot/init_boot loader, then the
 native Dali USB host controller, a USB mass-storage block device and its HFSX
 root. Cold boot directly from a stick through the stock bootloader has not
 been established. Keep the original boot/init_boot pair and recovery path.
+
+## Verified native PMIC observation
+
+Photo125352 from the CI39544763251 trial shows samples1,10,...90 with
+`role=0a cc=10 power=08 otg=60 vrt=14 rx=60`, followed by
+`bounded read-only capture ended`. The newest rows appear at the top after
+framebuffer wrap. The end message is the intentional sampling bound.
+Memory-root mount, BSD init, custom PID1 exec and periodic console writes
+also completed. The UTC banner itself is outside this photo.
+
+Using the exact vendor TCPCI and charger definitions:
+
+| Report | Interpretation |
+| --- | --- |
+| ROLE_CTRL `0a` | DRP disabled, both CC terminations Rd (sink configuration) |
+| CC_STATUS `10` | Not toggling, CC1 and CC2 status fields both zero/open |
+| POWER_STATUS `08` | VBUS detection enabled, VBUS-present/source status bits clear |
+| CHG_TOP2 `60` | Regulator OTG enable bit0 clear |
+| Repeater `vrt=14 rx=60` | Raw configuration observations; not link/USB enumeration evidence |
+
+These are controller reports, not an independent voltage measurement.
+Attachment of the OTG adapter during this XNU trial was not confirmed by
+the user. Do not infer a broken adapter from these values: the current
+service never enables source mode. Shared PMIF reads are now demonstrated;
+Type-C source policy, power routing and USB host/storage remain unfinished.
 
 ## Hardware facts
 
@@ -76,6 +103,7 @@ All paths below are within
 - `drivers/misc/mediatek/extcon/extcon-mtk-usb.c`
 - `drivers/power/supply/mt6379-charger.{c,h}`
 - `drivers/misc/mediatek/typec/tcpc/tcpc_mt6379.c`
+- [TCPCI register and bit definitions](https://github.com/MiCode/mtk_kernel_device_modules/blob/e45c3199537fbba9aae5fb06c31fc8dbd3c1dcee/drivers/misc/mediatek/typec/tcpc/inc/std_tcpci_v10.h)
 
 The vendor extcon path checks `cp_master`, programs reverse charge-pump mode
 and ACDRV/gates, and controls the MT6379 regulator. The regulator enable path
@@ -125,8 +153,9 @@ the presence of an image or a partially written filesystem as success.
 
 1. Compare Android device/host baselines and port domain/clock, Type-C/VBUS
    and repeater transitions with bounded failure and shutdown cleanup.
-2. Coordinate PMIF/SPMI ownership with the existing RTC driver; do not race
-   independent users of AP software channel2.
+2. Keep the now-verified shared PMIF/SPMI lock for RTC and USB clients.
+   Add board I2C5/SC858x charge-pump support required by the source path;
+   do not bypass the charger ADC checks or protected-register sequence.
 3. Implement xHCI DMA mapping/coherency, rings, completion and port events.
 4. Enumerate the device and implement mass-storage BOT/SCSI reads, including
    reset recovery, bounded retries and media removal handling.
