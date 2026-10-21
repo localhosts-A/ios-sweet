@@ -1,0 +1,323 @@
+diff --git a/iokit/Kernel/arm/DaliUSBHost.cpp b/iokit/Kernel/arm/DaliUSBHost.cpp
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -1,10 +1,8 @@
+-/* Dali USB host handoff observation, not an xHCI driver.
+- * Primary source: MiCode device modules e45c319, live Dali FDT,
+- * mtk-scpsys-mt6991-spm.c, mtk-scpsys.c, clk-mt6991.c,
+- * mtu3{_plat,_host,_hw_regs}.c/h, phy-mtk-xsphy.c.
+- * Standard xHCI capability/operational register layout: Linux v6.6 xhci.h.
+- * Read AO power/clock/bus state before touching the switchable USB region.
+- * Never enable a domain, clock, PHY, port, interrupt or DMA engine here.
++/* Dali USB host power-up and bounded xHCI capability observation, not an
++ * xHCI driver. Primary source: MiCode device modules e45c319 and live Dali
++ * FDT. Acquire the audited MTU3 v2 SPM request, pulse IP reset, release only
++ * host PDN, and read capabilities only after clock-ready status. Then restore
++ * host/device PDN and release SPM. No PHY tuning, port writes, IRQ or DMA.
+  */
+ #include <pexpert/arm64/board_config.h>
+ #if defined(SWEET)
+@@ -36,6 +34,34 @@
+     ~ReadMapping() { OSSafeReleaseNULL(map); OSSafeReleaseNULL(memory); }
+ };
+ 
++class WriteMapping {
++    IOMemoryDescriptor *memory = nullptr;
++    IOMemoryMap *map = nullptr;
++    vm_offset_t io = 0;
++    uint32_t length = 0;
++public:
++    bool open(uint64_t address, uint32_t size) {
++        length = size;
++        memory = IOMemoryDescriptor::withPhysicalAddress(address, size, kIODirectionInOut);
++        map = memory ? memory->map(kIOMapInhibitCache) : nullptr;
++        if (map) { io = map->getVirtualAddress(); }
++        return io != 0;
++    }
++    uint32_t read(uint32_t offset) const {
++        if (!io || (offset & 3) || length < 4 || offset > length - 4) { return ~0U; }
++        uint32_t value = *(volatile const uint32_t *)(io + offset);
++        __asm__ volatile("dmb oshld" ::: "memory");
++        return value;
++    }
++    void write(uint32_t offset, uint32_t value) const {
++        if (!io || (offset & 3) || length < 4 || offset > length - 4) { return; }
++        __asm__ volatile("dmb oshst" ::: "memory");
++        *(volatile uint32_t *)(io + offset) = value;
++        __asm__ volatile("dsb sy" ::: "memory");
++    }
++    ~WriteMapping() { OSSafeReleaseNULL(map); OSSafeReleaseNULL(memory); }
++};
++
+ /* Both power ACKs and de-isolated, released reset, ungated domain clock.
+  * SSUSB P0 additionally has SRAM PDN/ACK bits8/12, both must be clear.
+  */
+@@ -43,12 +69,31 @@
+     uint32_t mask = 0xc000001fU | (sram ? 0x1100U : 0U);
+     return (value & mask) == 0xc000000dU;
+ }
+-}
+-
+-void dali_usb_host_observe()
++
++bool waitBits(const WriteMapping &m, uint32_t offset, uint32_t mask,
++    uint32_t expected, unsigned tries, unsigned delayUs) {
++    for (unsigned i = 0; i < tries; ++i) {
++        if ((m.read(offset) & mask) == expected) { return true; }
++        IODelay(delayUs);
++    }
++    return false;
++}
++
++bool setResources(WriteMapping &ip, uint32_t saved, bool on) {
++    constexpr uint32_t requestMask = 0x5f; /* MTU3 v2: SRC/INFRA/APSRC/VRF18/EMI */
++    uint32_t value = ip.read(0xe0);
++    if (value == ~0U) { return false; }
++    value = (value & ~requestMask) | (on ? requestMask : (saved & requestMask));
++    ip.write(0xe0, value);
++    uint32_t expected = on ? requestMask : (saved & requestMask);
++    return waitBits(ip, 0xe8, requestMask, expected, 200, 100);
++}
++}
++
++void dali_usb_host_observe(bool hwrscsV2, bool vusbAlwaysOn)
+ {
+     if (!ml_get_interrupts_enabled() || ml_at_interrupt_context()) { return; }
+-    kprintf("DALI HOST: read-only handoff begin; no PHY/controller/DMA writes\n");
++    kprintf("DALI HOST: guarded MTU3 v2 host power-up begin; no PHY/port/DMA\n");
+     ReadMapping spm, bus, vlp, top;
+     if (!spm.open(0x1c004000, 0x1000) || !bus.open(0x1c00d000, 0x1000) ||
+         !vlp.open(0x1c016000, 0x1000) || !top.open(0x10000000, 0x800)) {
+@@ -92,54 +137,93 @@
+     kprintf("DALI HOST: IPPC cap=%08x hw=%08x sub=%08x U2=%08x U3=%08x\n",
+         cap, hw, sub, ippc.read(0x50), ippc.read(0x30));
+     kprintf("DALI HOST: SPM request=%08x ack=%08x\n", ippc.read(0xe0), ippc.read(0xe8));
+-    /* Same hardware IDs and port counts as the stock Android host capture. */
+-    if (hw != 0x20180724 || sub != 0x10090000 || cap != 0x101 || (ctrl0 & 1)) {
+-        kprintf("DALI HOST: IPPC identity/reset rejected; deeper reads skipped\n"); return;
+-    }
+-    /* IPPC is accessible before the MAC clocks finish coming out of reset. */
+-    if ((sts1 & 0x501U) != 0x501U || !(sts2 & 1)) {
+-        kprintf("DALI HOST: PHY/xHCI reads skipped MAC clocks not ready\n"); return;
+-    }
+-    ReadMapping phy;
+-    if (phy.open(0x16730000, 0x400)) {
+-        kprintf("DALI HOST: PHY acr0=%08x acr6=%08x dtm0=%08x dtm1=%08x\n",
+-            phy.read(0x300), phy.read(0x318), phy.read(0x368), phy.read(0x36c));
+-    } else { kprintf("DALI HOST: PHY mapping failed\n"); }
+-    if ((ctrl1 & 1) || !(sts1 & 0x800)) {
+-        kprintf("DALI HOST: xHCI reads skipped host powered down/reset\n"); return;
+-    }
+-    ReadMapping xhci;
+-    if (!xhci.open(0x16700000, 0x1000)) {
+-        kprintf("DALI HOST: xHCI mapping failed\n"); return;
+-    }
+-    uint32_t version = xhci.read(0), hcs1 = xhci.read(4), hcs2 = xhci.read(8);
+-    uint32_t hcc1 = xhci.read(0x10), doorbell = xhci.read(0x14), runtime = xhci.read(0x18);
+-    unsigned op = version & 0xff, ports = hcs1 >> 24;
+-    unsigned slots = hcs1 & 0xff, intrs = (hcs1 >> 8) & 0x7ff;
+-    unsigned rev = version >> 16;
+-    kprintf("DALI HOST: xHCI cap=%08x hcs1=%08x hcs2=%08x hcc1=%08x\n",
+-        version, hcs1, hcs2, hcc1);
+-    /* Validate all device-derived offsets before the first operational read. */
+-    if (rev < 0x100 || rev > 0x120 || op < 0x20 || op > 0x80 || (op & 3) ||
+-        !ports || ports > 32 || !slots || !intrs || intrs > 1024 ||
+-        op + 0x400U + ports * 0x10U > 0x1000U ||
+-        (doorbell & 3) || doorbell < 0x20 || doorbell > 0xffc ||
+-        (runtime & 0x1f) || runtime < 0x20 || runtime > 0xfe0) {
+-        kprintf("DALI HOST: xHCI capability bounds rejected\n"); return;
+-    }
+-    kprintf("DALI HOST: xHCI AC64=%u context=%u slots=%u ports=%u db=%x rt=%x\n",
+-        hcc1 & 1, (hcc1 & 4) ? 64U : 32U, slots, ports, doorbell, runtime);
+-    uint32_t cmd = xhci.read(op), sts = xhci.read(op + 4);
+-    kprintf("DALI HOST: xHCI cmd=%08x sts=%08x pages=%08x config=%08x\n",
+-        cmd, sts, xhci.read(op + 8), xhci.read(op + 0x38));
+-    if (cmd & 1 || !(sts & 1)) {
+-        kprintf("DALI HOST: inherited xHCI running; untouched, not adopted\n");
+-    }
+-    for (unsigned i = 0; i < ports; ++i) {
+-        uint32_t port = xhci.read(op + 0x400 + i * 0x10);
+-        kprintf("DALI HOST: port%u sc=%08x connected=%u enabled=%u speed=%u\n",
+-            i + 1, port, port & 1, (port >> 1) & 1, (port >> 10) & 0xf);
+-    }
+-    kprintf("DALI HOST: read-only handoff complete; enumeration not started\n");
++    /* Live Dali DTS sets HWRECS v2 and VUSB regulator always-on. Do not
++     * invent rail policy or take ownership of an already-running controller.
++     */
++    if (!hwrscsV2 || !vusbAlwaysOn || hw != 0x20180724 || sub != 0x10090000 ||
++        cap != 0x101 || (ctrl0 & ~1U) != 0x10411020 ||
++        (ctrl1 & ~1U) != 0 || (ctrl2 & ~1U) != 0 || !(ctrl1 & 1) ||
++        !(ctrl2 & 1)) {
++        kprintf("DALI HOST: policy/identity/controller ownership rejected\n"); return;
++    }
++    uint32_t oldRequest = ippc.read(0xe0), oldAck = ippc.read(0xe8);
++    if ((oldRequest & 0x7f00U) || (oldRequest & 0x5fU) || (oldAck & 0x5fU)) {
++        kprintf("DALI HOST: pre-existing SPM request/owner rejected\n"); return;
++    }
++    WriteMapping ip;
++    if (!ip.open(0x16703e00, 0x100)) {
++        kprintf("DALI HOST: writable IPPC mapping failed\n"); return;
++    }
++    /* Match MTU3 HWRECS v2 sequence. One 20ms bounded SPM request. */
++    ip.write(0xe0, oldRequest | 0x5fU);
++    if (!waitBits(ip, 0xe8, 0x5fU, 0x5fU, 200, 100)) {
++        ip.write(0xe0, oldRequest);
++        (void)waitBits(ip, 0xe8, 0x5fU, 0, 200, 100);
++        kprintf("DALI HOST: SPM v2 request ACK timeout; USB IP untouched\n"); return;
++    }
++    IODelay(2000);
++    /* MTU3 Linux driver pulses the whole IP reset, then requests host power. */
++    uint32_t resetValue = ip.read(0);
++    ip.write(0, resetValue | 1U);
++    IODelay(1);
++    ip.write(0, resetValue & ~1U);
++    uint32_t deviceValue = ip.read(8);
++    ip.write(8, deviceValue | 1U); /* keep device/gadget IP powered down */
++    uint32_t hostValue = ip.read(4);
++    ip.write(4, hostValue & ~1U); /* host IP on, ports stay disabled */
++    uint32_t afterCtrl0 = ip.read(0), afterCtrl1 = ip.read(4), afterCtrl2 = ip.read(8);
++    kprintf("DALI HOST: MTU3 init ctrl=%08x/%08x/%08x SPM=%08x/%08x\n",
++        afterCtrl0, afterCtrl1, afterCtrl2, ip.read(0xe0), ip.read(0xe8));
++    if ((afterCtrl0 & 1) || (afterCtrl1 & 1) || !(afterCtrl2 & 1)) {
++        ip.write(4, ctrl1);
++        ip.write(8, ctrl2);
++        (void)waitBits(ip, 0x10, 1U << 30, 1U << 30, 1000, 100);
++        bool released = setResources(ip, oldRequest, false);
++        kprintf("DALI HOST: control readback rejected; SPM restore=%u\n", released);
++        return;
++    }
++    constexpr uint32_t clockMask = 0xd01U; /* SYSPLL/REF/SYS125/XHCI */
++    bool clockReady = waitBits(ip, 0x10, clockMask, clockMask, 200, 100);
++    uint32_t liveSts1 = ip.read(0x10), liveSts2 = ip.read(0x14);
++    kprintf("DALI HOST: powered clocks=%u sts=%08x/%08x\n", clockReady, liveSts1, liveSts2);
++    if (clockReady && (liveSts2 & 1U)) {
++        ReadMapping phy;
++        if (phy.open(0x16730000, 0x400)) {
++            kprintf("DALI HOST: PHY acr0=%08x acr6=%08x dtm0=%08x dtm1=%08x (observe only)\n",
++                phy.read(0x300), phy.read(0x318), phy.read(0x368), phy.read(0x36c));
++        }
++        ReadMapping xhci;
++        if (xhci.open(0x16700000, 0x1000)) {
++            uint32_t version = xhci.read(0), hcs1 = xhci.read(4), hcs2 = xhci.read(8);
++            uint32_t hcc1 = xhci.read(0x10), doorbell = xhci.read(0x14), runtime = xhci.read(0x18);
++            unsigned op = version & 0xff, ports = hcs1 >> 24;
++            unsigned slots = hcs1 & 0xff, intrs = (hcs1 >> 8) & 0x7ff;
++            unsigned rev = version >> 16;
++            kprintf("DALI HOST: xHCI cap=%08x hcs=%08x/%08x hcc=%08x\n",
++                version, hcs1, hcs2, hcc1);
++            if (rev >= 0x100 && rev <= 0x120 && op >= 0x20 && op <= 0x80 && !(op & 3) &&
++                ports && ports <= 32 && slots && intrs && intrs <= 1024 &&
++                op + 0x400U + ports * 0x10U <= 0x1000U &&
++                !(doorbell & 3) && doorbell >= 0x20 && doorbell <= 0xffc &&
++                !(runtime & 0x1f) && runtime >= 0x20 && runtime <= 0xfe0) {
++                kprintf("DALI HOST: AC64=%u context=%u slots=%u ports=%u\n",
++                    hcc1 & 1, (hcc1 & 4) ? 64U : 32U, slots, ports);
++                uint32_t cmd = xhci.read(op), sts = xhci.read(op + 4);
++                kprintf("DALI HOST: xHCI cmd=%08x sts=%08x pages=%08x\n",
++                    cmd, sts, xhci.read(op + 8));
++            } else { kprintf("DALI HOST: xHCI capability bounds rejected\n"); }
++        }
++    }
++    /* Return host Pdn and device Pdn to the observed firmware state before
++     * releasing SPM. No port selector, PHY tuning, IRQ, xHCI or DMA action.
++     */
++    ip.write(4, ctrl1);
++    ip.write(8, ctrl2);
++    bool asleep = waitBits(ip, 0x10, 1U << 30, 1U << 30, 1000, 100);
++    bool released = asleep && setResources(ip, oldRequest, false);
++    kprintf("DALI HOST: host handoff cleaned sleep=%u SPMrestore=%u\n", asleep, released);
++    if (!asleep || !released) {
++        kprintf("DALI HOST: controller left in safe powered state; reboot required\n");
++    }
+ }
+ #endif
+diff --git a/iokit/Kernel/arm/DaliUSBHost.h b/iokit/Kernel/arm/DaliUSBHost.h
+--- a/iokit/Kernel/arm/DaliUSBHost.h
++++ b/iokit/Kernel/arm/DaliUSBHost.h
+@@ -1,8 +1,8 @@
+ #ifndef DALI_USB_HOST_H
+ #define DALI_USB_HOST_H
+-/* Read-only handoff observation; caller holds the DaliUSBPower lock and has
+- * just confirmed a debounced source attachment and a fresh 4.4..5.5V ADC.
+- * No controller/PHY/domain/clock/IRQ/DMA writes are performed.
++/* Caller holds the DaliUSBPower lock after debounced source attachment and
++ * a fresh 4.4..5.5V ADC. Uses only live-DT-validated MTU3 v2/always-on VUSB33
++ * policy. Any host resources acquired are released before return when asleep.
+  */
+-void dali_usb_host_observe();
++void dali_usb_host_observe(bool hwrscsV2, bool vusbAlwaysOn);
+ #endif
+diff --git a/iokit/Kernel/arm/DaliUSBPower.cpp b/iokit/Kernel/arm/DaliUSBPower.cpp
+--- a/iokit/Kernel/arm/DaliUSBPower.cpp
++++ b/iokit/Kernel/arm/DaliUSBPower.cpp
+@@ -402,7 +402,7 @@
+         if ((power & 4) && mv >= 4400 && mv <= 5500) {
+             state = Powered; stateTicks = 0; stateStartedMs = physicalMs();
+             kprintf("DALI OTG: VBUS valid %umV; connector source confirmed, USB host not started\n", mv);
+-            if (hostObserve) { dali_usb_host_observe(); }
++            if (hostObserve) { dali_usb_host_observe(hostHwrscsV2, hostVusbAlwaysOn); }
+         } else if (now - stateStartedMs >= 1000) {
+             finishLocked("VBUS rise timeout"); return false;
+         }
+@@ -414,12 +414,14 @@
+     return true;
+ }
+ 
+-bool DaliUSBPower::init(bool observeHost)
++bool DaliUSBPower::init(bool observeHost, bool hwrscsV2, bool vusbAlwaysOn)
+ {
+     uint64_t frequency;
+     __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(frequency));
+     if (frequency != 13000000) { return false; }
+     hostObserve = observeHost;
++    hostHwrscsV2 = hwrscsV2;
++    hostVusbAlwaysOn = vusbAlwaysOn;
+     lock = IOLockAlloc();
+     return lock != nullptr;
+ }
+diff --git a/iokit/Kernel/arm/DaliUSBPower.h b/iokit/Kernel/arm/DaliUSBPower.h
+--- a/iokit/Kernel/arm/DaliUSBPower.h
++++ b/iokit/Kernel/arm/DaliUSBPower.h
+@@ -16,7 +16,7 @@
+     uint8_t savedSys1 = 0, savedSys2 = 0;
+     bool tcpcTouched = false;
+     bool adcFault = false;
+-    bool hostObserve = false;
++    bool hostObserve = false, hostHwrscsV2 = false, hostVusbAlwaysOn = false;
+     unsigned adcReports = 0, previousADCmv = 0;
+     uint64_t startedMs = 0, stateStartedMs = 0;
+     bool roleTouched = false, chargerTouched = false, cpAttempted = false;
+@@ -32,7 +32,7 @@
+     void finishLocked(const char *reason);
+     bool tickLocked();
+ public:
+-    bool init(bool observeHost = false);
++    bool init(bool observeHost = false, bool hwrscsV2 = false, bool vusbAlwaysOn = false);
+     bool tick();
+     void finish(const char *reason);
+     void release();
+diff --git a/iokit/Kernel/arm/DaliUSBPMIC.cpp b/iokit/Kernel/arm/DaliUSBPMIC.cpp
+--- a/iokit/Kernel/arm/DaliUSBPMIC.cpp
++++ b/iokit/Kernel/arm/DaliUSBPMIC.cpp
+@@ -131,7 +131,20 @@
+                 hostRanges[2] != 0x16703e00 || hostRanges[3] != 0x100 ||
+                 hostRanges[4] != 0x16730000 || hostRanges[5] != 0x400) { return false; }
+         }
+-        if (!sourceRequested || !source.init(observeHost)) { return false; }
++        bool hostHwrscsV2 = false, hostVusbAlwaysOn = false;
++        if (observeHost) {
++            OSData *hwrscsData = OSDynamicCast(OSData, provider->getProperty("host-hwrscs-version"));
++            OSData *vusbData = OSDynamicCast(OSData, provider->getProperty("host-vusb33-always-on"));
++            uint32_t hwrscs = 0, vusbPolicy = 0;
++            if (!hwrscsData || hwrscsData->getLength() != sizeof(hwrscs) ||
++                !vusbData || vusbData->getLength() != sizeof(vusbPolicy)) { return false; }
++            memcpy(&hwrscs, hwrscsData->getBytesNoCopy(), sizeof(hwrscs));
++            memcpy(&vusbPolicy, vusbData->getBytesNoCopy(), sizeof(vusbPolicy));
++            hostHwrscsV2 = hwrscs == 2;
++            hostVusbAlwaysOn = vusbPolicy == 1;
++            if (!hostHwrscsV2 || !hostVusbAlwaysOn) { return false; }
++        }
++        if (!sourceRequested || !source.init(observeHost, hostHwrscsV2, hostVusbAlwaysOn)) { return false; }
+     } else if (otg != 0) { return false; }
+     workLoop = IOWorkLoop::workLoop();
+     timer = IOTimerEventSource::timerEventSource(this, timerAction);

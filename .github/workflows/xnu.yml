@@ -167,6 +167,12 @@ jobs:
           grep -Fq 'PE_parse_boot_argn("daliusbhost"' xnu/iokit/Kernel/arm/DaliUSBPMIC.cpp
           grep -Fq 'domainReady(dp, false) && domainReady(p0, true)' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           grep -Fq 'phy.read(0x300), phy.read(0x318), phy.read(0x368), phy.read(0x36c)' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'setResources(ip, oldRequest, false)' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'host-hwrscs-version' xnu/iokit/Kernel/arm/DaliUSBPMIC.cpp
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: SPM v2 request ACK timeout'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: powered clocks='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: host handoff cleaned sleep='
+
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: PWR dp='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: xHCI AC64='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: USB reads skipped domains='
