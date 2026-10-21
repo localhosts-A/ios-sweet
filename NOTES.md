@@ -1,4 +1,10 @@
-## Current: originals recovered; reset health candidate verified (2026-10-22)
+## ACTIVE reset health trial — original restoration PENDING (2026-10-22)
+
+User requests continue after resethealth candidate verified; Android connected. Currentpair `shim/out-dali/usb-reset-health-39634381746/device_pair.py trial` completed successfully: immediate Android root/model/_b/completed/full physical original sizes/SHA256 PASS; fastboot product/unlocked/slot/sizes plus host original/candidate hashes PASS. Temporary init_boot_b then boot_b flashed OKAY and reboot requested. Authoritative ignored manifest is trial_rebooted; CURRENT ORIGINAL RESTORATION PENDING. Previous originals_verified refer only to previous trials. Log research/dali-usb-root/ci-artifacts/run39634381746-trial.log. User instructed early redloader swapOTG/Udisk, photograph healthrejected/startfailedstage/running/MSC and returnPCmanualfastboot. No new hardware result yet.
+
+On return immediately recover this pair's full original init_boot_b then boot_b using device_pair.py recover ABS_PAIR, reboot Android then verify full physical sizes/SHA256. Backupdir intact. No GPT/userdata/Udisk writes. New phaseaware reset health behavior is unverified; no DMA/NoOP/enum/storage/root proof yet. Watchdog120s retained.
+
+## Reset health candidate verification (historical preflight)
 
 Patch0117/source13cc485d4d2e47b5fd2369cf6d9605c4029f14a3 fullCI39634381746 SUCCESS/cache1386/1388=99.86%. Actual31/31 artifact sources byte-identical to native compiled tree, counter/old+new linked markers and full paired headers/segments/entry/RAM/ADT/CPIO/AVB/host-original checks PASS. Prepared `shim/out-dali/usb-reset-health-39634381746`: kernel SHA256ec715e76aba29c4ff39c99b64001caaad0e40e66a3d0ec993a0be3fafda884c0; init_boot73a69f9468d1153a665e98c7bb7831205865197854dba82d17c2da008acb68e7. Unchangedboot/root/ADTprofile and explicitrd=du0/engine/root flags. Payload29289760/11segments/ADT8136/root2024e0000; bootwatchdog120s.
 
