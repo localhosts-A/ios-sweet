@@ -1,0 +1,36 @@
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -112,17 +112,26 @@
+     uint32_t value = (current & ~(kHwrscsForceMask | kHwrscsRequestMask)) |
+         (oldRequest & (kHwrscsForceMask | kHwrscsRequestMask));
+     ip.write(0xe0, value);
+-    bool ack = waitBits(ip, 0xe8, kHwrscsRequestMask,
+-        oldAck & kHwrscsRequestMask, 200, 100);
+     uint32_t after = ip.read(0xe0);
+     bool control = after != ~0U &&
+         (after & (kHwrscsForceMask | kHwrscsRequestMask)) ==
+         (oldRequest & (kHwrscsForceMask | kHwrscsRequestMask));
+-    kprintf("DALI HOST: restore SPM req=%08x ack=%08x saved=%08x/%08x match=%u/%u\n",
+-        after, ip.read(0xe8), oldRequest, oldAck, control, ack);
+-    bool gates = ack && control && setRequestGates(gate, savedGates, false);
+-    kprintf("DALI HOST: restore gates=%u attempted=%u\n", gates, ack && control);
+-    return gates;
++    kprintf("DALI HOST: restore SPM req=%08x ack=%08x saved=%08x/%08x ctrl=%u before gates\n",
++        after, ip.read(0xe8), oldRequest, oldAck, control);
++    /* FORCE_HW_REQ can assert ACK while the temporarily opened request
++     * gates remain enabled (observed ACK=0x0b on Dali). Restore the gate
++     * snapshot before checking the final firmware ACK, otherwise the ACK
++     * guard prevents the gate restoration needed to reach that state.
++     * Host cleanup already cleared/ACKed software requests with the IP
++     * asleep; an early startup-ACK failure calls here with IP untouched.
++     */
++    bool gates = control && setRequestGates(gate, savedGates, false);
++    kprintf("DALI HOST: restore gates=%u attempted=%u\n", gates, control);
++    bool ack = control && waitBits(ip, 0xe8, kHwrscsRequestMask,
++        oldAck & kHwrscsRequestMask, 200, 100);
++    kprintf("DALI HOST: restore ACK req=%08x ack=%08x goal=%08x match=%u\n",
++        ip.read(0xe0), ip.read(0xe8), oldAck, ack);
++    return gates && ack;
+ }
+ 
+ bool releaseResourcesAndRestore(WriteMapping &ip, WriteMapping &gate,

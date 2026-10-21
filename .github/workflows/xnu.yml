@@ -185,6 +185,7 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: reset restore want='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: restore SPM req='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: restore gates='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: restore ACK req='
 
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: PWR dp='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: AC64='
