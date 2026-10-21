@@ -1,0 +1,57 @@
+--- a/iokit/Kernel/arm/DaliXHCI.h
++++ b/iokit/Kernel/arm/DaliXHCI.h
+@@ -26,6 +26,8 @@
+     IOMemoryMap *arenaMap = nullptr;
+     uint8_t *bytes = nullptr;
+     uint64_t physical = 0, blockCount = 0;
++    uint64_t completedShortTRB = 0;
++    unsigned completedShortEndpoint = 0;
+     uint32_t blockBytes = 0, tag = 0;
+     unsigned op = 0, runtime = 0, doors = 0, slot = 0, port = 0;
+     unsigned contextBytes = 0, eventIndex = 0, eventCycle = 1;
+--- a/iokit/Kernel/arm/DaliXHCI.cpp
++++ b/iokit/Kernel/arm/DaliXHCI.cpp
+@@ -90,6 +90,10 @@
+     uint32_t control, bool give) {
+     if (r.index >= 255 || !live()) { return 0; }
+     unsigned offset = r.offset + r.index * sizeof(TRB);
++    /* The exact address becomes a new TD on ring reuse; its new completion
++     * must never be mistaken for a previous MTK short-transfer duplicate.
++     */
++    if (physical + offset == completedShortTRB) { completedShortTRB = 0; }
+     auto *trb = reinterpret_cast<volatile TRB *>(bytes + offset);
+     trb->lo = uint32_t(parameter); trb->hi = uint32_t(parameter >> 32); trb->status = status;
+     publish(); trb->control = control | (give ? r.cycle : (r.cycle ^ 1U)); publish();
+@@ -113,6 +117,17 @@
+             out->lo = t->lo; out->hi = t->hi; out->status = t->status; out->control = control;
+             if (++eventIndex == 256) { eventIndex = 0; eventCycle ^= 1; }
+             wr64(runtime + 0x38, (physical + 0x2000 + eventIndex * 16) | 8U);
++            /* Native xhci-mtk sets XHCI_SPURIOUS_SUCCESS. Suppress only the
++             * extra Success for a previously completed Short Packet TRB,
++             * with its exact endpoint/slot/address. Other events still fail
++             * normal completion validation. submitTRB clears this on reuse.
++             */
++            uint64_t pointer = out->lo | (uint64_t(out->hi) << 32);
++            if (completedShortTRB && ((control >> 10) & 63) == 32 &&
++                (out->status >> 24) == 1 && (control >> 24) == slot &&
++                ((control >> 16) & 31) == completedShortEndpoint && pointer == completedShortTRB) {
++                continue;
++            }
+             return true;
+         }
+         IOSleep(1);
+@@ -150,12 +165,14 @@
+         unsigned code = event.status >> 24;
+         if (shortPointer && kind == 32 && (event.control >> 24) == slot &&
+             ((event.control >> 16) & 31) == endpoint && address == shortPointer && code == 13) {
++            completedShortTRB = address; completedShortEndpoint = endpoint;
+             shortResidual = event.status & 0xffffff; continue;
+         }
+         if (kind != 32 || (event.control >> 24) != slot ||
+             ((event.control >> 16) & 31) != endpoint || address != pointer ||
+             (code != 1 && !(shortAllowed && code == 13))) { break; }
+         if (residual) { *residual = shortResidual ? shortResidual : (event.status & 0xffffff); }
++        if (code == 13) { completedShortTRB = address; completedShortEndpoint = endpoint; }
+         return true;
+     }
+     fail(); ops.log("DALI XHCI: transfer failed endpoint=%u\n", endpoint); return false;

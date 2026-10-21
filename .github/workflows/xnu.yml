@@ -202,6 +202,8 @@ jobs:
           grep -Fq 'dali_usb_host_stop()' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
           grep -Fq 'if (!portRestored)' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           grep -Fq 'first->control ^= 1U;' xnu/iokit/Kernel/arm/DaliXHCI.cpp
+          grep -Fq 'if (physical + offset == completedShortTRB)' xnu/iokit/Kernel/arm/DaliXHCI.cpp
+          grep -Fq '((control >> 16) & 31) == completedShortEndpoint' xnu/iokit/Kernel/arm/DaliXHCI.cpp
           grep -Fq 'arenaMap = memory->map(kIOMapAnywhere | kIOMapInhibitCache)' xnu/iokit/Kernel/arm/DaliXHCI.cpp
           grep -Fq 'if (!(buf_flags(bp) & B_READ)) { error = EROFS;' xnu/bsd/dev/dali_usb_disk.c
           grep -Fq 'usbroot != 1 && PE_parse_boot_argn("rootrw"' xnu/bsd/vfs/vfs_subr.c
