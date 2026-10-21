@@ -220,6 +220,8 @@ jobs:
           grep -Fq 'uint32_t gate = c->ao->read(0);' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           grep -Fq '!(gate & 0x13U)' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: health rejected AO'
+          grep -Fq 'flush_dcache((vm_offset_t) ptoa_64(pp), PAGE_SIZE, TRUE);' xnu/osfmk/arm/pmap/pmap.c
+          if grep -Fq 'flush_dcache((vm_offset_t) (pp << PAGE_SHIFT)' xnu/osfmk/arm/pmap/pmap.c; then exit 1; fi
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI XHCI: stopped/reset; DMA ownership returned'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI MSC: ready blocks='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI ROOT: selected read-only du0'

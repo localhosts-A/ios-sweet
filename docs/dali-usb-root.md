@@ -96,6 +96,18 @@ each engine poll/transfer. Full reset readiness is required before HCRST
 and again after CNR clears, before DMA allocation. The correction still
 needs hardware verification; DMA No-op and USB storage remain unverified.
 
+## High physical address cache synchronization
+
+The independent AO guard candidate completed controller reset, then panicked
+in `phystokv_range` while preparing the uncached arena. The cache attribute
+transition calls `pmap_sync_page_attributes_phys`. Its original expression
+shifted a 32-bit `ppnum_t` before casting, losing address bits above 4 GiB;
+the actual kernel contains `lsl w0, w0, #14`. Patch0119 uses `ptoa_64(pp)` so
+the widening precedes the shift. The locally compiled replacement contains
+`ubfiz x0, x0, #14, #32`, preserving the full page address. Physical RAM range
+checks and uncached mapping remain enabled. DMA execution and storage access
+still need hardware verification.
+
 ## Primary references
 
 - [Intel xHCI1.22 specification](https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/extensible-host-controler-interface-usb-xhci.pdf), sections4/5/6.

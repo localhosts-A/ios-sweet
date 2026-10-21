@@ -1,4 +1,12 @@
-## ACTIVE independent AO reset trial — original restoration PENDING (2026-10-22)
+## Current: controller reset completed; cache PA truncation panic; originals recovered (2026-10-22)
+
+Photo IMG_20261022_005356.jpg now reaches `DALI XHCI: reset complete pages=1 scratch=0`, proving HCRST/CNR/fullpostreset health passed. Then phystokv_range panics illegalPA0x55d0000 (photo), physicalbase0x208000000,size0x13fe00000, arm_vm_init.c406 during arena allocation/cache transition. No ring publication/Run/NoOP/enum/MSC/root evidence. Original full init_boot_bthenboot_b recovered immediately; Androidcompleted/root/dali/model/_b/fullphysicaloriginalsize/SHA256PASS; currentusb-reset-ao39637194159 originals_verified, NO ACTIVE TRIAL/PENDING RECOVERY.
+
+Sourceaudit found pmap_sync_page_attributes_phys uses `(vm_offset_t)(pp << PAGE_SHIFT)` with32-bitppnum_t: shift occurs before64bitcast, discarding highPA bits. This is called during cacheattribute changes (pmap_update_cache_attributes_locked), matching uncached arena transition. Fix must widen before shift, preserve legitimatehighRAM address/range guard; do not bypass panic or guess reconstructedaddress. Check actualkernelinstruction and adjacentPA conversions beforepatch/build. No newdevicewrites/GPT/userdata/Udiskwrites. One lookup used obsoletearm64/pmap.cpath/missingSwiftnm; actualsourcearm/pmap/pmap.c andsystemllvm-nm available.
+
+Patch0119 widenspageaddressvia ptoa_64(pp) beforecacheflush; actualoldkernelinstruction lslw0,w0,#14 confirms32bittruncation; newnativeobject ubfizx0,x0,#14,#32 preservesfullPA. NativepmapARM64compile1/1PASS. Adjacentcache_sync_page/cacheattrpathsuseptoa orwideaddr; nootherrawppshiftinthisfile. ExactactualCI0118patchreplay/fullCIpending. Physicalrangeguard/uncachedDMApolicyunchanged; no actualDMA/USBproof. Oldhypothesistruncationnowinstructionconfirmed, exactsourcecallerstacknotprintedbyphoto.
+
+## Historical independent AO reset trial (recovered)
 
 User requests continue after verifiedcandidate; Androidconnected. Currentpair `shim/out-dali/usb-reset-ao-39637194159/device_pair.py trial` completed: immediate AndroidfullphysicaloriginalSHA256/size/root/model/_b/completed PASS; fastbootproduct/unlocked/slot/sizes/hostoriginalcandidatehashes PASS. Temporaryinit_boot_bthenboot_b flashedOKAY/rebootrequested. Authoritativeignoredmanifesttrial_rebooted; CURRENT ORIGINAL RESTORATION PENDING. Previousoriginals_verifiedonlyhistorical. Logresearch/dali-usb-root/ci-artifacts/run39637194159-trial.log. UsertoldredloaderearlyswapOTG/Udisk, photographXHCIreset/running/healthrejected/startfailedstage/MSC/ROOT, observe~1minute thenPCmanualfastboot. No newhardwareoutcomeyet.
 
