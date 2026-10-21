@@ -1593,3 +1593,10 @@ Patch0126 mirrors the native host path where the previous XNU code diverged: it 
 Phone safety: connected Android verification passed (`dali`, slot `_b`, boot_completed, root); original boot_b/init_boot_b full physical sizes/SHA256 verified by `device_pair.py verify .`. No active trial or pending restore. The direct USB photo still shows `CCS=0`; there has been no USB device enumeration, disk sector read or root mount.
 
 Next: commit/push patch0126 and workflow assertions; run full fork CI; validate actual source and paired image, then prepare the complete candidate for one consolidated OTG/U-disk trial. Do not flash an incomplete candidate.
+
+
+## ACTIVE consolidated MTU3 host-parity trial — original restoration pending (2026-10-22)
+
+Patch `8b184eb` adds the Dali MTU3 native host-init parity and its CI checks. Full CI `39676676815` succeeded (5m32s); actual 32/32 source comparisons, kernel build, source/linked-marker checks, and artifact uploads passed. Local ARM64 syntax compile of `DaliUSBHost.cpp` passed. The paired candidate was packaged and validated: kernel SHA256 `ecd1fef9263c3b5d058c463689385e3c6f29bd6b56c05c947e0e5ceca6dc1a46`; `dali-boot.img` SHA256 `ddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39`; `dali-init_boot.img` SHA256 `381fbd1413b5139c24cf1a6937cdf8ead1f4a0a2d88b9b41fbfa2ef58f212c2a`. Existing 12MiB root and args preserved; AVB, entry, ADT, segments, and CPIO checks passed.
+
+Fresh Android root/slot/model/physical original hashes passed. The authorized single consolidated trial has been started: candidate `shim/out-dali/usb-mtu3-host-parity-39676676815` flashed to `init_boot_b` then `boot_b`, manifest `trial_rebooted`. Original pair restoration is pending fastboot return. User was asked to attach OTG+U-disk, observe about one minute, capture U3/MTU3/xHCI/MSC/ROOT lines, then return to fastboot. No USB hardware result yet; no userdata/GPT/U-disk writes. Restore original `init_boot_b` then `boot_b` and verify physical hashes as soon as the phone returns to fastboot.
