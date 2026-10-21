@@ -1,3 +1,7 @@
+## Current: host observation kernel build in progress (2026-10-21)
+
+Host observation patch0101 committed/pushed725df013ba9f20849d8fe54063c4866114ff45f9; fullcachedCI39561692789 in progress. Candidate shim/out-dali/usb-host-39561692789 staged exactoldboot/root/helpers andupdated verifier; regeneratebaseADT/newhost property atpackaging. Wait24sourcebyte/counter/hostmarkers/fullpairverification before freshphysicalpreflight/trial. Originals remain verified/noactivetrial.
+
 ## Current: host handoff observation implemented; originals verified (2026-10-21)
 
 Patch0101 adds separately opt-in daliusbhost=1 plus exact ADT host-observe-reg to existing bounded source trial. After fresh valid source ADC, once-only read-only AO domain/clock/bus guard, conditionally IPPC IDs/status/SPM request, XSphy registers at300/318/368/36c and xHCI capabilities/AC64/context/port status. Require both domain ACKs/deisolated/reset released/SRAMon, bus unprotected, clock gates/fences ready before switchable reads; host-PDN/reset blocks xHCI reads, capability-derived offsets bounded. No controller/PHY/domain/clock/IRQ/DMA writes, no enumeration yet; source15s/60s leases/voltage/fault guards unchanged. Local3/3 arm64object compilation PASS, exactbaseline patch applies. FullcachedCI/hardwarepending. Originals remain full physical verified/no active trial. Mainlocal tree /tmp/dali-timed-boot/buildtree; base/objects /tmp/dali-usb-host; workdiskTMPDIR/artifacts.
