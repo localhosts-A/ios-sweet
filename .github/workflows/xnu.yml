@@ -199,6 +199,12 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI PP: protocol rev='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI PP: enable port='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI PP: restore port='
+          grep -Fq 'host-u2-native-config' xnu/iokit/Kernel/arm/DaliUSBPMIC.cpp
+          grep -Fq 'PE_parse_boot_argn("daliusbphy"' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI PHY: power/mode ready='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI PHY: UTMI16/host ready='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI PHY: owned controls restored='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI RPTR: handoff chip='
 
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: PWR dp='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: AC64='

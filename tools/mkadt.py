@@ -281,6 +281,8 @@ def build(seed=None, qemu=False, highmem=False, dali=False):
                                  0x16730000, 0x400, 0x16790000, 0x100)),
         ('host-hwrscs-version', u32(2)),
         ('host-vusb33-always-on', u32(1)),
+        # Exact USB0 UTMI width, fixed ref clock, XSphy LPM timings/refclk-sel.
+        ('host-u2-native-config', u32(16, 26000000, 0x19, 0x1e, 0x1e, 1)),
     ])] if dali else []
 
     dali_watchdog = [node('dali-watchdog', [

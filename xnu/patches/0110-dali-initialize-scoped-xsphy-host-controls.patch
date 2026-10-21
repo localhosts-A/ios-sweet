@@ -1,0 +1,352 @@
+--- a/iokit/Kernel/arm/DaliUSBHost.h
++++ b/iokit/Kernel/arm/DaliUSBHost.h
+@@ -4,7 +4,7 @@
+  * a fresh 4.4..5.5V ADC. Uses only live-DT-validated MTU3 v2/always-on VUSB33
+  * policy. Any host resources acquired are released before return when asleep.
+  */
+-void dali_usb_host_observe(bool hwrscsV2, bool vusbAlwaysOn);
++void dali_usb_host_observe(bool hwrscsV2, bool vusbAlwaysOn, bool nativePhyValidated);
+ /* Replay saved diagnostic text after source cleanup, under the same lock. */
+ void dali_usb_host_report();
+ #endif
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -3,11 +3,12 @@
+  * FDT. Acquire the audited MTU3 v2 SPM request, pulse IP reset, release only
+  * host PDN, and read capabilities only after clock-ready status. Then restore
+  * host/device PDN and release SPM. Optional U2 port0 and USB2 PP probes;
+- * no PHY tuning, xHCI engine, IRQ or DMA programming.
++ * firmware trims preserved; no xHCI engine, IRQ or DMA programming.
+  */
+ #include <pexpert/arm64/board_config.h>
+ #if defined(SWEET)
+ #include "DaliUSBHost.h"
++#include "DaliPMIF.h"
+ #include <IOKit/IOLib.h>
+ #include <IOKit/IOMemoryDescriptor.h>
+ #include <machine/machine_routines.h>
+@@ -188,6 +189,107 @@
+     return reset && restoreSpmAndGates(ip, gate, oldRequest, oldAck, savedGates);
+ }
+ 
++/* SoC XSphy basic power/mode controls from the Dali vendor driver. Retain
++ * firmware efuse/eye trims and do not touch frequency-meter or repeater power.
++ * Every allowed field has a pre-write snapshot and exact masked rollback.
++ */
++class ScopedU2Phy {
++    struct Field { uint32_t offset, mask, saved; bool dirty; };
++    static constexpr uint32_t dtm0Mask = (1U << 26) | (1U << 23) | (0x1fU << 17) |
++        (0xfU << 10) | (3U << 6) | (3U << 4) | (1U << 3) | (1U << 2);
++    Field fields[9] = {
++        {0x000, 0xffffff00U, 0, false}, {0x004, 1U << 16, 0, false},
++        {0x300, (7U << 24) | (1U << 5), 0, false},
++        {0x310, 7U << 8, 0, false},
++        {0x318, (3U << 30) | (1U << 25) | (1U << 23) | (1U << 20), 0, false},
++        {0x344, 1U << 5, 0, false}, {0x364, 3U << 18, 0, false},
++        {0x368, dtm0Mask, 0, false},
++        {0x36c, (1U << 16) | (1U << 9) | (1U << 5) | (1U << 4) | 6U, 0, false}
++    };
++    WriteMapping phy;
++    bool saved = false;
++    bool change(uint32_t offset, uint32_t mask, uint32_t value) {
++        if (!saved) { return false; }
++        for (auto &field : fields) {
++            if (field.offset != offset) { continue; }
++            if (mask & ~field.mask) { return false; }
++            uint32_t before = phy.read(offset);
++            if (before == ~0U) { return false; }
++            field.dirty = true; /* Mark before a write that could partially succeed. */
++            phy.write(offset, (before & ~mask) | (value & mask));
++            uint32_t after = phy.read(offset);
++            bool ok = after != ~0U && (after & mask) == (value & mask);
++            if (!ok) { u2Log("DALI PHY: field write failed reg=%03x read=%08x\n", offset, after); }
++            return ok;
++        }
++        return false;
++    }
++public:
++    bool powerOn() {
++        if (!phy.open(0x16730000, 0x400)) { return false; }
++        for (auto &field : fields) {
++            field.saved = phy.read(field.offset);
++            if (field.saved == ~0U) { return false; }
++        }
++        if ((fields[7].saved & (1U << 26)) || (fields[8].saved & (1U << 16))) {
++            u2Log("DALI PHY: UART ownership rejected; untouched\n"); return false;
++        }
++        saved = true;
++        bool ok = change(0x318, 1U << 23, 0) && change(0x300, 1U << 5, 1U << 5);
++        ok = ok && change(0x344, 1U << 5, 1U << 5);
++        if (ok) { IODelay(250); }
++        /* Native FORCE_SUSPENDM pulse, then hand control back to the MAC. */
++        ok = ok && change(0x368, 1U << 18, 1U << 18) && change(0x368, 8, 0) &&
++            change(0x368, 8, 8);
++        if (ok) { IODelay(30); }
++        ok = ok && change(0x368, 1U << 18, 0) && change(0x368, 8, 0) &&
++            change(0x368, dtm0Mask, 0) && change(0x36c, 1U << 16, 0) &&
++            change(0x310, 3U << 8, 0) && change(0x318, (1U << 23) | (1U << 20), 1U << 20) &&
++            change(0x36c, (1U << 5) | (1U << 4) | 4U, (1U << 5) | 4U) &&
++            change(0x300, 7U << 24, 0) &&
++            change(0x318, (3U << 30) | (1U << 25), 1U << 30);
++        if (ok) { IODelay(800); }
++        /* Exact live-DT LPM PLL timings and FS_CR; no efuse/eye overwrite. */
++        ok = ok && change(0x364, 3U << 18, 1U << 18) &&
++            change(0x004, 1U << 16, 1U << 16) && change(0x000, 0xffffff00U, 0x1e1e1900U) &&
++            change(0x310, 7U << 8, 7U << 8) &&
++            change(0x36c, (1U << 9) | 2U, 1U << 9);
++        u2Log("DALI PHY: power/mode ready=%u dtm=%08x/%08x acr=%08x/%08x pll=%08x\n",
++            ok, phy.read(0x368), phy.read(0x36c), phy.read(0x300), phy.read(0x318), phy.read(0x364));
++        return ok;
++    }
++    bool restore() {
++        if (!saved) { return true; } /* Snapshot failed before any write. */
++        bool ok = true;
++        for (unsigned i = 9; i-- > 0;) {
++            auto &field = fields[i];
++            if (!field.dirty) { continue; }
++            uint32_t before = phy.read(field.offset);
++            if (before == ~0U) { ok = false; continue; }
++            phy.write(field.offset, (before & ~field.mask) | (field.saved & field.mask));
++            uint32_t after = phy.read(field.offset);
++            bool matched = after != ~0U && (after & field.mask) == (field.saved & field.mask);
++            if (!matched) { u2Log("DALI PHY: restore failed reg=%03x read=%08x\n", field.offset, after); }
++            ok = ok && matched;
++        }
++        u2Log("DALI PHY: owned controls restored=%u\n", ok);
++        return ok;
++    }
++};
++
++void observeRepeaterHandoff() {
++    static const uint16_t regs[] = {0x000, 0xd00, 0xd03, 0xd12, 0xd89, 0xd8b, 0xd91};
++    uint8_t values[7] = {};
++    uint32_t status = 0;
++    for (unsigned i = 0; i < 7; ++i) {
++        if (!dali_pmif_transfer(14, regs[i], &values[i], false, &status)) {
++            u2Log("DALI RPTR: read failed reg=%03x status=%x; no writes\n", regs[i], status); return;
++        }
++    }
++    u2Log("DALI RPTR: handoff chip=%02x d00=%02x d03=%02x d12=%02x d89=%02x d8b=%02x d91=%02x read-only\n",
++        values[0], values[1], values[2], values[3], values[4], values[5], values[6]);
++}
++
+ /* Identify the sole USB2 port from Supported Protocol capabilities. Never
+  * infer xHCI port order from the physical IPPC U2/U3 numbering.
+  */
+@@ -288,11 +390,11 @@
+ 
+ /* Return whether the original U2 port state is intact, including skips.
+  * This is the MTU3 host-enable port RMW followed by its inverse. The xHCI
+- * engine stays halted; PHY accesses are reads only. A separately requested
+- * PP probe below switches only the protocol-selected USB2 PORTSC power bit.
++ * engine stays halted. Optional native PHY control fields are snapshotted;
++ * the PP probe switches only the protocol-selected USB2 PORTSC power bit.
+  */
+ bool observeU2Port(WriteMapping &ip, const ReadMapping &xhci,
+-    unsigned op, unsigned ports, bool powerProbe) {
++    unsigned op, unsigned ports, bool powerProbe, bool phyProbe) {
+     u2Report.reached = true;
+     uint32_t saved = ip.read(0x50), u3 = ip.read(0x30);
+     uint32_t cmd = xhci.read(op), sts = xhci.read(op + 4);
+@@ -315,8 +417,33 @@
+         saved, wanted, enabled, control);
+     u2Log("DALI U2: MAC ready=%u sts=%08x/%08x\n",
+         ready, ip.read(0x10), ip.read(0x14));
+-    bool ppRestored = true;
++    bool ppRestored = true, nativeReady = true, ckTouched = false;
++    uint32_t savedCK = 0;
++    ScopedU2Phy nativePhy;
+     if (ready) {
++        if (phyProbe) {
++            observeRepeaterHandoff();
++            savedCK = ip.read(0x9c);
++            nativeReady = savedCK != ~0U && hostStillHalted(ip, xhci, op);
++            if (nativeReady) {
++                nativeReady = nativePhy.powerOn() && hostStillHalted(ip, xhci, op);
++                if (nativeReady) {
++                    uint32_t roleBefore = ip.read(0x50);
++                    nativeReady = roleBefore == enabled && ip.read(0x9c) == savedCK;
++                    if (nativeReady) {
++                        ckTouched = true;
++                        ip.write(0x9c, savedCK | 8U); /* Native UTMI16, sole U2 port. */
++                        nativeReady = ip.read(0x9c) == (savedCK | 8U) && hostStillHalted(ip, xhci, op);
++                        if (nativeReady) {
++                            uint32_t role = (roleBefore | (1U << 11)) & ~(1U << 12);
++                            ip.write(0x50, role);
++                            nativeReady = ip.read(0x50) == role;
++                        }
++                    }
++                }
++            }
++            u2Log("DALI PHY: UTMI16/host ready=%u\n", nativeReady);
++        }
+         ReadMapping phy;
+         if (phy.open(0x16730000, 0x400)) {
+             u2Log("DALI U2: PHY acr0=%08x acr4=%08x acr6=%08x dcr1=%08x\n",
+@@ -340,7 +467,23 @@
+                     sample, port + 1, sc, sc & 1U, (sc >> 1) & 1U, (sc >> 10) & 0xfU);
+             }
+         }
+-        if (powerProbe) { ppRestored = observePortPower(ip, xhci, op, ports); }
++        if (powerProbe && nativeReady) { ppRestored = observePortPower(ip, xhci, op, ports); }
++    }
++    bool phyRestored = true;
++    if (phyProbe && ready) {
++        if (ppRestored && hostStillHalted(ip, xhci, op)) {
++            phyRestored = nativePhy.restore();
++            if (ckTouched) {
++                uint32_t current = ip.read(0x9c);
++                if (current != ~0U) { ip.write(0x9c, (current & ~8U) | (savedCK & 8U)); }
++                bool ckRestored = current != ~0U && ip.read(0x9c) == savedCK;
++                phyRestored = phyRestored && ckRestored;
++                u2Log("DALI PHY: UTMI restore=%u read=%08x\n", ckRestored, ip.read(0x9c));
++            }
++        } else {
++            phyRestored = false;
++            u2Log("DALI PHY: restore guard failed; reboot required\n");
++        }
+     }
+     /* Disable/power down the port before the existing host-PDN handshake.
+      * Never release the SPM request if this exact restoration fails.
+@@ -349,23 +492,25 @@
+     uint32_t after = ip.read(0x50);
+     bool restored = after == saved;
+     u2Log("DALI U2: restore want=%08x read=%08x match=%u\n", saved, after, restored);
+-    return restored && ppRestored;
++    return restored && ppRestored && phyRestored;
+ }
+ }
+ 
+-void dali_usb_host_observe(bool hwrscsV2, bool vusbAlwaysOn)
++void dali_usb_host_observe(bool hwrscsV2, bool vusbAlwaysOn, bool nativePhyValidated)
+ {
+     if (!ml_get_interrupts_enabled() || ml_at_interrupt_context()) { return; }
+-    int portProbe = 0, powerProbe = 0;
++    int portProbe = 0, powerProbe = 0, phyProbe = 0;
+     PE_parse_boot_argn("daliusbport", &portProbe, sizeof(portProbe));
+     PE_parse_boot_argn("daliusbpp", &powerProbe, sizeof(powerProbe));
++    PE_parse_boot_argn("daliusbphy", &phyProbe, sizeof(phyProbe));
+     if ((portProbe != 0 && portProbe != 1) || (powerProbe != 0 && powerProbe != 1) ||
+-        (powerProbe && !portProbe)) { return; }
++        (phyProbe != 0 && phyProbe != 1) || (powerProbe && !portProbe) ||
++        (phyProbe && (!powerProbe || !nativePhyValidated))) { return; }
+     bzero(&u2Report, sizeof(u2Report));
+     u2Report.called = true;
+     u2Report.requested = portProbe == 1;
+-    u2Log("DALI HOST: guarded MTU3 v2 host power-up begin; U2 probe=%u PP=%u no DMA\n",
+-        portProbe, powerProbe);
++    u2Log("DALI HOST: guarded MTU3 v2 host power-up begin; U2 probe=%u PP=%u PHY=%u no DMA\n",
++        portProbe, powerProbe, phyProbe);
+     ReadMapping spm, bus, vlp, top;
+     if (!spm.open(0x1c004000, 0x1000) || !bus.open(0x1c00d000, 0x1000) ||
+         !vlp.open(0x1c016000, 0x1000) || !top.open(0x10000000, 0x800)) {
+@@ -530,12 +675,14 @@
+                 uint32_t cmd = xhci.read(op), sts = xhci.read(op + 4);
+                 kprintf("DALI HOST: xHCI cmd=%08x sts=%08x pages=%08x\n",
+                     cmd, sts, xhci.read(op + 8));
+-                if (portProbe == 1) { portRestored = observeU2Port(ip, xhci, op, ports, powerProbe == 1); }
++                if (portProbe == 1) {
++                    portRestored = observeU2Port(ip, xhci, op, ports, powerProbe == 1, phyProbe == 1);
++                }
+             } else { kprintf("DALI HOST: xHCI capability bounds rejected\n"); }
+         }
+     }
+     /* U2 port was restored before returning host/device PDN and SPM.
+-     * No PHY tuning, xHCI engine, IRQ or DMA action.
++     * No xHCI engine, IRQ or DMA action.
+      */
+     ip.write(4, ctrl1);
+     ip.write(8, ctrl2);
+--- a/iokit/Kernel/arm/DaliUSBPower.h
++++ b/iokit/Kernel/arm/DaliUSBPower.h
+@@ -2,7 +2,8 @@
+ #define DALI_USB_POWER_H
+ #include <IOKit/IOLib.h>
+ /* Single built-in Dali client. Tick/finish serialize through an owned lock.
+- * Diagnostic 5V/default-current source only, no PD/VCONN/PHY/xHCI/DMA.
++ * Diagnostic 5V/default-current source and scoped host/PHY setup; no PD,
++ * VCONN, xHCI engine or DMA.
+  */
+ class DaliUSBPower {
+     IOLock *lock = nullptr;
+@@ -17,6 +18,7 @@
+     bool tcpcTouched = false;
+     bool adcFault = false;
+     bool hostObserve = false, hostHwrscsV2 = false, hostVusbAlwaysOn = false;
++    bool hostNativePhyValidated = false;
+     unsigned adcReports = 0, previousADCmv = 0;
+     uint64_t startedMs = 0, stateStartedMs = 0;
+     bool roleTouched = false, chargerTouched = false, cpAttempted = false;
+@@ -32,7 +34,8 @@
+     void finishLocked(const char *reason);
+     bool tickLocked();
+ public:
+-    bool init(bool observeHost = false, bool hwrscsV2 = false, bool vusbAlwaysOn = false);
++    bool init(bool observeHost = false, bool hwrscsV2 = false, bool vusbAlwaysOn = false,
++        bool nativePhyValidated = false);
+     bool tick();
+     void finish(const char *reason);
+     void release();
+--- a/iokit/Kernel/arm/DaliUSBPower.cpp
++++ b/iokit/Kernel/arm/DaliUSBPower.cpp
+@@ -403,7 +403,9 @@
+         if ((power & 4) && mv >= 4400 && mv <= 5500) {
+             state = Powered; stateTicks = 0; stateStartedMs = physicalMs();
+             kprintf("DALI OTG: VBUS valid %umV; connector source confirmed, USB host not started\n", mv);
+-            if (hostObserve) { dali_usb_host_observe(hostHwrscsV2, hostVusbAlwaysOn); }
++            if (hostObserve) {
++                dali_usb_host_observe(hostHwrscsV2, hostVusbAlwaysOn, hostNativePhyValidated);
++            }
+         } else if (now - stateStartedMs >= 1000) {
+             finishLocked("VBUS rise timeout"); return false;
+         }
+@@ -415,7 +417,7 @@
+     return true;
+ }
+ 
+-bool DaliUSBPower::init(bool observeHost, bool hwrscsV2, bool vusbAlwaysOn)
++bool DaliUSBPower::init(bool observeHost, bool hwrscsV2, bool vusbAlwaysOn, bool nativePhyValidated)
+ {
+     uint64_t frequency;
+     __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(frequency));
+@@ -423,6 +425,7 @@
+     hostObserve = observeHost;
+     hostHwrscsV2 = hwrscsV2;
+     hostVusbAlwaysOn = vusbAlwaysOn;
++    hostNativePhyValidated = nativePhyValidated;
+     lock = IOLockAlloc();
+     return lock != nullptr;
+ }
+--- a/iokit/Kernel/arm/DaliUSBPMIC.cpp
++++ b/iokit/Kernel/arm/DaliUSBPMIC.cpp
+@@ -1,7 +1,7 @@
+ /* Dali native USB platform: shared PMIF observations by default; separately
+  * opt-in bounded Type-C source diagnostic via daliotg=1.
+  * MT6379 tcpc_mt6379.c maps standard TCPCI00xx registers to PMIC04xx.
+- * No PHY/xHCI/USB-storage engine is started.
++ * Optional scoped SoC PHY setup; no xHCI/USB-storage engine is started.
+  */
+ #include <pexpert/arm64/board_config.h>
+ #if defined(SWEET)
+@@ -145,7 +145,20 @@
+             hostVusbAlwaysOn = vusbPolicy == 1;
+             if (!hostHwrscsV2 || !hostVusbAlwaysOn) { return false; }
+         }
+-        if (!sourceRequested || !source.init(observeHost, hostHwrscsV2, hostVusbAlwaysOn)) { return false; }
++        int nativePhy = 0;
++        PE_parse_boot_argn("daliusbphy", &nativePhy, sizeof(nativePhy));
++        bool nativePhyValidated = false;
++        if (nativePhy == 1 && observeHost) {
++            OSData *nativeData = OSDynamicCast(OSData, provider->getProperty("host-u2-native-config"));
++            uint32_t config[6] = {};
++            if (!nativeData || nativeData->getLength() != sizeof(config)) { return false; }
++            memcpy(config, nativeData->getBytesNoCopy(), sizeof(config));
++            nativePhyValidated = config[0] == 16 && config[1] == 26000000 &&
++                config[2] == 0x19 && config[3] == 0x1e && config[4] == 0x1e && config[5] == 1;
++            if (!nativePhyValidated) { return false; }
++        } else if (nativePhy != 0) { return false; }
++        if (!sourceRequested || !source.init(observeHost, hostHwrscsV2, hostVusbAlwaysOn,
++            nativePhyValidated)) { return false; }
+     } else if (otg != 0) { return false; }
+     workLoop = IOWorkLoop::workLoop();
+     timer = IOTimerEventSource::timerEventSource(this, timerAction);
