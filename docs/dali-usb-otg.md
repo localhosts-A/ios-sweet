@@ -165,6 +165,25 @@ must succeed and read back zero. It is never retried, and every later or
 additional fault remains fatal. Existing idle/CC debounce and voltage
 checks still precede source enable. Hardware acknowledgement is unverified.
 
+### Initial acknowledgement works; fixed Rp still reports open
+
+Photo142735 from CI39554602650/8cfb5ef confirms the exact initial W1C write
+and zero fault readback. Fixed default Rp was programmed, but CC remained
+`00` throughout the40second attach window; no CP/charger source writes
+occurred. Timeout cleanup restored the original Type-C role. Original
+Android partitions were then restored and both complete physical SHA256
+values verified.
+
+Patch0099 adds the missing vendor detection-wake steps after confirming
+absent VBUS and opening both CC pins: save SYSCTRL1/2 at physical48f/490,
+set SHIPPING_OFF bit5, set SYSCTRL2 BMCIOOSC/VBUSDET and clear LPWR using
+mask0b/value03. Preserve other fields, settle and read back, check VBUS
+again before Rp. Periodic logs guard actual role/SYSCTRL values. After
+confirmed source-off, restore only the changed control bits. Failed
+read/write/cleanup is reported explicitly. This does not program PD,
+DRP toggling, USB PHY, thresholds, resets or protection masks. Whether
+this explains the open CC observation is still hardware-unverified.
+
 ## Hardware facts
 
 Live stock Android FDT, cross-checked against MiCode's device-module source

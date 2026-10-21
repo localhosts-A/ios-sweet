@@ -1,0 +1,149 @@
+diff --git a/iokit/Kernel/arm/DaliUSBPower.cpp b/iokit/Kernel/arm/DaliUSBPower.cpp
+--- a/iokit/Kernel/arm/DaliUSBPower.cpp
++++ b/iokit/Kernel/arm/DaliUSBPower.cpp
+@@ -32,11 +32,19 @@
+     /* Whitelist only the audited role/polarity/power and charger registers. */
+     if (reg != 0x41a && reg != 0x419 && reg != 0x41c && reg != 0x108 &&
+         reg != 0x11c && reg != 0x11d && reg != 0x11e && reg != 0x135 &&
++        reg != 0x48f && reg != 0x490 &&
+         (reg < 7 || reg > 10)) { return false; }
+     uint8_t verify = 0;
+-    if (!dali_pmif_transfer(14, reg, &v, true, &status)) { return false; }
++    bool wrote = dali_pmif_transfer(14, reg, &v, true, &status);
+     /* TM passcode registers are write-only/unlock sequence, not readback. */
+-    return (reg >= 7 && reg <= 10) || (read8(reg, &verify) && verify == v);
++    bool sequence = reg >= 7 && reg <= 10;
++    bool readback = wrote && !sequence && read8(reg, &verify);
++    bool ok = wrote && (sequence || (readback && verify == v));
++    if (!ok && writeErrors++ < 4) {
++        kprintf("DALI OTG: write failed reg=%04x set=%02x got=%02x wrote=%u read=%u pmif=%08x\n",
++            reg, v, verify, wrote, readback, status);
++    }
++    return ok;
+ }
+ 
+ bool DaliUSBPower::update(uint16_t reg, uint8_t mask, uint8_t v)
+@@ -106,6 +114,30 @@
+     return cleared;
+ }
+ 
++bool DaliUSBPower::wakeDetection()
++{
++    /* mt6379_tcpc_init sets SYSCTRL1.SHIPPING_OFF; its exit-low-power path
++     * sets SYSCTRL2 BMCIOOSC_EN|VBUSDET_EN and clears LPWR_EN. PD base=400.
++     * Preserve all other fields, no protocol/DRP/PHY/protection programming.
++     * Caller already verified absent VBUS and opened both CC terminations.
++     */
++    if (!read8(0x48f, &savedSys1) || !read8(0x490, &savedSys2)) { return false; }
++    kprintf("DALI OTG: TCPC handoff sys1=%02x sys2=%02x\n", savedSys1, savedSys2);
++    if ((savedSys1 & 0x20) != 0x20 || (savedSys2 & 0x0b) != 3) {
++        tcpcTouched = true; /* Dirty before any possible write. */
++        if (!(savedSys1 & 0x20) && !update(0x48f, 0x20, 0x20)) { return false; }
++        IOSleep(1); /* Vendor shipping-off settle is1ms. */
++        if ((savedSys2 & 0x0b) != 3 && !update(0x490, 0x0b, 3)) { return false; }
++        IOSleep(1);
++    }
++    uint8_t sys1 = 0, sys2 = 0;
++    bool ok = read8(0x48f, &sys1) && read8(0x490, &sys2) &&
++        (sys1 & 0x20) && (sys2 & 0x0b) == 3;
++    kprintf("DALI OTG: TCPC detection wake %s sys1=%02x sys2=%02x\n",
++        ok ? "confirmed" : "FAILED", sys1, sys2);
++    return ok;
++}
++
+ bool DaliUSBPower::protectedIdle(bool idle)
+ {
+     /* Only this service owns MT6379 test mode; shared PMIF still locks every
+@@ -150,9 +182,9 @@
+     if (state == Finished) { return; }
+     unsigned endingState = (unsigned)state;
+     state = Finished; /* Never rearm automatically after detach/error. */
+-    kprintf("DALI OTG: ending tick=%u state=%u touched role=%u cp=%u charger=%u\n",
+-        ticks, endingState, roleTouched, cpAttempted, chargerTouched);
+-    bool chargerOK = true, cpOK = true, roleOK = true;
++    kprintf("DALI OTG: ending tick=%u state=%u touched role=%u cp=%u charger=%u tcpc=%u\n",
++        ticks, endingState, roleTouched, cpAttempted, chargerTouched, tcpcTouched);
++    bool chargerOK = true, cpOK = true, roleOK = true, tcpcOK = true;
+     bool sourceOffConfirmed = !chargerTouched;
+     if (chargerTouched) {
+         /* Vendor off path enables PP_CV_FLOW_IDLE before regulator-disable.
+@@ -185,6 +217,15 @@
+         bool d = sourceOffConfirmed && write8(0x41a, savedRole);
+         roleOK = a && b && c && d;
+     }
++    if (tcpcTouched) {
++        if (sourceOffConfirmed) {
++            bool a = update(0x490, 0x0b, savedSys2);
++            bool b = update(0x48f, 0x20, savedSys1);
++            tcpcOK = a && b;
++        } else { tcpcOK = false; } /* Keep detection awake if source-off unknown. */
++    }
++    kprintf("DALI OTG: TCPC wake cleanup=%s\n",
++        !tcpcTouched ? "untouched" : tcpcOK ? "restored" : "FAILED");
+     uint8_t cc = 0, power = 0, otg = 0;
+     unsigned mv = 0;
+     bool measured = snapshot(&cc, &power, &otg, &mv);
+@@ -199,7 +240,7 @@
+         reason, !chargerTouched ? "untouched" : chargerOK ? "restored" : "FAILED",
+         !cpAttempted ? "untouched" : cpOK ? "restored" : "FAILED",
+         !roleTouched ? "untouched" : roleOK ? "restored" : "FAILED", mv, measured, otg);
+-    if (!chargerOK || !cpOK || !roleOK) { kprintf("DALI OTG: cleanup incomplete; reboot required\n"); }
++    if (!chargerOK || !cpOK || !roleOK || !tcpcOK) { kprintf("DALI OTG: cleanup incomplete; reboot required\n"); }
+ }
+ 
+ bool DaliUSBPower::tickLocked()
+@@ -233,8 +274,11 @@
+         if (++stable < 3) { return true; }
+         stable = 0;
+         roleTouched = true;
+-        if (!write8(0x41a, 0x0f) || !update(0x41c, 0x40, 0) ||
+-            !write8(0x41a, 0x05)) { finishLocked("Rp programming failed"); return false; }
++        if (!write8(0x41a, 0x0f) || !wakeDetection() || !update(0x41c, 0x40, 0) ||
++            !snapshot(&cc, &power, &otg, &mv) || (power & 0x37) ||
++            (otg & 1) || mv > 800 || !write8(0x41a, 0x05)) {
++            finishLocked("TCPC wake/Rp programming failed"); return false;
++        }
+         /* Fixed Rp/default current on both CC pins; no DRP/PD/VCONN. */
+         IODelay(30);
+         state = Waiting; stateTicks = 0; stateStartedMs = physicalMs();
+@@ -242,8 +286,15 @@
+         return true;
+     }
+     if (ticks % 10 == 0) {
+-        kprintf("DALI OTG: tick=%u state=%u cc=%02x power=%02x VBUS=%umV otg=%02x\n",
+-            ticks, state, cc, power, mv, otg);
++        uint8_t role = 0, sys1 = 0, sys2 = 0;
++        if (!read8(0x41a, &role) || !read8(0x48f, &sys1) || !read8(0x490, &sys2)) {
++            finishLocked("TCPC awake read error"); return false;
++        }
++        kprintf("DALI OTG: tick=%u state=%u cc=%02x power=%02x VBUS=%umV otg=%02x role=%02x sys1=%02x sys2=%02x\n",
++            ticks, state, cc, power, mv, otg, role, sys1, sys2);
++        if (role != 0x05 || !(sys1 & 0x20) || (sys2 & 0x0b) != 3) {
++            finishLocked("TCPC wake/role changed"); return false;
++        }
+     }
+     unsigned c1 = cc & 3, c2 = (cc >> 2) & 3;
+     /* Exactly one Rd, the unused contact open or Ra. Reject audio/debug
+diff --git a/iokit/Kernel/arm/DaliUSBPower.h b/iokit/Kernel/arm/DaliUSBPower.h
+--- a/iokit/Kernel/arm/DaliUSBPower.h
++++ b/iokit/Kernel/arm/DaliUSBPower.h
+@@ -11,8 +11,10 @@
+     uint8_t savedRole = 0, savedPolarity = 0, savedPowerCtrl = 0;
+     uint8_t savedCVHi = 0, savedCVLo = 0, savedCurrent = 0;
+     uint32_t status = 0;
+-    unsigned readErrors = 0, snapshotReports = 0;
++    unsigned readErrors = 0, writeErrors = 0, snapshotReports = 0;
+     bool initialFaultAckAttempted = false;
++    uint8_t savedSys1 = 0, savedSys2 = 0;
++    bool tcpcTouched = false;
+     uint64_t startedMs = 0, stateStartedMs = 0;
+     bool roleTouched = false, chargerTouched = false, cpAttempted = false;
+     bool read8(uint16_t reg, uint8_t *value);
+@@ -20,6 +22,7 @@
+     bool update(uint16_t reg, uint8_t mask, uint8_t value);
+     bool snapshot(uint8_t *cc, uint8_t *power, uint8_t *otg, unsigned *mv);
+     bool acknowledgeInitialFault(uint8_t power, uint8_t otg, uint16_t raw);
++    bool wakeDetection();
+     bool protectedIdle(bool idle);
+     bool sourceOn();
+     void finishLocked(const char *reason);

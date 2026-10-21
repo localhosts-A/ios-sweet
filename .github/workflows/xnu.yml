@@ -154,6 +154,11 @@ jobs:
           grep -Fq 'fault == 0x80 && !(raw & ~0x3ffU)' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
           grep -Fq 'state != Initial || ticks != 1 || initialFaultAckAttempted' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI OTG: initial fault80 W1C'
+          grep -Fq 'update(0x490, 0x0b, 3)' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
+          grep -Fq 'update(0x490, 0x0b, savedSys2)' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI OTG: TCPC detection wake'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI OTG: TCPC wake cleanup='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI OTG: write failed reg='
           grep -Fq 'No reset, SCL pulses, repeated attempt or DMA programming.' xnu/iokit/Kernel/arm/DaliI2C5.cpp
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI CP: SC8585 verified'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI I2C5: scoped controller/clock state restored'

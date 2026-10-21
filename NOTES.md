@@ -1,3 +1,17 @@
+## Current: scoped TCPC detection wake implemented; originals verified (2026-10-21)
+
+Photo142735 confirms initialfault80W1Cack/zero readback plusfixedRpandrecoveryoforiginalrole; waitingCC00timesout40s,noCP/chargerwrites. FulloriginalpairRESTORED/Androiddali/_b/completed1/root/bothphysicalSHA256VERIFIED. Noactivecustomtrial.
+
+Patch0099fillsvendorwakegapbeforeRp: afterabsentVBUS>=200ms/opencircuitCC, saveSYSCTRL1/2(48f/490), setonlySHIPPING_OFFbit5andSYSCTRL2mask0b->03(VBUSDET/BMCIOOSC on, LPWRoff), readback/settle, recheckVBUSabsentthenfixedRp. Periodicrole/sys1/sys2readbackloggedandguarded. Dirtymarkbeforewrites; aftersourceoffconfirmedrestorechangedSYS2/SYS1bits, failurelogsrebootrequired. NoPD/DRP/PHY/CCthreshold/globalreset/protectionchanges. W1Cguard/CCdebounce/sourceoff/leasepreserved. Missingwakeisconcreteportgap, CC00causeNOTyetconfirmed. Final2/2actualarm64objectscompilePASS; exactbaselineapplycheckPASS, boundedwritereadbackdiagnosticsincluded. Commit/fullcachedCInext.
+
+## OTG photo142735: fault acknowledgement succeeds, CC attach times out (2026-10-21)
+
+ObservedinitialW1Cconfirmedwrote1/read1/fault00, fixeddefaultRparmed. Waitingstate1CC00/power08/VBUS0/OTG60through390ticks, endingtick393/state1/roleTouched1/CP0/charger0, endattachtimeout/chargeruntouched/CPuntouched/rolerestored/valid1/OTG60. Thus W1C/readback and scopedroleprogramming/restorationproven; no stableRd/SC8585sourceprepare/MT6379OTGenable yet. Udiskvisibleinphoto. Do notinferphysicaladapterfailureorclaim5Vsource.
+
+VendorfixedRppathwritesROLECTRLwithoutLOOK_CONNECTION(commandonlyDRP). MissingnativeCCdetectionwakeisconcretegap: SYSCTRL1offset8fshippingoffbit5, SYSCTRL2offset90BMCIOOSCbit0/VBUSDETbit1/LPWRbit3; vendorexitlowpowerwrites03. PhysicalPDbase400=>48f/490. Needcaptureinitialcontrolvalues, scopedsetshippingoff/enableosc+VBUSdet/clearlowpowerwithreadback andrestorechangedbitsafterconfirmedsourceoff. NoPDprotocol/DRP/globalreset/protectionchanges. CauseofCC00notyetproven.
+
+Userfastbootreturned; fulloriginalinit_boot_bthenboot_brestoredOKAY/Androidrebootrequested; physicalreadbackpending.
+
 ## ACTIVE guarded initial fault80 OTG trial — original restoration PENDING (2026-10-21)
 
 CI39554602650/8cfb5ef fullverifiedpair: immediateAndroidoriginalphysicalhash/root/model/_b/completed +hostbackup/candidate +fastbootidentity/unlocked/64+8MiBsizesallPASS. Temporaryinit_boot_bthenboot_bflashesbothOKAY/rebootrequested. Authoritativeignored `shim/out-dali/usb-fault80-39554602650/trial-state.json` trial_rebooted. UsertoldNOWswapPCtoOTGbeforeprompt; observe30s/photo initialfault80W1C/Rparmed/CP/VBUS/end thenmanualfastboot/PCreconnect. Hardwareack/source/cleanupoutcomeunconfirmed. OnlynewruntimehardwareoperationisguardedexactinitialW1C80oncetoreadbackzero; arbitrary/laterfaultsremainfatal.
