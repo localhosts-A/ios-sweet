@@ -1,3 +1,11 @@
+## Current: USB media verified; Android OTG capture waiting for attachment (2026-10-21)
+
+**/dev/sdc1 full16GiB write+O_DIRECTreadback VERIFIED**, source/readbackSHA ea6fe9549adc6a2f4f466079e5fb4e2b7432e80977923dbc98a3c6944c5be3cd; GPT/diskfirst1MiBunchanged. Authoritativeignored backup/usb-root-20261021/write-state.json=readback_verified; files.tar compare/hashverified (filebackup+metadata, NOTwhole119GiBraw). SourceUSBnonjournaledHFSXcleanfullfsck-fy/-fn, originaljournaledimagespreserved. blkidiOSRoot; stickpoweredoffviaudisksctl afteridentityguard, safeunplug.
+
+RootAndroidcapture **/data/local/tmp/dali-usb-host-capture-20261021-122201** waiting-host, baselinewritten, scriptroot0700/nohup,10minuteattachmentwindow. Localignored research/dali-usb-root/capture-state.json. UserneedsAndroidrunning->disconnectPC->ordinaryOTG+writtenstick20secs(declineformat)->reconnectPC. Pullcapturewhenback, inspecthostpower/PHY/xHCI/USBblock beforedriverwrites. ActualstockPHYprovidersshowMT6379repeater+XSphy,noNXPprovider despite6-004fdriverbinding; vendorNXPprobeCIDfailurecanreturn0withoutprovider. Docs/toolupdatedaccordingly.
+
+XNUUSBhost/storageNOTimplementedorhardwareverified; imagepresencealoneisNOTUSBboot. Phoneoriginalboot/init_bootunchangedinthisphase; noactiveboottrial. USBcapture/docsbasea8d24d9 pushedsuccessfully, resolvingpreviousPID1docsTLSsync. Latestprovider/capture/resultdocscommitnext.
+
 ## USB write active; native Android host capture prepared (2026-10-21)
 
 Host `/dev/sdc1` backup files.tar compared/hashed; metadata prefixes/table saved in ignored `backup/usb-root-20261021/` (file backup, not whole raw disk). Initial lsblk flat/tree guard mismatch fixed before writes. Current guarded writer active (session88579), source16GiB nonjournaledHFSX SHAea6fe9549adc6a2f4f466079e5fb4e2b7432e80977923dbc98a3c6944c5be3cd, fullrepair andindependentreadonlyfsck clean. Originaljournaledroot andjournaledclonepreserved. Await `write-state.json` readback_verified afterfsync/directall16GiBhash/table+prefix checks; do notremoveUSB untilthen.

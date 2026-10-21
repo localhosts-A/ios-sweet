@@ -38,6 +38,12 @@ snapshot() {
         printf '\nREGULATORS\n'
         timeout 5 cat /sys/kernel/debug/regulator/regulator_summary 2>/dev/null |
             grep -E 'usb|otg|6379|boost' || true
+        printf '\nPHY PROVIDERS\n'
+        ls -l /sys/class/phy 2>/dev/null || true
+        printf '\nCHARGER USB STATUS\n'
+        for name in typec_mode typec_cc_orientation voltage_now reverse_quick_charge; do
+            read_file "/sys/class/power_supply/usb/$name"
+        done
         # These are named read-only xHCI register views from the Linux driver.
         for controller in /sys/kernel/debug/usb/xhci/*; do
             [ -d "$controller" ] || continue

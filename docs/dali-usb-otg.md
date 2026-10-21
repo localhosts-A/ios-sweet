@@ -23,7 +23,7 @@ at `e45c3199537fbba9aae5fb06c31fc8dbd3c1dcee`:
 | Device MAC / IPPC | `0x16701000 / 0x2e00`, `0x16703e00 / 0x100` |
 | xHCI host | `0x16700000 / 0x1000`, SPI600 (INTID632) |
 | USB2 XS PHY | `0x16730000 / 0x400`, 26MHz reference |
-| USB2 repeater chain | NXP at I2C address `0x4f`, MT6379 at SPMI SID14, base `0xd00` |
+| DT repeater references | NXP at I2C address `0x4f`, MT6379 at SPMI SID14, base `0xd00` |
 | Main clocks | VLP `sys_ck`, `host_ck`; 48MHz `frmcnt_ck` |
 | Power domains | Separate USB2 and USB3 domains |
 | Type-C and VBUS | MT6379 TCPC/5V regulator, plus board charge-pump routing |
@@ -31,6 +31,13 @@ at `e45c3199537fbba9aae5fb06c31fc8dbd3c1dcee`:
 Native Android device-mode baseline: IPPC PW_CTRL0=`10411020`,
 CTRL1=`1`, CTRL2=`0`, CTRL3=`1`, STS1=`01013d0f`, U2_CTRL0=`1848`,
 HW_ID=`20180724`. These are observations, not values to write blindly.
+
+Stock Android currently publishes a USB2 XS PHY and an MT6379 repeater PHY.
+It does **not** publish an NXP repeater PHY, although I2C6-004f has a bound
+driver. The vendor NXP probe returns success even if its chip-ID check fails,
+without publishing a PHY; XS PHY treats unavailable repeaters as optional.
+Thus the DT list does not prove both repeaters are populated or active.
+Check actual PHY providers and board hardware before implementing NXP I2C.
 
 ### Source references
 
