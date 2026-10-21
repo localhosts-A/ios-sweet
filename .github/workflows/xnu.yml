@@ -188,6 +188,13 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: restore ACK req='
           grep -Fq 'PE_parse_boot_argn("daliusbport"' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           grep -Fq '(saved & ~3U) | 0x204U' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'bool u3Touched = engineProbe;' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'uint32_t wantedU3 = (u3 & ~3U) | 4U;' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'u3Ready = u3Control;' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'ip.write(0x30, wantedU3);' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'ip.write(0x30, u3);' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U3: host enable saved='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U3: restore want='
           grep -Fq 'portRestored && asleep && releaseResourcesAndRestore' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U2: MAC ready='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U2: PORTSC sample='

@@ -1,0 +1,54 @@
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -613,14 +613,27 @@
+      * not just bit2. Preserve OTG/IDDIG/other firmware fields.
+      */
+     uint32_t wanted = (saved & ~3U) | 0x204U;
++    bool u3Touched = engineProbe;
++    bool u3Ready = true;
++    uint32_t wantedU3 = (u3 & ~3U) | 4U; /* Native host path enables U3 before U2. */
++    if (u3Touched) {
++        ip.write(0x30, wantedU3);
++        uint32_t enabledU3 = ip.read(0x30);
++        bool u3Control = enabledU3 == wantedU3;
++        u3Ready = u3Control;
++        uint32_t sts1 = ip.read(0x10);
++        u2Log("DALI U3: host enable saved=%08x want=%08x read=%08x ctrl=%u mac=%u sts1=%08x\n",
++            u3, wantedU3, enabledU3, u3Control, (sts1 >> 16) & 1U, sts1);
++    }
+     ip.write(0x50, wanted);
+     uint32_t enabled = ip.read(0x50);
+-    bool control = enabled == wanted;
+-    bool ready = control && waitBits(ip, 0x14, 1U, 1U, 100, 100);
++    bool u2Control = enabled == wanted;
++    bool u2MacReady = u2Control && waitBits(ip, 0x14, 1U, 1U, 100, 100);
++    bool ready = u3Ready && u2MacReady;
+     u2Log("DALI U2: enable saved=%08x want=%08x read=%08x ctrl=%u\n",
+-        saved, wanted, enabled, control);
++        saved, wanted, enabled, u2Control);
+     u2Log("DALI U2: MAC ready=%u sts=%08x/%08x\n",
+-        ready, ip.read(0x10), ip.read(0x14));
++        u2MacReady, ip.read(0x10), ip.read(0x14));
+     bool ppRestored = true, nativeReady = true, ckTouched = false;
+     uint32_t savedCK = 0;
+     ScopedU2Phy nativePhy;
+@@ -707,11 +720,18 @@
+     /* Disable/power down the port before the existing host-PDN handshake.
+      * Never release the SPM request if this exact restoration fails.
+      */
++    bool u3Restored = true;
++    if (u3Touched) {
++        ip.write(0x30, u3);
++        uint32_t afterU3 = ip.read(0x30);
++        u3Restored = afterU3 == u3;
++        u2Log("DALI U3: restore want=%08x read=%08x match=%u\n", u3, afterU3, u3Restored);
++    }
+     ip.write(0x50, saved);
+     uint32_t after = ip.read(0x50);
+     bool restored = after == saved;
+     u2Log("DALI U2: restore want=%08x read=%08x match=%u\n", saved, after, restored);
+-    return restored && ppRestored && phyRestored && repeaterRestored;
++    return restored && u3Restored && ppRestored && phyRestored && repeaterRestored;
+ }
+ }
+ 
