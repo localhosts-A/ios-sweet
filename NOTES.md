@@ -1,4 +1,12 @@
-## Current: controller reset completed; cache PA truncation panic; originals recovered (2026-10-22)
+## Current: cache PA fix built and packaged; originals verified; no active trial (2026-10-22)
+
+Patch0119/source8fc0413 full CI39639794623 SUCCESS. Downloaded artifacts match checksums; all32 actual source files match the native compiled tree. Actual linked `_pmap_sync_page_attributes_phys` disassembly is `ubfiz x0, x0, #14, #32` before `flush_dcache`, replacing the old truncating `lsl w0, w0, #14`. This confirms the high physical address conversion is fixed in the delivered kernel. Full boot-counter, linked-marker, headers/segments/entry/RAM/ADT/CPIO/AVB/host-original packaging checks PASS.
+
+Candidate `shim/out-dali/usb-cache-pa-39639794623` is prepared: kernel SHA256 803f03a7b070c0aaba2579ace89eb0c0e80054efecdf210706e69d42b0a1c3b9; init_boot SHA256 c81f1b17c6f0cd0a1ccbfa8d3cf09c241aa1b650fee1a19d9887d2261c1f0f8d; payload29289760 bytes/11 segments/ADT8136/root2024e0000. Same audited36bit DMA, measured PHY trims, explicit rd=du0, full engine/root flags and120s watchdog. Fresh read-only preflight verifies Android completed/root/dali/model/_b and full physical original partition sizes/SHA256; new manifest android_preflight_verified. Previous trial usb-reset-ao-39637194159 remains originals_verified. NO ACTIVE TRIAL OR PENDING RESTORATION. Candidate has NOT been flashed. DMA/Run/NoOP/enumeration/MSC/root remain hardware-unverified.
+
+User told no phone operation needed during this offline round. Next trial requires current readiness for the cable swap; then use this candidate's paired trial helper and immediately recover full originals on fastboot return, followed by physical Android verification. Package/preflight logs and actual disassembly stay ignored under research/dali-usb-root/ci-artifacts and the candidate directory. A read-only status summary initially requested absent payload_bytes from manifest (KeyError); packaging and preflight had already passed, sizes are recorded in package log. No new flash/reboot/GPT/userdata/Udisk writes.
+
+## Cache PA panic investigation (completed offline)
 
 Photo IMG_20261022_005356.jpg now reaches `DALI XHCI: reset complete pages=1 scratch=0`, proving HCRST/CNR/fullpostreset health passed. Then phystokv_range panics illegalPA0x55d0000 (photo), physicalbase0x208000000,size0x13fe00000, arm_vm_init.c406 during arena allocation/cache transition. No ring publication/Run/NoOP/enum/MSC/root evidence. Original full init_boot_bthenboot_b recovered immediately; Androidcompleted/root/dali/model/_b/fullphysicaloriginalsize/SHA256PASS; currentusb-reset-ao39637194159 originals_verified, NO ACTIVE TRIAL/PENDING RECOVERY.
 
