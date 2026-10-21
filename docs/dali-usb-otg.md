@@ -91,7 +91,7 @@ SHA256 values verified from rooted Android.
 SC8585 protection fields and IBUS ADC scale differ from SC8581; do not
 reuse the older chip's complete configuration.
 
-## Bounded source diagnostic (hardware result pending)
+## Bounded source diagnostic (initial snapshot rejected)
 
 Patch0096 adds an independently opt-in `daliotg=1` state machine. It also
 requires `daliusb=1 dalicp=1` and the exact Dali `otg-source-config` ADT
@@ -124,6 +124,22 @@ controller/clock state. A failed transaction latches a permanent refusal
 to reuse that bus until reboot. Source-off is independently attempted over
 PMIF. Neither software logging nor a source enable bit alone establishes
 physical VBUS or working USB enumeration; the hardware trial is pending.
+
+### First source trial, 2026-10-21
+
+CI39551734817/1251c67 reached the memory-root PID1, but the source service
+reported `end=status/fault error`, `valid=0`, and OTG=`60` before visible
+Rp/CP/source-enable messages. The voltage value is invalid, so this does
+not establish physical0V. The old `restored` labels also include untouched
+components and do not establish a successful source-on/off cycle. Original
+boot_b and init_boot_b were restored, Android returned, and both complete
+physical partition SHA256 values matched the saved originals.
+
+Patch0097 reports bounded register/PMIF read failures, the initial or
+rejected raw TCPC snapshot, ending state/touched flags, and explicit
+`untouched` labels. All fault/voltage/power guards, bus operations and
+lease limits remain unchanged. The exact initial rejection is still
+unknown; no faults are cleared or ignored to bypass it.
 
 ## Hardware facts
 

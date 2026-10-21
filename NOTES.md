@@ -1,3 +1,15 @@
+## Current: source trial rejected initial snapshot; originals verified (2026-10-21)
+
+Photo140006 shows status/fault error with valid0 and otg60, no visible Rp/source enable. Generic cleanup labels may mean untouched, not restoration after actual power. Full original pair restored, Android dali/_b/completed1/root and both full physical SHA256 VERIFIED; manifest originals_verified. No active trial. Guards remain intact.
+
+Patch0097 adds bounded read/read16 address+PMIF failure logging, first accepted or rejected snapshot CC/power/OTG/fault/raw voltage, ending tick/state/touched flags and explicit untouched cleanup labels. No change to any hardware read/write sequence, guards, role policy, fault clearing or source lease. Exact cause still unconfirmed; do not assume chip fault or physical0V. Local2/2actualarm64objectcompiles PASS; exact0097baseline applycheckPASS, no new tests. Cached CI next. Source candidate usb-source-39551734817/kernel1251c67 remains historical.
+
+## OTG source photo140006: snapshot rejected; recovery readback pending (2026-10-21)
+
+Photo shows `DALI OTG: end=status/fault error charger=restored cp=restored role=restored VBUS=0mV valid=0 otg=60` around first user heartbeat, before visible Rp/CP/source messages; staticPID1 continues heartbeat. snapshot() combines PMIF read failures, TCPC fault!=0, raw voltage upper bits and POWER uninitialized; exact cause unknown because current logging omits raw/status. valid0 means voltage unknown, not confirmed0V. cleanup restored labels can mean untouched; no actual source enable/cleanup success established. Do not relax guards or clear faults blindly.
+
+User returned fastboot, full original init_boot_b then boot_b restored OKAY and Android reboot requested. **Physical original readback still pending**; no new trial. Next verify Android full hashes, add bounded exact read/fault/raw diagnostics and explicit untouched cleanup labels before another trial. Backups remain intact.
+
 ## ACTIVE bounded OTG source trial — original restoration PENDING (2026-10-21)
 
 CI39551734817/1251c67 pair flashed init_boot_b then boot_b, both OKAY; reboot requested. Fresh immediate Android dali/model/_b/completed/root/full physical original hashes, host original/candidate hashes, fastboot identity/unlocked/sizes all verified. Authoritative ignored manifest `shim/out-dali/usb-source-39551734817/trial-state.json` trial_rebooted. User ready; asked to swap PC cable for ordinary OTG+Udisk within40s of unplug prompt, keep30s, photo DALI OTG/CP/VBUS/end, then reconnect PC/manualfastboot. 5V500mA/15s finite source diagnostic; hardware outcome not yet known. USBhost/storage unimplemented.

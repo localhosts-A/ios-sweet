@@ -148,6 +148,9 @@ jobs:
           grep -Fq 'roleTouched = true;' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI OTG: VBUS valid'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'cleanup incomplete; reboot required'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI OTG: snapshot %s'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI OTG: read16 failed reg=0470'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI OTG: ending tick='
           grep -Fq 'No reset, SCL pulses, repeated attempt or DMA programming.' xnu/iokit/Kernel/arm/DaliI2C5.cpp
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI CP: SC8585 verified'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI I2C5: scoped controller/clock state restored'

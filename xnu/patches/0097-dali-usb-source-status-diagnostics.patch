@@ -1,0 +1,81 @@
+diff --git a/iokit/Kernel/arm/DaliUSBPower.cpp b/iokit/Kernel/arm/DaliUSBPower.cpp
+--- a/iokit/Kernel/arm/DaliUSBPower.cpp
++++ b/iokit/Kernel/arm/DaliUSBPower.cpp
+@@ -19,7 +19,12 @@
+ 
+ bool DaliUSBPower::read8(uint16_t reg, uint8_t *v)
+ {
+-    return dali_pmif_transfer(14, reg, v, false, &status);
++    bool ok = dali_pmif_transfer(14, reg, v, false, &status);
++    if (!ok && readErrors++ < 4) {
++        kprintf("DALI OTG: read failed reg=%04x pmif=%08x tick=%u state=%u\n",
++            reg, status, ticks, (unsigned)state);
++    }
++    return ok;
+ }
+ 
+ bool DaliUSBPower::write8(uint16_t reg, uint8_t v)
+@@ -45,10 +50,26 @@
+     uint16_t raw = 0;
+     uint8_t fault = 0;
+     if (!read8(0x41d, cc) || !read8(0x41e, power) || !read8(0x108, otg) ||
+-        !read8(0x41f, &fault) ||
+-        !dali_pmif_read16(14, 0x470, &raw, &status)) { return false; }
++        !read8(0x41f, &fault)) { return false; }
++    if (!dali_pmif_read16(14, 0x470, &raw, &status)) {
++        if (readErrors++ < 4) {
++            kprintf("DALI OTG: read16 failed reg=0470 pmif=%08x tick=%u state=%u\n",
++                status, ticks, (unsigned)state);
++        }
++        return false;
++    }
++    /* Preserve every source guard. Log the first snapshot and each reject
++     * (four reports maximum), distinguishing data rejection from bus failure.
++     */
++    bool accepted = !fault && !(raw & ~0x3ffU) && !(*power & 0x40);
++    if ((!accepted || !snapshotReports) && snapshotReports < 4) {
++        ++snapshotReports;
++        kprintf("DALI OTG: snapshot %s tick=%u state=%u cc=%02x power=%02x otg=%02x fault=%02x raw=%04x pmif=%08x\n",
++            accepted ? "accepted" : "REJECT", ticks, (unsigned)state,
++            *cc, *power, *otg, fault, raw, status);
++    }
+     /* Vendor reads low10bits *25mV. Refuse unhandled scaling/reserved bits. */
+-    if (fault || (raw & ~0x3ffU) || (*power & 0x40)) { return false; }
++    if (!accepted) { return false; }
+     *mv = (raw & 0x3ffU) * 25U;
+     return true;
+ }
+@@ -95,7 +116,10 @@
+ void DaliUSBPower::finishLocked(const char *reason)
+ {
+     if (state == Finished) { return; }
++    unsigned endingState = (unsigned)state;
+     state = Finished; /* Never rearm automatically after detach/error. */
++    kprintf("DALI OTG: ending tick=%u state=%u touched role=%u cp=%u charger=%u\n",
++        ticks, endingState, roleTouched, cpAttempted, chargerTouched);
+     bool chargerOK = true, cpOK = true, roleOK = true;
+     bool sourceOffConfirmed = !chargerTouched;
+     if (chargerTouched) {
+@@ -140,8 +164,9 @@
+         }
+     }
+     kprintf("DALI OTG: end=%s charger=%s cp=%s role=%s VBUS=%umV valid=%u otg=%02x\n",
+-        reason, chargerOK ? "restored" : "FAILED", cpOK ? "restored" : "FAILED",
+-        roleOK ? "restored" : "FAILED", mv, measured, otg);
++        reason, !chargerTouched ? "untouched" : chargerOK ? "restored" : "FAILED",
++        !cpAttempted ? "untouched" : cpOK ? "restored" : "FAILED",
++        !roleTouched ? "untouched" : roleOK ? "restored" : "FAILED", mv, measured, otg);
+     if (!chargerOK || !cpOK || !roleOK) { kprintf("DALI OTG: cleanup incomplete; reboot required\n"); }
+ }
+ 
+diff --git a/iokit/Kernel/arm/DaliUSBPower.h b/iokit/Kernel/arm/DaliUSBPower.h
+--- a/iokit/Kernel/arm/DaliUSBPower.h
++++ b/iokit/Kernel/arm/DaliUSBPower.h
+@@ -11,6 +11,7 @@
+     uint8_t savedRole = 0, savedPolarity = 0, savedPowerCtrl = 0;
+     uint8_t savedCVHi = 0, savedCVLo = 0, savedCurrent = 0;
+     uint32_t status = 0;
++    unsigned readErrors = 0, snapshotReports = 0;
+     uint64_t startedMs = 0, stateStartedMs = 0;
+     bool roleTouched = false, chargerTouched = false, cpAttempted = false;
+     bool read8(uint16_t reg, uint8_t *value);
