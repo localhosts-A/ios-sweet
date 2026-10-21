@@ -1,0 +1,187 @@
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -2,7 +2,7 @@
+  * xHCI driver. Primary source: MiCode device modules e45c319 and live Dali
+  * FDT. Acquire the audited MTU3 v2 SPM request, pulse IP reset, release only
+  * host PDN, and read capabilities only after clock-ready status. Then restore
+- * host/device PDN and release SPM. Optional U2 port0 enable/read/restore;
++ * host/device PDN and release SPM. Optional U2 port0 and USB2 PP probes;
+  * no PHY tuning, xHCI engine, IRQ or DMA programming.
+  */
+ #include <pexpert/arm64/board_config.h>
+@@ -19,7 +19,7 @@
+  * Keep only diagnostic text in fixed memory; replay never touches MMIO.
+  */
+ struct U2Report {
+-    char text[2048];
++    char text[4096];
+     unsigned size;
+     bool called, requested, reached, truncated;
+ };
+@@ -188,12 +188,111 @@
+     return reset && restoreSpmAndGates(ip, gate, oldRequest, oldAck, savedGates);
+ }
+ 
++/* Identify the sole USB2 port from Supported Protocol capabilities. Never
++ * infer xHCI port order from the physical IPPC U2/U3 numbering.
++ */
++unsigned usb2ProtocolPort(const ReadMapping &xhci, unsigned ports) {
++    uint32_t hcc = xhci.read(0x10);
++    unsigned offset = (hcc >> 16) * 4U, seen = 0, u2 = 0, u3 = 0;
++    bool ended = false;
++    if (ports != 2 || hcc == ~0U || !(hcc & (1U << 3))) { return 0; }
++    for (unsigned i = 0; i < 16; ++i) {
++        if (offset < 0x500 || offset > 0xff0 || (offset & 3)) { return 0; }
++        uint32_t header = xhci.read(offset);
++        if (!header || header == ~0U) { return 0; }
++        unsigned id = header & 0xff, next = (header >> 8) & 0xff;
++        /* No BIOS/OS legacy owner may be present. Do not alter ownership. */
++        if (id == 1 && (header & 0x01010000U)) {
++            u2Log("DALI PP: legacy owner present raw=%08x; skipped\n", header); return 0;
++        }
++        if (id == 2) {
++            uint32_t name = xhci.read(offset + 4), info = xhci.read(offset + 8);
++            unsigned major = header >> 24, minor = (header >> 16) & 0xff;
++            unsigned first = info & 0xff, count = (info >> 8) & 0xff;
++            u2Log("DALI PP: protocol rev=%u.%u first=%u count=%u raw=%08x\n",
++                major, minor, first, count, info);
++            if (name != 0x20425355U || !first || count != 1 || first > ports ||
++                (seen & (1U << (first - 1)))) { return 0; }
++            seen |= 1U << (first - 1);
++            if (major == 2 && !u2) { u2 = first; }
++            else if (major == 3 && !u3) { u3 = first; }
++            else { return 0; }
++        }
++        if (!next) { ended = true; break; }
++        offset += next * 4U;
++    }
++    return ended && seen == 3 && u2 && u3 ? u2 : 0;
++}
++
++bool hostStillHalted(const WriteMapping &ip, const ReadMapping &xhci, unsigned op) {
++    uint32_t s1 = ip.read(0x10), s2 = ip.read(0x14), status = xhci.read(op + 4);
++    return s1 != ~0U && s2 != ~0U && (s1 & 0xd01U) == 0xd01U && (s2 & 1U) &&
++        xhci.read(op) == 0 && status != ~0U && (status & 0x801U) == 1U;
++}
++
++/* Linux6.6 xhci_port_state_to_neutral / xhci_set_port_power: preserve RO
++ * and ordinary RW bits, zero RW1C/reset/strobe bits. Only change PP; never
++ * issue a port reset or start the engine. Return ownership restoration.
++ */
++bool observePortPower(const WriteMapping &ip, const ReadMapping &xhci,
++    unsigned op, unsigned ports) {
++    unsigned port = usb2ProtocolPort(xhci, ports);
++    if (!port || !hostStillHalted(ip, xhci, op)) {
++        u2Log("DALI PP: protocol/clock/halted guard rejected; untouched\n"); return true;
++    }
++    unsigned offset = op + 0x400U + (port - 1) * 0x10U;
++    uint32_t saved = xhci.read(offset);
++    constexpr uint32_t power = 1U << 9;
++    constexpr uint32_t neutral = (1U << 0) | (1U << 3) | (0xfU << 10) | (1U << 30) |
++        (0xfU << 5) | power | (3U << 14) | (7U << 25);
++    constexpr uint32_t controls = power | (3U << 14) | (7U << 25);
++    if (saved == ~0U || (saved & (power | 2U | 8U | 16U | (1U << 31)))) {
++        u2Log("DALI PP: entry rejected port=%u raw=%08x; untouched\n", port, saved); return true;
++    }
++    /* Writable mapping exposes only this one PORTSC register. */
++    WriteMapping portsc;
++    if (!portsc.open(0x16700000ULL + offset, 4)) {
++        u2Log("DALI PP: PORTSC mapping failed; untouched\n"); return true;
++    }
++    uint32_t wanted = (saved & neutral) | power;
++    portsc.write(0, wanted);
++    uint32_t after = portsc.read(0);
++    bool enabled = after != ~0U && (after & controls) == ((saved & controls) | power);
++    u2Log("DALI PP: enable port=%u saved=%08x want=%08x read=%08x match=%u\n",
++        port, saved, wanted, after, enabled);
++    for (unsigned sample = 0; enabled && sample < 3; ++sample) {
++        IOSleep(100); /* USB2 root-hub power-good minimum is20ms. */
++        if (!hostStillHalted(ip, xhci, op)) {
++            u2Log("DALI PP: observation stopped clock/engine changed\n"); break;
++        }
++        uint32_t sc = portsc.read(0);
++        if (sc == ~0U || !(sc & power) || (sc & 8U)) {
++            u2Log("DALI PP: observation stopped port=%u raw=%08x\n", port, sc); break;
++        }
++        u2Log("DALI PP: sample=%u port=%u raw=%08x pp=%u ccs=%u ped=%u speed=%u pls=%u\n",
++            sample, port, sc, (sc >> 9) & 1, sc & 1, (sc >> 1) & 1,
++            (sc >> 10) & 15, (sc >> 5) & 15);
++    }
++    uint32_t current = portsc.read(0);
++    if (current == ~0U || !hostStillHalted(ip, xhci, op)) {
++        u2Log("DALI PP: restore guard failed; reboot required\n"); return false;
++    }
++    /* Preserve live RO/RW state while restoring the PP bit we own. */
++    portsc.write(0, (current & neutral & ~power) | (saved & power));
++    uint32_t restored = portsc.read(0);
++    bool matched = restored != ~0U && (restored & controls) == (saved & controls);
++    u2Log("DALI PP: restore port=%u saved=%08x read=%08x match=%u\n",
++        port, saved, restored, matched);
++    return matched;
++}
++
+ /* Return whether the original U2 port state is intact, including skips.
+  * This is the MTU3 host-enable port RMW followed by its inverse. The xHCI
+- * engine stays halted; PORTSC and PHY accesses below are reads only.
++ * engine stays halted; PHY accesses are reads only. A separately requested
++ * PP probe below switches only the protocol-selected USB2 PORTSC power bit.
+  */
+ bool observeU2Port(WriteMapping &ip, const ReadMapping &xhci,
+-    unsigned op, unsigned ports) {
++    unsigned op, unsigned ports, bool powerProbe) {
+     u2Report.reached = true;
+     uint32_t saved = ip.read(0x50), u3 = ip.read(0x30);
+     uint32_t cmd = xhci.read(op), sts = xhci.read(op + 4);
+@@ -216,6 +315,7 @@
+         saved, wanted, enabled, control);
+     u2Log("DALI U2: MAC ready=%u sts=%08x/%08x\n",
+         ready, ip.read(0x10), ip.read(0x14));
++    bool ppRestored = true;
+     if (ready) {
+         ReadMapping phy;
+         if (phy.open(0x16730000, 0x400)) {
+@@ -240,6 +340,7 @@
+                     sample, port + 1, sc, sc & 1U, (sc >> 1) & 1U, (sc >> 10) & 0xfU);
+             }
+         }
++        if (powerProbe) { ppRestored = observePortPower(ip, xhci, op, ports); }
+     }
+     /* Disable/power down the port before the existing host-PDN handshake.
+      * Never release the SPM request if this exact restoration fails.
+@@ -248,20 +349,23 @@
+     uint32_t after = ip.read(0x50);
+     bool restored = after == saved;
+     u2Log("DALI U2: restore want=%08x read=%08x match=%u\n", saved, after, restored);
+-    return restored;
++    return restored && ppRestored;
+ }
+ }
+ 
+ void dali_usb_host_observe(bool hwrscsV2, bool vusbAlwaysOn)
+ {
+     if (!ml_get_interrupts_enabled() || ml_at_interrupt_context()) { return; }
+-    int portProbe = 0;
++    int portProbe = 0, powerProbe = 0;
+     PE_parse_boot_argn("daliusbport", &portProbe, sizeof(portProbe));
+-    if (portProbe != 0 && portProbe != 1) { return; }
++    PE_parse_boot_argn("daliusbpp", &powerProbe, sizeof(powerProbe));
++    if ((portProbe != 0 && portProbe != 1) || (powerProbe != 0 && powerProbe != 1) ||
++        (powerProbe && !portProbe)) { return; }
+     bzero(&u2Report, sizeof(u2Report));
+     u2Report.called = true;
+     u2Report.requested = portProbe == 1;
+-    kprintf("DALI HOST: guarded MTU3 v2 host power-up begin; U2 probe=%u no DMA\n", portProbe);
++    u2Log("DALI HOST: guarded MTU3 v2 host power-up begin; U2 probe=%u PP=%u no DMA\n",
++        portProbe, powerProbe);
+     ReadMapping spm, bus, vlp, top;
+     if (!spm.open(0x1c004000, 0x1000) || !bus.open(0x1c00d000, 0x1000) ||
+         !vlp.open(0x1c016000, 0x1000) || !top.open(0x10000000, 0x800)) {
+@@ -426,7 +530,7 @@
+                 uint32_t cmd = xhci.read(op), sts = xhci.read(op + 4);
+                 kprintf("DALI HOST: xHCI cmd=%08x sts=%08x pages=%08x\n",
+                     cmd, sts, xhci.read(op + 8));
+-                if (portProbe == 1) { portRestored = observeU2Port(ip, xhci, op, ports); }
++                if (portProbe == 1) { portRestored = observeU2Port(ip, xhci, op, ports, powerProbe == 1); }
+             } else { kprintf("DALI HOST: xHCI capability bounds rejected\n"); }
+         }
+     }
