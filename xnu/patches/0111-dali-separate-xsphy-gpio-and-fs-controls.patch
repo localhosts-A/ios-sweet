@@ -1,0 +1,43 @@
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -197,11 +197,12 @@
+     struct Field { uint32_t offset, mask, saved; bool dirty; };
+     static constexpr uint32_t dtm0Mask = (1U << 26) | (1U << 23) | (0x1fU << 17) |
+         (0xfU << 10) | (3U << 6) | (3U << 4) | (1U << 3) | (1U << 2);
+-    Field fields[9] = {
++    Field fields[10] = {
+         {0x000, 0xffffff00U, 0, false}, {0x004, 1U << 16, 0, false},
+         {0x300, (7U << 24) | (1U << 5), 0, false},
+         {0x310, 7U << 8, 0, false},
+         {0x318, (3U << 30) | (1U << 25) | (1U << 23) | (1U << 20), 0, false},
++        {0x320, 3U << 8, 0, false}, /* XSP_U2PHYACR4 GPIO, distinct from FS_CR0x310. */
+         {0x344, 1U << 5, 0, false}, {0x364, 3U << 18, 0, false},
+         {0x368, dtm0Mask, 0, false},
+         {0x36c, (1U << 16) | (1U << 9) | (1U << 5) | (1U << 4) | 6U, 0, false}
+@@ -231,7 +232,7 @@
+             field.saved = phy.read(field.offset);
+             if (field.saved == ~0U) { return false; }
+         }
+-        if ((fields[7].saved & (1U << 26)) || (fields[8].saved & (1U << 16))) {
++        if ((fields[8].saved & (1U << 26)) || (fields[9].saved & (1U << 16))) {
+             u2Log("DALI PHY: UART ownership rejected; untouched\n"); return false;
+         }
+         saved = true;
+@@ -244,7 +245,7 @@
+         if (ok) { IODelay(30); }
+         ok = ok && change(0x368, 1U << 18, 0) && change(0x368, 8, 0) &&
+             change(0x368, dtm0Mask, 0) && change(0x36c, 1U << 16, 0) &&
+-            change(0x310, 3U << 8, 0) && change(0x318, (1U << 23) | (1U << 20), 1U << 20) &&
++            change(0x320, 3U << 8, 0) && change(0x318, (1U << 23) | (1U << 20), 1U << 20) &&
+             change(0x36c, (1U << 5) | (1U << 4) | 4U, (1U << 5) | 4U) &&
+             change(0x300, 7U << 24, 0) &&
+             change(0x318, (3U << 30) | (1U << 25), 1U << 30);
+@@ -261,7 +262,7 @@
+     bool restore() {
+         if (!saved) { return true; } /* Snapshot failed before any write. */
+         bool ok = true;
+-        for (unsigned i = 9; i-- > 0;) {
++        for (unsigned i = sizeof(fields) / sizeof(fields[0]); i-- > 0;) {
+             auto &field = fields[i];
+             if (!field.dirty) { continue; }
+             uint32_t before = phy.read(field.offset);
