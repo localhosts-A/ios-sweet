@@ -1,4 +1,10 @@
-## Current: integrated USB root candidate verified, trial ready (2026-10-21)
+## ACTIVE integrated USB root trial — original restoration PENDING (2026-10-21)
+
+User explicitly confirmed ready for timed cable swap. Currentpair `shim/out-dali/usb-integrated-39628092431/device_pair.py trial` completed successfully: immediate Android full physical original SHA256/size/root/model/_b/completed PASS, fastboot product/slot/unlocked/sizes PASS, host original/candidate hashes PASS; temporary init_boot_b then boot_b flashed OKAY and reboot requested. Authoritative ignored manifest is now trial_rebooted. CURRENT ORIGINAL RESTORATION PENDING; all earlier originals_verified/preflight records are historical. Log research/dali-usb-root/ci-artifacts/run39628092431-trial.log. User instructed swap at red loader before prompt allowed, photograph XHCI/MSC/ROOT/failure and return PC/manual fastboot. No hardware result received yet.
+
+On fastboot return immediately run this pair/device_pair.py recover ABS_PAIR (full original init_boot_b then boot_b, reboot Android), then verify full physical sizes/SHA256. No GPT/userdata/Udisk writes. Explicit USB root refuses diagnostic RAM fallback. Engine, enumeration, read-only storage/root are unverified until photographed; watchdog120s remains. Prior isolated halted PP trials are not equivalent to running host initialization.
+
+## Integrated USB root candidate verification (2026-10-21)
 
 CI39628092431 succeeded for source7fb235e6988d60a82483343ce78055c8d903b1d1/patch0115. Actual31/31 sources match the native compiled tree. Paired candidate `shim/out-dali/usb-integrated-39628092431` passed headers/segments/entry/RAM/ADT/LZ4CPIO/AVB/counter/linked-marker/host-original checks. Kernel SHA256224f47ea94c08619a7bc1bcb553dd28fc1f3f9c6a59c496d43675ad390be3133; init_boot eae1c35dc7ed625f78f31677a8a7f4162aabac49e59b7f7270e40761081b6b40; boot ddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39. Payload29289760/11segments, ADT8136, unchanged12MiB diagnostic RAM root at2024e0000. Explicit rd=du0/daliusbengine=1/daliusbroot=1 refuses RAM fallback. ADT audited36bit identityDMA and measured trim9/16/21/SW1 supplied.
 
