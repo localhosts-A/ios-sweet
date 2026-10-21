@@ -1,3 +1,6 @@
+
+- Sync status: PID1 success/recovery results committed locally7ebde99. Both normal HTTPS and HTTP/1.1 push hit TLS unexpected EOF; remote remains at prior87a0066 until connectivity recovers. All implementation commits/artifact builds already on fork; only final result documentation pending push. Phone originals verified, no active trial.
+
 ## Current handoff: PID1/EL0 heartbeat SUCCESS; originals restored/verified (2026-10-21)
 
 - Photo `/home/baka/Downloads/IMG_20261021_113942.jpg` proves clone/initproc/AST/returnwait, bsdinit_task/ux/VM initialization and exec. Optional development launchd path returnsENOENT2 (normal fallback), `/sbin/launchd` exec returns0 T36687, load_init_program returns36695. **This is the signed static probe named launchd, not proof full iOS GUI/Apple userspace has booted.**
