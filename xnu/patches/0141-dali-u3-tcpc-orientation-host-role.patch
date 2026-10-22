@@ -1,0 +1,20 @@
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -607,10 +607,13 @@
+     bool apply() {
+         uint8_t polarity = 0, role = 0;
+         uint32_t status = 0;
+-        if (!dali_pmif_transfer(14, 0x419, &polarity, false, &status) ||
+-            !dali_pmif_transfer(14, 0x41a, &role, false, &status) || role != 0x05) {
+-            u2Log("DALI U3 PHY: TCPC orientation unavailable polarity=%02x role=%02x pmif=%08x\n",
+-                polarity, role, status);
++        bool polarityRead = dali_pmif_transfer(14, 0x419, &polarity, false, &status);
++        bool roleRead = polarityRead &&
++            dali_pmif_transfer(14, 0x41a, &role, false, &status);
++        const uint8_t expectedRole = (polarity & 1U) ? 0x06 : 0x09;
++        if (!roleRead || role != expectedRole) {
++            u2Log("DALI U3 PHY: attached-source orientation mismatch polarity=%02x role=%02x expected=%02x pmif=%08x\n",
++                polarity, role, expectedRole, status);
+             return false;
+         }
+         orientationFlip = (polarity & 1U) != 0;
