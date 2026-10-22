@@ -192,7 +192,7 @@ jobs:
           grep -Fq 'uint32_t wantedU3 = (u3 & ~3U) | 4U;' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           grep -Fq 'constexpr uint32_t kMtu3U3ClockMask = 0x10501U;' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           grep -Fq 'u3Ready = u3Control && waitBits(ip, 0x10, kMtu3U3ClockMask,' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
-          grep -Fq 'engineProbe ? 0x80U : 0U' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'wanted = (wanted & ~kMtu3U2RoleMask) | kMtu3U2ForceIddigHost;' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           grep -Fq 'class ScopedMtu3HostMac' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           grep -Fq '{0x0c84, 0x00000003U, 0U, 0, false, true}' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           grep -Fq '{0x2450, 0x00000fffU, 0x474U, 0, false, false}' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
@@ -205,6 +205,7 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U3: restore want='
           grep -Fq 'portRestored && asleep && releaseResourcesAndRestore' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U2: MAC ready='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U2: enable saved='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U2: PORTSC sample='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U2: restore want='
           grep -Fq 'if (hostObserve && hostJoined) { dali_usb_host_report(); }' xnu/iokit/Kernel/arm/DaliUSBPower.cpp

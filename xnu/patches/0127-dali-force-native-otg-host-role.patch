@@ -1,0 +1,45 @@
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -101,6 +101,9 @@
+ 
+ /* Native MTU3 checks these clock/reset bits after enabling the U3 host port. */
+ constexpr uint32_t kMtu3U3ClockMask = 0x10501U; /* U3 MAC, SYS125, REF, SYSPLL */
++/* Native MTU3 dynamic Type-C host role: force IDDIG, clear RG_IDDIG and OTG_SEL. */
++constexpr uint32_t kMtu3U2RoleMask = (1U << 11) | (1U << 10) | (1U << 7);
++constexpr uint32_t kMtu3U2ForceIddigHost = 1U << 11;
+ 
+ /* Apply only the Dali MTU3 host fields declared in the live USB0 device tree.
+  * Preserve unrelated register bits, verify every write, and restore the owned
+@@ -688,11 +691,16 @@
+             saved, u3, cmd, sts);
+         return true; /* No port was changed. */
+     }
+-    /* SSUSB_U2_PORT_HOST_SEL is HOST(bit2) | VBUSVALID(bit9),
+-     * not just bit2. Preserve OTG/IDDIG/other firmware fields.
++    /* SSUSB_U2_PORT_HOST_SEL is HOST(bit2) | VBUSVALID(bit9), not just bit2.
++     * Match the native Type-C role-switch host state for IDDIG and OTG_SEL below.
+      */
+-    /* Native ssusb_set_force_vbus(false) also selects OTG when keep-host-on is absent. */
+-    uint32_t wanted = (saved & ~3U) | 0x204U | (engineProbe ? 0x80U : 0U);
++    uint32_t wanted = (saved & ~3U) | 0x204U;
++    if (engineProbe) {
++        /* Match ssusb_set_force_mode(HOST): FORCE_IDDIG=1, RG_IDDIG=0;
++         * the successful native Type-C host snapshot also has OTG_SEL=0.
++         */
++        wanted = (wanted & ~kMtu3U2RoleMask) | kMtu3U2ForceIddigHost;
++    }
+     bool u3Touched = engineProbe;
+     bool u3Ready = true;
+     uint32_t wantedU3 = (u3 & ~3U) | 4U; /* Native host path enables U3 before U2. */
+@@ -711,8 +719,9 @@
+     bool u2Control = enabled == wanted;
+     bool u2MacReady = u2Control && waitBits(ip, 0x14, 1U, 1U, 100, 100);
+     bool ready = u3Ready && u2MacReady;
+-    u2Log("DALI U2: enable saved=%08x want=%08x read=%08x ctrl=%u\n",
+-        saved, wanted, enabled, u2Control);
++    u2Log("DALI U2: enable saved=%08x want=%08x read=%08x ctrl=%u forceIddig=%u rgIddig=%u otgSel=%u\n",
++        saved, wanted, enabled, u2Control, (enabled >> 11) & 1U,
++        (enabled >> 10) & 1U, (enabled >> 7) & 1U);
+     u2Log("DALI U2: MAC ready=%u sts=%08x/%08x\n",
+         u2MacReady, ip.read(0x10), ip.read(0x14));
+     bool ppRestored = true, nativeReady = true, ckTouched = false;
