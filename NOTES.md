@@ -1,3 +1,19 @@
+## CURRENT HANDOFF — patch0131 compiled; originals verified, no active trial (2026-10-22)
+
+Patch0131 adds the missing native post-PHY `ssusb_ip_sw_reset` step before host MAC tuning/xHCI DMA. With halted/no-published-DMA and exact owned IPPC controls, it disables U2/U3 ports, pulses whole-IP reset1us, reapplies saved powered-host/device-PDN controls and U3/U2 host routes, and waits for the native clock/reset and xHCI-halted conditions. Existing source lease, DMA shutdown/PHY/MAC/port/resource restoration remain. It also snapshots/restores and clears native repeater D17[1:0] SQD before power-on. Exact patch0130->0131 replay and actual ARM64 DaliUSBHost.cpp compilation pass. This source-backed sequence difference is not yet proven to fix attachment; full build/package pending.
+
+Fresh read-only Android register baseline after patch0130 recovery: repeater chip74, D17=00, D88=00, D89=40, D8B=46. MT6373 VUSB control1b95=01, voltage1e0d=0b/1e0c=00 (native3000mV). These are Android-device-mode values, not ABL or native-host state. Debugfs mounted; only targeted analog/repeater configuration addresses and VUSB controls were read; no tuning writes. No additional VUSB rail policy was inferred from these values. Logs in `research/dali-usb-root/audit/android-after0130-*` (ignored).
+
+Latest patch0130 photo121450 still has no attachment; original full pair is restored and physically verified. No active trial, no userdata/GPT/U-disk writes. Build patch0131, inspect/package actual artifacts, then request current cable-swap availability before the next actual trial.
+
+## CURRENT HANDOFF — patch0130 no attach; original pair restored/physically verified (2026-10-22)
+
+Photo `IMG_20261022_121450.jpg`: repeater efuse/defaults ready=1, top81=16/top82=13/D22=34; post-power native host calibration ready=1. Slew still valid=0/fm=0/default3. xHCI runs its No-op path but USB2 port2 raw=0x2a0 (PP1/CCS0/PED0/PLS5/speed0), attachment timeout5211ms. Held VBUS samples around4.98V at phone ADC. After controller stop/reset, read-only monitor=0/DP0/DM0; that is not a live during-scan line measurement. At~T97404ms vfs_mountroot panics bdevvp failed open @vfs_subr.c:2168. No descriptor, MSC, capacity, sector read or USB root success. Patch0130 did not resolve attachment.
+
+Fastboot returned and candidate `usb-repeater-host-order-39719999704` helper restored original init_boot_b then boot_b. Android boot completed; helper verify passed Dali/model/slot_b/root and full physical original partition sizes/SHA256. Manifest originals_verified plus photo observation. NO ACTIVE TRIAL OR PENDING RESTORATION. No userdata/GPT/U-disk writes. Recovery/verify logs: `research/dali-usb-root/ci-artifacts/run39719999704-{recover,verify}.log`.
+
+Next: compare complete native XSphy/repeater power sequence and analog supply state against current XNU. Native power_on clears repeater SQD at D17[1:0]; this field is absent from XNU, but its reset/current value and impact are not yet established. Avoid another one-bit diagnostic trial without a consolidated evidence-backed candidate. Do not infer loaded connector voltage from PP/phone ADC or active line state from post-stop monitor.
+
 ## CURRENT HANDOFF — patch0130 trial rebooted; ORIGINAL RESTORATION PENDING (2026-10-22)
 
 The user explicitly confirmed current cable-swap availability. Candidate `shim/out-dali/usb-repeater-host-order-39719999704` passed fresh Android physical original size/SHA256 checks and fastboot identity/slot/unlocked/partition-size checks. Its helper flashed temporary `init_boot_b` then `boot_b`, requested reboot successfully, and recorded `trial_rebooted`. Original `init_boot_b`/`boot_b` restoration is now PENDING. The user was told to swap the PC cable for direct OTG + U-disk, keep connected about one minute, and photograph the console. No hardware result for patch0130 yet; USB attachment/MSC/read/root remain unproven. No userdata/GPT/U-disk writes.

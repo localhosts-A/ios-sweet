@@ -1,0 +1,114 @@
+diff --git a/iokit/Kernel/arm/DaliUSBHost.cpp b/iokit/Kernel/arm/DaliUSBHost.cpp
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -424,11 +424,11 @@
+  */
+ class ScopedRepeater {
+     struct Field { uint16_t reg; uint8_t mask, saved; bool dirty; };
+     uint8_t intrCal = 0, termCal = 0;
+     bool calibrationReady = false;
+-    Field fields[27] = {
++    Field fields[28] = {
+         {0xd00, 1, 0, false}, {0xd03, 3, 0, false},
+         {0xd12, 0x20, 0, false}, {0xd34, 1, 0, false},
+         {0xd89, 0xc0, 0, false}, {0xd8b, 0x20, 0, false},
+         {0xd92, 7, 0, false}, {0xd94, 2, 0, false},
+         {0xd13, 0x78, 0, false}, {0xd21, 0x80, 0, false},
+@@ -438,11 +438,11 @@
+         {0xd30, 0x7f, 0, false}, {0xd24, 0x77, 0, false},
+         {0xd14, 7, 0, false}, {0xd27, 0xc0, 0, false},
+         {0xd20, 4, 0, false}, {0xd8a, 7, 0, false},
+         {0xd35, 6, 0, false}, {0xd31, 0xff, 0, false},
+         {0xd10, 0x70, 0, false}, {0xd18, 0xff, 0, false},
+-        {0xd1b, 0x7f, 0, false}
++        {0xd1b, 0x7f, 0, false}, {0xd17, 3, 0, false}
+     };
+     bool saved = false;
+     uint32_t status = 0;
+     bool read(uint16_t reg, uint8_t *v) {
+         bool ok = dali_pmif_transfer(14, reg, v, false, &status);
+@@ -544,11 +544,12 @@
+             uint8_t current = 0;
+             if (!read(field.reg, &current) || current != field.saved) { return false; }
+         }
+         if (!read(0, &chip) || chip != 0x74 || !read(0xd91, &reset) || reset != 0) { return false; }
+         saved = true;
+-        bool ok = change(0xd92, 7, 7) && change(0xd94, 2, 2);
++        /* Native power_on clears SQD before the normal chip74 power sequence. */
++        bool ok = change(0xd17, 3, 0) && change(0xd92, 7, 7) && change(0xd94, 2, 2);
+         ok = ok && off();
+         ok = ok && (!calibrated || calibrate());
+         /* Normal power-on in vendor >=E3 path. */
+         ok = ok && change(0xd12, 0x20, 0x20) && change(0xd89, 0x80, 0x80) &&
+             change(0xd8b, 0x20, 0) && change(0xd00, 1, 1);
+@@ -605,10 +606,56 @@
+ 
+ bool hostStillHalted(const WriteMapping &ip, const ReadMapping &xhci, unsigned op) {
+     uint32_t s1 = ip.read(0x10), s2 = ip.read(0x14), status = xhci.read(op + 4);
+     return s1 != ~0U && s2 != ~0U && (s1 & 0xd01U) == 0xd01U && (s2 & 1U) &&
+         xhci.read(op) == 0 && status != ~0U && (status & 0x801U) == 1U;
++}
++
++/* Native switch_port_to_on powers the PHY, applies host mode, then pulses
++ * ssusb_ip_sw_reset before enabling the host ports. Repeat that MAC-only IP
++ * reset here: earlier platform clock startup occurred before PHY power-on.
++ * No DMA may be published. Preserve the owned IPPC controls, source lease and
++ * PHY state; the existing shutdown path restores the full firmware handoff.
++ */
++bool resetHostAfterPhy(WriteMapping &ip, const ReadMapping &xhci, unsigned op,
++    uint32_t u2Host, uint32_t u3Host) {
++    uint32_t ctrl0 = ip.read(0), ctrl1 = ip.read(4), ctrl2 = ip.read(8);
++    if (!hostStillHalted(ip, xhci, op) || ctrl0 != 0x10411020U || ctrl1 != 0 ||
++        ctrl2 != 1 || ip.read(0x50) != u2Host || ip.read(0x30) != u3Host) {
++        u2Log("DALI MTU3: post-PHY reset entry rejected; no reset\n");
++        return false;
++    }
++    /* Match the native disabled-port -> IP reset -> host-enable order. */
++    ip.write(0x50, u2Host | 3U);
++    ip.write(0x30, u3Host | 3U);
++    bool disabled = ip.read(0x50) == (u2Host | 3U) &&
++        ip.read(0x30) == (u3Host | 3U);
++    if (!disabled) {
++        /* No reset happened; restore port controls before cleanup. */
++        ip.write(0x30, u3Host); ip.write(0x50, u2Host);
++        u2Log("DALI MTU3: post-PHY reset port-disable failed\n");
++        return false;
++    }
++    ip.write(0, ctrl0 | 1U);
++    IODelay(1); /* Native SSUSB_IP_SW_RST pulse. */
++    ip.write(0, ctrl0);
++    ip.write(8, ctrl2); /* Device IP stays powered down. */
++    ip.write(4, ctrl1); /* Host IP stays powered. */
++    ip.write(0x30, u3Host);
++    ip.write(0x50, u2Host);
++    bool controls = ip.read(0) == ctrl0 && ip.read(4) == ctrl1 &&
++        ip.read(8) == ctrl2 && ip.read(0x30) == u3Host && ip.read(0x50) == u2Host;
++    bool clocks = controls && waitBits(ip, 0x10, kMtu3U3ClockMask | 0xd01U,
++        kMtu3U3ClockMask | 0xd01U, 200, 100) && waitBits(ip, 0x14, 1U, 1U, 200, 100);
++    bool halted = false;
++    for (unsigned n = 0; clocks && n < 200; ++n) {
++        if (hostStillHalted(ip, xhci, op)) { halted = true; break; }
++        IODelay(100);
++    }
++    u2Log("DALI MTU3: post-PHY IP reset ready=%u controls=%u clocks=%u halted=%u\n",
++        controls && clocks && halted, controls, clocks, halted);
++    return controls && clocks && halted;
+ }
+ 
+ /* DMA must stop/reset before releasing PHY and platform clocks. */
+ bool integratedStorage(WriteMapping &ip, unsigned op, bool rootMode) {
+     if (!hostDMAValidated) { u2Log("DALI XHCI: DMA policy unverified; engine untouched\n"); return true; }
+@@ -767,10 +814,13 @@
+                     hostStillHalted(ip, xhci, op);
+                 nativeReady = nativeReady && nativePhy.powerOn(engineProbe) && hostStillHalted(ip, xhci, op);
+                 if (nativeReady && engineProbe && repeaterProbe) {
+                     nativeReady = nativeRepeater.setHostMode() && hostStillHalted(ip, xhci, op);
+                 }
++                if (nativeReady && engineProbe) {
++                    nativeReady = resetHostAfterPhy(ip, xhci, op, enabled, wantedU3);
++                }
+                 if (nativeReady) {
+                     uint32_t roleBefore = ip.read(0x50);
+                     nativeReady = roleBefore == enabled && ip.read(0x9c) == savedCK;
+                     if (nativeReady) {
+                         ckTouched = true;
