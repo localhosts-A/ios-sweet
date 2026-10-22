@@ -1,3 +1,15 @@
+## CURRENT HANDOFF — USB2 attach failure narrowed; patch0138 CI passed (2026-10-22)
+
+Latest USB2 symptom is still xHCI port2 `PP=1, CCS=0, PLS=5` (RxDetect), no USB descriptor/MSC/read/root. Patch0137's HS_ENABLE change was a no-op: register `0x2404` was already `0x000060a1` with bit5 set. Native and XNU MTU3 host `U2_CTRL_0P=0xa4c`, `U3_CTRL_0P=0x20c`, repeater host fields, VUSB33 and MAC state otherwise match. The previous patch0137 scan saw live DP/DM `0/0` in both cable orientations; that points upstream of enumeration but isn't a native line-state comparison.
+
+New discriminating register gap: native `SSUSB_OTG_STS=0x13401340` while XNU reports `0`; `SSUSB_VBUS_VALID` is bit9 in the status register. The separately writable `U2_CTRL_0P.VBUSVALID` host bit is already set in the matching `0xa4c` value. Treat OTG_STS as a sensed status, not a bit to force-write. `IP_PW_STS1` differs only at bit9, which vendor headers don't define; do not touch it without documentation.
+
+Patch0138 commit `a9fa700` now matches vendor `ssusb_reset()` by pulsing USBCFG clock-gate mask `0x13` for 1 ms before host power, and clears XS PHY ACR0.CHP_EN per the live `mediatek,chp-en-disable` DT property. Fork CI `39797603879` succeeded through build, linked diagnostics and build-tree artifact upload. No paired device images have been packaged/preflighted and no hardware trial has run for 0138. Review its CHP_EN handling against vendor's `sw_ver == 0` guard before trial.
+
+Next: package the successful 0138 artifact, then resolve the conflicting patch0137 trial/restore records with a fresh read-only device preflight before any flash. In the next bounded scan, correlate OTG_STS/VBUS_VALID, U2 DTM1 and live DP/DM with port2 CCS/PLS; try a low-power known-good USB2 mouse/keyboard to separate a dead USB2 path from U-disk/adapter-specific behavior. Do not change the undocumented IP_PW_STS1 bit9.
+
+---
+
 ## CURRENT HANDOFF — patch0132 complete candidate ready; originals physically verified (2026-10-22)
 
 Native Android capture complete/retrieved: same1f75:0903/480Mbps, block249905152 sectors/127951437824bytes, successful repeater host fields match the XNU photo (VRT24/DISCd0/EYE24/INTR26/TERM06/D22=34). Files research/dali-usb-root/native-analog-0131 (ignored), capture-0131-state.json=complete_retrieved. Configured internal VUSB supply native1b95=01/1e0d=0b/1e0c=00; not a voltage measurement and not proof of ABL state. No further Android capture swap is needed.
