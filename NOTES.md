@@ -1,3 +1,11 @@
+## CURRENT HANDOFF — known-good native capture retrieved; patch0132 compiled (2026-10-22)
+
+Native capture completed/retrieved in research/dali-usb-root/native-analog-0131; summary.json verifies actual1f75:0903 at480Mbps with block249905152x512=127951437824bytes. Host IPPC U2=a4c/U3=20c. Native repeater D10=24/D11=26/D18=d0/D1a=06/D1b=24/D22=34 exactly match photographed XNU host readbacks; device->host changes only D11/D18/D1a/D1b among captured controls. Native D16=04/D17=00/D88=00/D89=40/D8a=33/D8b=46/top0e=74. VUSB1b95=01/1e0c=00/1e0d=0b (3000mV). This does NOT establish ABL/XNU rail state. Capture manifest complete_retrieved; no duplicate capture needed. Android remains original full pair restored/physically verified; no active trial/pending restore.
+
+Concrete remaining source gap: native ssusb_rscs_init calls regulator_enable(vusb33); XNU only accepted DT regulator-always-on as policy and never read/enabled the actual rail. Patch0132 implements a narrow native MT6373 SID5 VUSB path: only ID9/B, ctrl1b95 and voltage1e0c/d read access; writes only1b95. Captured chip IDs9=73/B=73 and voltage0b/trim0/normal mode required; no voltage/mode programming. A disabled enable bit is snapshotted, set, read back and given live-DT720us ramp; existing enabled rail is untouched. xHCI health checks actual rail enable, and original enable bit is restored only after confirmed USB/DMA shutdown, IP sleep and resource/control restoration. Failed shutdown retains rail/resources until reboot; restore failure clears safe-rescan flag. Other SIDs and read16 remain unchanged.
+
+Local actual ARM64 DaliUSBHost.cpp and DaliPMIF.cpp compile0/2 failures. Exact patch0131->0132 replay matches both staged files. Kernel build/package pending; no new candidate flashed. This closes a source-backed missing operation, not proof that firmware leaves VUSB disabled or that it fixes attachment. Original pair remains verified. No userdata/GPT/U-disk writes.
+
 ## CURRENT HANDOFF — native USB analog capture armed; original pair verified (2026-10-22)
 
 Patch0131 photo145226 confirms successful post-PHY reset/readback/xHCI but still port2 PP1/CCS0/PLS5 and root unavailable. Original init_boot_b then boot_b restored; completed Android full physical original sizes/SHA256 verified. NO ACTIVE TRIAL OR PENDING RESTORATION. No userdata/GPT/U-disk writes.

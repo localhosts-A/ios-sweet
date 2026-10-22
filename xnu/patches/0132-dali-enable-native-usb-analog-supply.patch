@@ -1,0 +1,156 @@
+diff --git a/iokit/Kernel/arm/DaliPMIF.cpp b/iokit/Kernel/arm/DaliPMIF.cpp
+--- a/iokit/Kernel/arm/DaliPMIF.cpp
++++ b/iokit/Kernel/arm/DaliPMIF.cpp
+@@ -1,8 +1,9 @@
+ /* Dali main PMIF/SPMI, AP software channel2. Protocol from vendor
+  * spmi-mtk-pmif-core.c, e45c3199537fbba9aae5fb06c31fc8dbd3c1dcee.
+- * Share the channel between RTC and USB clients. Adopt firmware setup;
++ * Share the channel between RTC and USB clients, including the narrow SID5
++ * VUSB regulator subset. Adopt firmware setup;
+  * never program PMIF arbitration, clocks, reset or error-recovery controls.
+  */
+ #include <pexpert/arm64/board_config.h>
+ #if defined(SWEET)
+ #include "DaliPMIF.h"
+@@ -113,11 +114,18 @@
+ }
+ 
+ bool dali_pmif_transfer(uint8_t sid, uint16_t address, uint8_t *value,
+     bool write, uint32_t *status)
+ {
+-    if (!value || !status || !threadContext() || (sid != 9 && sid != 14)) {
++    bool vusbRegister = address == 0x0009 || address == 0x000b ||
++        address == 0x1b95 || address == 0x1e0c || address == 0x1e0d;
++    /* SID5 is not a general PMIC API: identity/voltage readback plus the
++     * native MT6373 VUSB enable register only. Other RTC/USB SIDs are unchanged.
++     */
++    bool allowed = sid == 9 || sid == 14 ||
++        (sid == 5 && vusbRegister && (!write || address == 0x1b95));
++    if (!value || !status || !threadContext() || !allowed) {
+         return false;
+     }
+     IOLock *lock = __atomic_load_n(&busLock, __ATOMIC_ACQUIRE);
+     if (!lock) { return false; }
+     IOLockLock(lock);
+diff --git a/iokit/Kernel/arm/DaliUSBHost.cpp b/iokit/Kernel/arm/DaliUSBHost.cpp
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -416,10 +416,71 @@
+     }
+     u2Log("DALI RPTR: handoff chip=%02x d00=%02x d03=%02x d12=%02x d89=%02x d8b=%02x d91=%02x read-only\n",
+         values[0], values[1], values[2], values[3], values[4], values[5], values[6]);
+ }
+ 
++/* ssusb_rscs_init enables the live-DT MT6373 VUSB rail, not just its
++ * regulator-always-on policy. Native attached-host capture has SID5 IDs73/73,
++ * 1b95=01 and 1e0d/1e0c=0b/00 (3.0V). Never program voltage or mode. If this
++ * exact rail was disabled at handoff, own only its enable bit until USB sleeps.
++ */
++class ScopedUsbAnalogSupply {
++    uint8_t saved = 0;
++    bool dirty = false;
++    bool read(uint16_t reg, uint8_t *value) {
++        uint32_t status = 0;
++        bool ok = dali_pmif_transfer(5, reg, value, false, &status);
++        if (!ok) { u2Log("DALI VUSB33: read failed reg=%04x pmif=%08x\n", reg, status); }
++        return ok;
++    }
++public:
++    bool enable() {
++        uint8_t id = 0, swid = 0, control = 0, voltage = 0, trim = 0;
++        bool got = read(9, &id) && read(0xb, &swid) && read(0x1b95, &control) &&
++            read(0x1e0d, &voltage) && read(0x1e0c, &trim);
++        if (!got || id != 0x73 || swid != 0x73 || (control & 2U) ||
++            (voltage & 15U) != 0xb || (trim & 15U) != 0) {
++            u2Log("DALI VUSB33: profile rejected got=%u id=%02x/%02x ctrl=%02x voltage=%02x trim=%02x\n",
++                got, id, swid, control, voltage, trim);
++            return false;
++        }
++        saved = control;
++        if (!(control & 1U)) {
++            uint8_t before = 0;
++            if (!read(0x1b95, &before) || before != saved) { return false; }
++            uint8_t wanted = saved | 1U;
++            uint32_t status = 0;
++            dirty = true; /* A timed-out transfer can still have changed the bit. */
++            bool wrote = dali_pmif_transfer(5, 0x1b95, &wanted, true, &status);
++            bool gotAfter = read(0x1b95, &control);
++            if (!wrote || !gotAfter || control != wanted) {
++                u2Log("DALI VUSB33: enable failed wrote=%u read=%u ctrl=%02x pmif=%08x\n",
++                    wrote, gotAfter, control, status);
++                return false;
++            }
++            IODelay(720); /* Live-DT regulator-enable-ramp-delay. */
++        }
++        u2Log("DALI VUSB33: ready=1 before=%02x read=%02x changed=%u voltage=%02x trim=%02x\n",
++            saved, control, dirty, voltage, trim);
++        return true;
++    }
++    bool changed() const { return dirty; }
++    bool restore() {
++        if (!dirty) { u2Log("DALI VUSB33: restore=1 changed=0\n"); return true; }
++        uint8_t before = 0, after = 0;
++        if (!read(0x1b95, &before)) { return false; }
++        uint8_t wanted = (before & ~1U) | (saved & 1U);
++        uint32_t status = 0;
++        bool wrote = dali_pmif_transfer(5, 0x1b95, &wanted, true, &status);
++        bool got = read(0x1b95, &after);
++        bool ok = wrote && got && after == wanted;
++        u2Log("DALI VUSB33: restore=%u changed=1 want=%02x read=%02x\n", ok, wanted, after);
++        if (ok) { dirty = false; }
++        return ok;
++    }
++};
++
+ /* MT6379 chip74 normal-mode power with optional native host calibration.
+  * Calibration reads efuse shadow bytes; never programs any fuse. Every
+  * changed operational register is snapshotted and restored on shutdown.
+  */
+ class ScopedRepeater {
+@@ -718,10 +779,15 @@
+         for (unsigned i = 0; i < 3; ++i) {
+             if (!dali_pmif_transfer(14, regs[i], values[i], false, &status)) {
+                 u2Log("DALI XHCI: health rejected PMIF reset=%u reg=%04x status=%08x\n",
+                     resetPending, regs[i], status); return false;
+             }
++        }
++        uint8_t analog = 0;
++        if (!dali_pmif_transfer(5, 0x1b95, &analog, false, &status) || (analog & 3U) != 1U) {
++            u2Log("DALI XHCI: health rejected VUSB33 ctrl=%02x pmif=%08x\n", analog, status);
++            return false;
+         }
+         bool healthy = (power & 4) && !(power & 0x63) && (otg & 1) && !fault;
+         if (!healthy) {
+             u2Log("DALI XHCI: health rejected supply reset=%u power=%02x otg=%02x fault=%02x\n",
+                 resetPending, power, otg, fault);
+@@ -1079,11 +1145,13 @@
+     constexpr uint32_t clockMask = 0xd01U; /* SYSPLL/REF/SYS125/XHCI */
+     bool portRestored = true;
+     bool clockReady = waitBits(ip, 0x10, clockMask, clockMask, 200, 100);
+     uint32_t liveSts1 = ip.read(0x10), liveSts2 = ip.read(0x14);
+     kprintf("DALI HOST: powered clocks=%u sts=%08x/%08x\n", clockReady, liveSts1, liveSts2);
+-    if (clockReady) {
++    ScopedUsbAnalogSupply analogSupply;
++    bool analogReady = engineProbe != 1 || (clockReady && analogSupply.enable());
++    if (clockReady && analogReady) {
+         if (liveSts2 & 1U) {
+             ReadMapping phy;
+             if (phy.open(0x16730000, 0x400)) {
+                 kprintf("DALI HOST: PHY acr0=%08x acr6=%08x dtm0=%08x dtm1=%08x (observe only)\n",
+                     phy.read(0x300), phy.read(0x318), phy.read(0x368), phy.read(0x36c));
+@@ -1133,11 +1201,14 @@
+     bool released = portRestored && asleep && releaseResourcesAndRestore(ip, requestGates,
+         oldRequest, oldAck, savedGates, ctrl0);
+     bool controlsRestored = ip.read(0) == ctrl0 && ip.read(4) == ctrl1 && ip.read(8) == ctrl2;
+     u2Log("DALI HOST: host handoff cleaned sleep=%u ctrl=%u SPM/gates/force=%u U2=%u\n",
+         asleep, controlsRestored, released, portRestored);
+-    if (!asleep || !released) {
++    bool analogRestored = !analogSupply.changed();
++    if (asleep && released && controlsRestored) { analogRestored = analogSupply.restore(); }
++    if (!asleep || !released || !controlsRestored || !analogRestored) {
++        __atomic_store_n(&hostRetrySafe, false, __ATOMIC_RELEASE);
+         kprintf("DALI HOST: cleanup incomplete; reboot required\n");
+     }
+ }
+ 
+ void dali_usb_host_report()
