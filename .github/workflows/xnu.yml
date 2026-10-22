@@ -166,6 +166,15 @@ jobs:
           grep -Fq 'update(0x155, 0x1f, savedReport)' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI ADC: PDVBUS='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI ADC: failed channel='
+          grep -Fq '(hostSW || change(0x300, 2U, 0))' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          ! grep -Fq 'change(0x300, 1U << 1, 0);' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI OTG: attach accepted tick='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI OTG: pre-host tick='
+          grep -Fq 'channel != 2 && channel != 5 && channel != 7' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
+          grep -Fq 'readDiagnosticADC(2, &dp)' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
+          grep -Fq 'readDiagnosticADC(5, &ibus)' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
+          grep -Fq 'readDiagnosticADC(7, &dm)' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI ADC PROBE: pre-host tick='
           grep -Fq 'dali_usb_host_observe(hostHwrscsV2, hostVusbAlwaysOn, hostNativePhyValidated);' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
           grep -Fq 'PE_parse_boot_argn("daliusbhost"' xnu/iokit/Kernel/arm/DaliUSBPMIC.cpp
           grep -Fq 'hostRanges[6] != 0x16790000 || hostRanges[7] != 0x100' xnu/iokit/Kernel/arm/DaliUSBPMIC.cpp

@@ -1,0 +1,112 @@
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -436,8 +436,9 @@
+             change(0x300, 7U << 24, 0) &&
+             change(0x318, (3U << 30) | (1U << 25), 1U << 30);
+         if (ok) { IODelay(800); }
+-        /* Live DT sets mediatek,chp-en-disable; vendor clears ACR0.CHP_EN. */
+-        ok = ok && change(0x300, 1U << 1, 0);
++        /* Keep CHP_EN for revision 1; the vendor's sw_ver==0 clear remains
++         * below, after the LPM PLL setup.
++         */
+         /* Exact live-DT LPM PLL timings and FS_CR; no efuse/eye overwrite. */
+         ok = ok && change(0x364, 3U << 18, 1U << 18) &&
+             change(0x004, 1U << 16, 1U << 16) && change(0x000, 0xffffff00U, 0x1e1e1900U) &&
+--- a/iokit/Kernel/arm/DaliUSBPower.cpp
++++ b/iokit/Kernel/arm/DaliUSBPower.cpp
+@@ -328,6 +328,62 @@
+     if (state == Finished) { return false; }
+     ++ticks; ++stateTicks;
+     uint64_t now = physicalMs();
++    /* Best-effort ADC diagnostics. A safely restored mux/read failure is
++     * logged but never changes CC, power policy, or scan eligibility.
++     */
++    auto readDiagnosticADC = [this](unsigned channel, unsigned *sample) -> bool {
++        if (adcFault || !sample || (channel != 2 && channel != 5 && channel != 7)) {
++            return false;
++        }
++        uint8_t config = 0, savedReport = 0;
++        if (!read8(0x14f, &config) || !read8(0x155, &savedReport)) {
++            kprintf("DALI ADC PROBE: guard read failed channel=%u pmif=%08x\n", channel, status);
++            return false;
++        }
++        if (config != 0) {
++            kprintf("DALI ADC PROBE: busy guard channel=%u cfg=%02x\n", channel, config);
++            return false;
++        }
++        uint8_t request = (uint8_t)channel;
++        if (!dali_pmif_transfer(14, 0x14f, &request, true, &status)) {
++            uint8_t after = 0xff;
++            if (!read8(0x14f, &after) || after != 0) { adcFault = true; }
++            kprintf("DALI ADC PROBE: trigger failed channel=%u cfg=%02x pmif=%08x\n",
++                channel, after, status);
++            return false;
++        }
++        IOSleep(5);
++        bool idle = false;
++        for (unsigned n = 0; n < 10; ++n) {
++            if (!read8(0x14f, &config)) { break; }
++            if (config == 0) { idle = true; break; }
++            IODelay(100);
++        }
++        if (!idle) {
++            adcFault = true; /* Conversion did not return to the idle state. */
++            kprintf("DALI ADC PROBE: conversion uncertain channel=%u cfg=%02x pmif=%08x\n",
++                channel, config, status);
++            return false;
++        }
++        bool selected = update(0x155, 0x1f, (uint8_t)channel);
++        uint16_t wire = 0;
++        bool got = false;
++        if (selected) {
++            IOSleep(1);
++            got = dali_pmif_read16(14, 0x156, &wire, &status);
++        }
++        /* Always attempt to restore the report mux after a selection attempt. */
++        bool restored = update(0x155, 0x1f, savedReport);
++        if (!restored) { adcFault = true; }
++        unsigned value = ((wire & 0xffU) << 8) | (wire >> 8);
++        if (!selected || !got || !restored || value > 30000) {
++            kprintf("DALI ADC PROBE: read failed channel=%u selected=%u read=%u restored=%u raw=%u\n",
++                channel, selected, got, restored, value);
++            return false;
++        }
++        *sample = value; /* Preserve raw ADC units; do not infer IBUS meaning in OTG. */
++        return true;
++    };
+     if (!startedMs) { startedMs = stateStartedMs = now; }
+     bool rootSession = hostRoot && hostEngine && state == Powered && dali_usb_host_root_active();
+     if (state != Powered && now - startedMs >= 60000) { finishLocked("total60s lease"); return false; }
+@@ -394,6 +450,12 @@
+             else { attachedCC = cc & 15; stable = 1; }
+         } else { stable = 0; attachedCC = 0; }
+         if (stable >= 3) { /* >=200ms between first and third 100ms sample. */
++            uint8_t role = 0, fault = 0;
++            if (!read8(0x41a, &role) || !read8(0x41f, &fault)) {
++                finishLocked("attach readback failed"); return false;
++            }
++            kprintf("DALI OTG: attach accepted tick=%u cc=%02x role=%02x power=%02x otg=%02x fault=%02x VBUS=%umV\n",
++                ticks, cc, role, power, otg, fault, mv);
+             if (!update(0x419, 1, c2 == 2 ? 1 : 0) || !sourceOn()) {
+                 finishLocked("source prepare failed"); return false;
+             }
+@@ -413,6 +475,19 @@
+         if ((power & 4) && mv >= 4400 && mv <= 5500) {
+             state = Powered; stateTicks = 0; stateStartedMs = physicalMs();
+             kprintf("DALI OTG: VBUS valid %umV; connector source confirmed, USB host not started\n", mv);
++            uint8_t role = 0, fault = 0;
++            if (!read8(0x41a, &role) || !read8(0x41f, &fault)) {
++                finishLocked("pre-host readback failed"); return false;
++            }
++            kprintf("DALI OTG: pre-host tick=%u cc=%02x role=%02x power=%02x otg=%02x fault=%02x VBUS=%umV\n",
++                ticks, cc, role, power, otg, fault, mv);
++            unsigned dp = 0, ibus = 0, dm = 0;
++            bool dpOK = readDiagnosticADC(2, &dp);
++            bool ibusOK = readDiagnosticADC(5, &ibus);
++            bool dmOK = readDiagnosticADC(7, &dm);
++            kprintf("DALI ADC PROBE: pre-host tick=%u dp_raw=%u ibus_raw=%u dm_raw=%u valid=%u\n",
++                ticks, dp, ibus, dm, (dpOK ? 1U : 0U) | (ibusOK ? 2U : 0U) | (dmOK ? 4U : 0U));
++            if (adcFault) { finishLocked("ADC probe state uncertain"); return false; }
+             if (hostEngine) {
+                 if (!dali_usb_host_launch(hostHwrscsV2, hostVusbAlwaysOn,
+                     hostNativePhyValidated, hostDMAValidated)) {
