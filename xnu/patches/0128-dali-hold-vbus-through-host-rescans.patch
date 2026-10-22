@@ -1,0 +1,135 @@
+diff --git a/iokit/Kernel/arm/DaliUSBHost.cpp b/iokit/Kernel/arm/DaliUSBHost.cpp
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -18,6 +18,7 @@
+ 
+ namespace {
+ bool hostRunning = false, hostStopRequested = true, hostDMAValidated = false;
++bool hostRetrySafe = false, hostRootActive = false;
+ bool hostLaunchHwrscs = false, hostLaunchVusb = false, hostLaunchNative = false;
+ bool hostCalibrationValid = false;
+ uint32_t hostTerm = 0, hostImpn = 0, hostImpp = 0, hostSW = 0;
+@@ -667,11 +668,13 @@
+         };
+         success = dali_usb_disk_supply(&controller, reader, first, length) == 0;
+         if (success) {
++            __atomic_store_n(&hostRootActive, true, __ATOMIC_RELEASE);
+             u2Log("DALI ROOT: read-only USB partition available; source health monitoring active\n");
+             while (controller.sourceHealthy()) { IOSleep(100); }
+         }
+         /* Wait for any serialized block read before the stack object dies. */
+         dali_usb_disk_detach(&controller);
++        __atomic_store_n(&hostRootActive, false, __ATOMIC_RELEASE);
+     }
+     bool stopped = controller.stop();
+     u2Log("DALI XHCI: integrated result=%u stopped=%u\n", success, stopped);
+@@ -834,12 +837,16 @@
+     uint32_t after = ip.read(0x50);
+     bool restored = after == saved;
+     u2Log("DALI U2: restore want=%08x read=%08x match=%u\n", saved, after, restored);
+-    return restored && u3Restored && ppRestored && phyRestored && repeaterRestored && hostMacRestored;
++    bool retrySafe = restored && u3Restored && ppRestored && phyRestored &&
++        repeaterRestored && hostMacRestored;
++    __atomic_store_n(&hostRetrySafe, retrySafe, __ATOMIC_RELEASE);
++    return retrySafe;
+ }
+ }
+ 
+ void dali_usb_host_observe(bool hwrscsV2, bool vusbAlwaysOn, bool nativePhyValidated)
+ {
++    __atomic_store_n(&hostRetrySafe, false, __ATOMIC_RELEASE);
+     if (!ml_get_interrupts_enabled() || ml_at_interrupt_context()) { return; }
+     int portProbe = 0, powerProbe = 0, phyProbe = 0, repeaterProbe = 0, engineProbe = 0, rootMode = 0;
+     PE_parse_boot_argn("daliusbport", &portProbe, sizeof(portProbe));
+@@ -1061,7 +1068,16 @@
+ 
+ namespace {
+ void hostWorker(void *, wait_result_t) {
+-    dali_usb_host_observe(hostLaunchHwrscs, hostLaunchVusb, hostLaunchNative);
++    unsigned scans = 0;
++    do {
++        __atomic_store_n(&hostRetrySafe, false, __ATOMIC_RELEASE);
++        dali_usb_host_observe(hostLaunchHwrscs, hostLaunchVusb, hostLaunchNative);
++        if (__atomic_load_n(&hostStopRequested, __ATOMIC_ACQUIRE) ||
++            !__atomic_load_n(&hostRetrySafe, __ATOMIC_ACQUIRE)) { break; }
++        ++scans;
++        kprintf("DALI XHCI: scan cleanup verified; keeping VBUS for rescan=%u\n", scans + 1);
++        IOSleep(1000);
++    } while (!__atomic_load_n(&hostStopRequested, __ATOMIC_ACQUIRE));
+     __atomic_store_n(&hostRunning, false, __ATOMIC_RELEASE);
+     thread_terminate(current_thread());
+ }
+@@ -1085,6 +1101,8 @@
+         false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) { return false; }
+     hostLaunchHwrscs = hwrscs; hostLaunchVusb = vusb; hostLaunchNative = native;
+     hostDMAValidated = dma;
++    __atomic_store_n(&hostRootActive, false, __ATOMIC_RELEASE);
++    __atomic_store_n(&hostRetrySafe, false, __ATOMIC_RELEASE);
+     __atomic_store_n(&hostStopRequested, false, __ATOMIC_RELEASE);
+     thread_t worker = THREAD_NULL;
+     if (kernel_thread_start(hostWorker, nullptr, &worker) != KERN_SUCCESS) {
+@@ -1093,6 +1111,7 @@
+     thread_deallocate(worker); return true;
+ }
+ bool dali_usb_host_active() { return __atomic_load_n(&hostRunning, __ATOMIC_ACQUIRE); }
++bool dali_usb_host_root_active() { return __atomic_load_n(&hostRootActive, __ATOMIC_ACQUIRE); }
+ bool dali_usb_host_stop() {
+     __atomic_store_n(&hostStopRequested, true, __ATOMIC_RELEASE);
+     for (unsigned i = 0; i < 4000; ++i) {
+diff --git a/iokit/Kernel/arm/DaliUSBHost.h b/iokit/Kernel/arm/DaliUSBHost.h
+--- a/iokit/Kernel/arm/DaliUSBHost.h
++++ b/iokit/Kernel/arm/DaliUSBHost.h
+@@ -8,10 +8,13 @@
+ void dali_usb_host_observe(bool hwrscsV2, bool vusbAlwaysOn, bool nativePhyValidated);
+ /* Replay saved diagnostic text after source cleanup, under the same lock. */
+ void dali_usb_host_report();
+-/* Integrated worker owns clocks/PHY/DMA through detach and controller stop. */
++/* Integrated scans own clocks/PHY/DMA through each controller stop. Safely
++ * restored scans retry while the separate Type-C source window remains active.
++ */
+ bool dali_usb_host_launch(bool, bool, bool, bool dmaValidated);
+ bool dali_usb_host_stop();
+ bool dali_usb_host_active();
++bool dali_usb_host_root_active();
+ bool dali_usb_host_set_calibration(const uint32_t *config, unsigned words);
+ bool dali_usb_host_set_dma_policy(const uint32_t *config, unsigned words);
+ #endif
+diff --git a/iokit/Kernel/arm/DaliUSBPower.cpp b/iokit/Kernel/arm/DaliUSBPower.cpp
+--- a/iokit/Kernel/arm/DaliUSBPower.cpp
++++ b/iokit/Kernel/arm/DaliUSBPower.cpp
+@@ -329,8 +329,11 @@
+     ++ticks; ++stateTicks;
+     uint64_t now = physicalMs();
+     if (!startedMs) { startedMs = stateStartedMs = now; }
+-    bool rootSession = hostRoot && hostEngine && state == Powered && dali_usb_host_active();
+-    if (!rootSession && now - startedMs >= 60000) { finishLocked("total60s lease"); return false; }
++    bool rootSession = hostRoot && hostEngine && state == Powered && dali_usb_host_root_active();
++    if (state != Powered && now - startedMs >= 60000) { finishLocked("total60s lease"); return false; }
++    if (state == Powered && !rootSession && now - stateStartedMs >= 60000) {
++        finishLocked("60s powered source budget"); return false;
++    }
+     uint8_t cc = 0, power = 0, otg = 0;
+     unsigned mv = 0;
+     if (!snapshot(&cc, &power, &otg, &mv)) { finishLocked("status/fault error"); return false; }
+@@ -363,7 +366,7 @@
+         /* Fixed Rp/default current on both CC pins; no DRP/PD/VCONN. */
+         IODelay(30);
+         state = Waiting; stateTicks = 0; stateStartedMs = physicalMs();
+-        kprintf("DALI OTG: default Rp armed; attach window40s, source lease15s\n");
++        kprintf("DALI OTG: default Rp armed; attach window40s, powered source budget60s\n");
+         return true;
+     }
+     if (ticks % 10 == 0) {
+@@ -423,10 +426,8 @@
+         }
+     } else if (mv < 4400 || !(power & 4)) {
+         finishLocked("VBUS dropped"); return false;
+-    } else if (hostEngine && !dali_usb_host_active()) {
+-        finishLocked("host worker ended"); return false;
+-    } else if (!hostRoot && now - stateStartedMs >= 15000) {
+-        finishLocked("15s source lease expired"); return false;
++    } else if (hostEngine && !dali_usb_host_active() && ticks % 10 == 0) {
++        kprintf("DALI OTG: host scan idle; retaining 5V source VBUS=%umV\n", mv);
+     }
+     return true;
+ }

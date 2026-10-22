@@ -144,7 +144,10 @@ jobs:
           grep -Fq 'config[0] == 5000000 && config[1] == 500000 && config[2] == 0x8585' xnu/iokit/Kernel/arm/DaliUSBPMIC.cpp
           grep -Fq 'control == 0 && mode == 0 && present == 8' xnu/iokit/Kernel/arm/DaliI2C5.cpp
           grep -Fq 'version != 0xa0' xnu/iokit/Kernel/arm/DaliI2C5.cpp
-          grep -Fq 'now - stateStartedMs >= 15000' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
+          grep -Fq 'state == Powered && !rootSession && now - stateStartedMs >= 60000' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
+          grep -Fq 'dali_usb_host_root_active()' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
+          grep -Fq 'keeping VBUS for rescan=' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI OTG: host scan idle; retaining 5V source VBUS='
           grep -Fq 'roleTouched = true;' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI OTG: VBUS valid'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'cleanup incomplete; reboot required'
