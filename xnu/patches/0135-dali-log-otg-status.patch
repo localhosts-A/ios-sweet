@@ -1,0 +1,21 @@
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -1008,2 +1008,5 @@
+     uint32_t saved = ip.read(0x50), u3 = ip.read(0x30);
++    uint32_t otg = ip.read(0x18), pw1 = ip.read(0x10), pw2 = ip.read(0x14);
++    u2Log("DALI OTG: pre-host sts=%08x pw1=%08x pw2=%08x u2=%08x u3=%08x\n",
++        otg, pw1, pw2, saved, u3);
+     uint32_t cmd = xhci.read(op), sts = xhci.read(op + 4);
+@@ -1062,4 +1062,6 @@
+             u2Log("DALI PHY: UTMI16/host ready=%u\n", nativeReady);
+         }
++        u2Log("DALI OTG: post-phy sts=%08x pw1=%08x pw2=%08x u2=%08x u3=%08x\n",
++            ip.read(0x18), ip.read(0x10), ip.read(0x14), ip.read(0x50), ip.read(0x30));
+         if (engineProbe && nativeReady) {
+             hostMacReady = hostMac.apply();
+@@ -1081,3 +1081,5 @@
+             }
+         }
++        u2Log("DALI OTG: pre-xhci sts=%08x pw1=%08x pw2=%08x u2=%08x u3=%08x\n",
++            ip.read(0x18), ip.read(0x10), ip.read(0x14), ip.read(0x50), ip.read(0x30));
+         ReadMapping phy;

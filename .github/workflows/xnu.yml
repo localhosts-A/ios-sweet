@@ -293,6 +293,10 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI PHY: post-scan line valid='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI PHY: host mode ready=%u dtm1=%08x forceIddig=%u rgIddig=%u'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI PHY: live attachment line elapsed=%llu monitor=%08x valid=%u dp=%u dm=%u'
+          grep -Fq 'uint32_t otg = ip.read(0x18), pw1 = ip.read(0x10), pw2 = ip.read(0x14);' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI OTG: pre-host sts=%08x pw1=%08x pw2=%08x u2=%08x u3=%08x'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI OTG: post-phy sts=%08x pw1=%08x pw2=%08x u2=%08x u3=%08x'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI OTG: pre-xhci sts=%08x pw1=%08x pw2=%08x u2=%08x u3=%08x'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI PHY: slew calibration ready='
           grep -Fq 'uint32_t fm = phy.read(0x10c);' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           grep -Fq 'valid=%u fm=%u value=%u' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
