@@ -1,4 +1,16 @@
-## CURRENT HANDOFF — Android restored and verified; consolidated diagnostic image next (2026-10-23)
+## CURRENT HANDOFF — patch0142 reached xHCI attach scan; originals restored and verified (2026-10-23)
+
+The patch0142 trial has ended and the stock pair is back on the phone. Photo `IMG_20261023_034907.jpg` confirms the polarity-matched TCPC/USB3 PHY guard now passes; MT6379 reports CC=`02`, source VBUS≈4.98V, and attached-source role `09`. The polling xHCI engine starts, completes its No-op command, powers USB2 protocol port2, and scans for 5.2s. It times out at `stage=attachment` with PORTSC `0x000002a0` (PP=1, CCS=0, PED=0, PLS=5/RxDetect); the SoC PHY monitor stayed `0` (DP=0, DM=0) during the sample window. The controller was stopped/reset and DMA ownership returned; displayed PHY/repeater/MTU3 controls were restored. XNU then panicked at `vfs_mountroot` because no USB root device was available. No device descriptors, BOT/MSC command, capacity, HFS read or root block read is evidenced.
+
+Recovery completed: `device_pair.py recover` restored `init_boot_b` then `boot_b`; after Android reported `sys.boot_completed=1`, `device_pair.py verify` confirmed Dali/model 25060RK16C, slot `_b`, and both original physical partition sizes/SHA256. There is no active trial. The later ADB poll found no connected transport; no further device write occurred.
+
+Next: compare the synchronized XNU attach readings against a native Android OTG host capture, especially USB-DP/DM levels and the SoC host-status delta (`IP_PW_STS1` XNU `0x01013d0f` vs native `0x01013f0f`; bit9 remains undocumented). Do not extend the attachment timeout or write undocumented status bits as a fix. USB enumeration/MSC/HFS/root are still unverified.
+
+Prepared the existing Android capture helper at `tools/dali-usb-host-capture.sh` to collect targeted TCPCI ROLE_CTRL/CC/fault/power status and standard MT6379 IIO USB-DP/USB-DM/IBUS samples alongside the existing xHCI/USB snapshots. It writes the most relevant filtered summary to `FINAL.txt` and prints that summary last. The ADC calls perform standard one-shot measurements; IBUS direction is not assumed. The capture has not been run because ADB disconnected after recovery.
+
+---
+
+## PREVIOUS HANDOFF — Android restored and verified; consolidated diagnostic image next (2026-10-23)
 
 The phone is connected through ADB. Read-only status is Android Dali, model 25060RK16C, slot _b, Android 17, boot_completed=1. `shim/out-dali/usb-clkgate-39797603879/device_pair.py verify ...` completed: original boot_b/init_boot_b full physical sizes and SHA256 match the saved backup pair; manifest state is `originals_verified`. No fastboot device is currently listed. No partition or USB setting was changed; ADB daemon startup was the only side effect.
 

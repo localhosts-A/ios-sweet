@@ -1,7 +1,8 @@
 #!/system/bin/sh
 # Run as root on stock Dali Android; survives the ADB cable being removed.
-# Read existing kernel interfaces only. Never changes USB role, regulators,
-# register values, partition contents or mount state. Debugfs must be mounted.
+# Read existing kernel interfaces and use MT6379's standard IIO one-shot
+# conversions for USB-DP/USB-DM and IBUS. Never changes USB role, regulator
+# policy, partition contents or mount state. Debugfs must be mounted.
 # Usage: sh dali-usb-host-capture.sh /data/local/tmp/dali-usb-host-capture
 set -eu
 
@@ -49,6 +50,38 @@ read_usb_analog() {
     timeout 3 dd if="$map" bs=9 skip=7692 count=2 2>/dev/null || true
 }
 
+read_tcpc_status() {
+    printf '\nTARGETED MT6379 TCPC STATUS (READ ONLY)\n'
+    map=/sys/kernel/debug/regmap/0-0e/registers
+    [ -r "$map" ] || return 0
+    identity=$(timeout 3 dd if="$map" bs=8 count=1 2>/dev/null || true)
+    case "$identity" in '000: 74') ;; *)
+        printf 'regmap layout/chip mismatch: %s\n' "$identity"; return 0 ;; esac
+    printf '%s\n' "$identity"
+    # TCPCI ROLE_CTRL, CC_STATUS, FAULT_STATUS and POWER_STATUS on SID14.
+    for register in 1045 1050 1053 1054; do
+        timeout 3 dd if="$map" bs=8 skip="$register" count=1 2>/dev/null || true
+    done
+}
+
+read_usb_adc() {
+    printf '\nMT6379 USB ANALOG ADC (IIO ONE-SHOT; IBUS DIRECTION NOT ASSUMED)\n'
+    found=0
+    for device in /sys/bus/iio/devices/iio:device*; do
+        [ -r "$device/name" ] || continue
+        name=$(timeout 2 cat "$device/name" 2>/dev/null || true)
+        case "$name" in *6379*|*6373*) ;; *) continue ;; esac
+        found=1
+        read_file "$device/name"
+        for input in "$device"/in_voltage2_* "$device"/in_voltage_usb-dp_* \
+                    "$device"/in_voltage7_* "$device"/in_voltage_usb-dm_* \
+                    "$device"/in_current5_* "$device"/in_current_ibus_*; do
+            read_file "$input"
+        done
+    done
+    [ "$found" -eq 1 ] || printf 'MT6379 IIO device not exposed\n'
+}
+
 snapshot() {
     destination=$out/$1.txt
     {
@@ -69,6 +102,8 @@ snapshot() {
         timeout 5 cat /sys/kernel/debug/regulator/regulator_summary 2>/dev/null |
             grep -E 'usb|otg|6379|boost' || true
         read_usb_analog
+        read_tcpc_status
+        read_usb_adc
         printf '\nPHY PROVIDERS\n'
         ls -l /sys/class/phy 2>/dev/null || true
         printf '\nCHARGER USB STATUS\n'
@@ -105,6 +140,18 @@ snapshot() {
     } > "$destination" 2>&1
 }
 
+final_summary() {
+    printf 'DALI NATIVE USB CAPTURE FINAL: state=%s\n' \
+        "$(cat "$out/state" 2>/dev/null || echo unknown)"
+    for name in host-attached host-after-5s host-after-15s device-before; do
+        file=$out/$name.txt
+        [ -r "$file" ] || continue
+        printf '\n--- %s ---\n' "$name"
+        grep -E '^(FILE |DEVICE |BLOCK |TARGETED |MT6379 |[0-9a-f]{3,4}:)|role$|orientation$|speed$|size$|in_voltage|in_current|SSUSB_IP_|SSUSB_OTG_|DALI NATIVE' \
+            "$file" || true
+    done
+}
+
 snapshot device-before
 echo waiting-host > "$out/state"
 # 10 minute bounded attachment window. No background permanent service.
@@ -119,6 +166,8 @@ while [ "$count" -lt 600 ]; do
             sleep 10
             snapshot host-after-15s
             echo complete > "$out/state"
+            final_summary > "$out/FINAL.txt"
+            cat "$out/FINAL.txt"
             exit 0
             ;;
     esac
@@ -126,3 +175,5 @@ while [ "$count" -lt 600 ]; do
     count=$((count + 1))
 done
 echo attachment-timeout > "$out/state"
+final_summary > "$out/FINAL.txt"
+cat "$out/FINAL.txt"
