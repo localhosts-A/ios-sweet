@@ -206,6 +206,9 @@ jobs:
           grep -Fq 'ip.write(0x30, u3);' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U3: host enable saved='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U3: restore want='
+          grep -Fq 'class ScopedDaliUsb3Phy' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U3 PHY: native host lane ready=1 orientation='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U3 PHY: owned lane/selector restored='
           grep -Fq 'portRestored && asleep && releaseResourcesAndRestore' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U2: MAC ready='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U2: enable saved='

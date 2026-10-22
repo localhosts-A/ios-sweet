@@ -1,0 +1,178 @@
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -481,0 +482,149 @@
++/* The native MTU3 host path powers the XSPHY U3 instance as well as U2.
++ * Live Dali DT names the lane/global windows and supplies the U3 orientation
++ * switch. Values below are read-only MTK eFuse data captured from the target
++ * mtk-devinfo nvmem cells (four words at 0x1c4/1c8/1cc/1d0); they are stable
++ * board calibration, not values inferred from the failed XNU port. TCPC
++ * PLUG_ORIENT (SID14:0x419 bit0) chooses the normal/flip set.
++ */
++class ScopedDaliUsb3Phy {
++    enum Bank : uint8_t { Global = 0, Lane = 1, Selector = 2 };
++    struct Field { Bank bank; uint16_t offset; uint32_t mask, value, saved; bool dirty; };
++    WriteMapping global, lane, selector;
++    Field fields[22] = {
++        {Selector, 0x000, 1U << 18, 0, 0, false},
++        {Global, 0x114, 0x78000000U, 0, 0, false}, /* V2V trim */
++        {Global, 0x100, 0x003f0000U, 0, 0, false}, /* bias/intr control */
++        {Lane,   0x40c, 1U << 31, 1U << 31, 0, false},
++        {Lane,   0x338, 0x01e00000U, 0x01a00000U, 0, false},
++        {Lane,   0x33c, 0x01e00000U, 0x01a00000U, 0, false},
++        {Lane,   0x43c, 0x00006000U, 0x00002000U, 0, false},
++        {Lane,   0x334, 0x7e000000U, 0x20000000U, 0, false},
++        {Lane,   0x458, 0x0000003eU, 0x00000014U, 0, false}, /* TX PMOS */
++        {Lane,   0x458, 0x000007c0U, 0x00000200U, 0, false}, /* TX NMOS */
++        {Lane,   0x414, 0x0000000fU, 0x00000005U, 0, false}, /* RX impedance */
++        {Lane,   0x470, 0x0003e000U, 0, 0, false}, /* CTLE eFuse, orientation set below */
++        {Lane,   0x470, 0x007c0000U, 0x001c0000U, 0, false}, /* VGA eFuse */
++        {Lane,   0x474, 0x0000001fU, 0x00000007U, 0, false}, /* DFE eFuse */
++        {Lane,   0x408, 1U << 13, 0, 0, false}, /* clear TX/RX detect HZ mode */
++        {Global, 0x028, 0x0003e000U, 0x00008000U, 0, false}, /* TXPLL IR=4 */
++        {Global, 0x038, 0x0003e000U, 0x00008000U, 0, false}, /* SPLL IR=4 */
++        {Lane,   0x320, 0x00c00000U, 0x00800000U, 0, false}, /* G1 RX SGDT HF=2 */
++        {Lane,   0x32c, 0x00c00000U, 0x00800000U, 0, false}, /* G2 RX SGDT HF=2 */
++        {Lane,   0x270, 0x000000ffU, 0x00000028U, 0, false}, /* Dali Gen2 LPM fix */
++        {Lane,   0x27c, 0x0000c000U, 0x00008000U, 0, false},
++        {Lane,   0x344, 0x0000e000U, 0x00004000U, 0, false},
++    };
++    bool snapshotted = false;
++    bool orientationFlip = false;
++
++    WriteMapping &mapping(Bank bank) {
++        return bank == Global ? global : bank == Lane ? lane : selector;
++    }
++    uint32_t read(const Field &field) { return mapping(field.bank).read(field.offset); }
++    void write(const Field &field, uint32_t value) { mapping(field.bank).write(field.offset, value); }
++
++public:
++    bool apply() {
++        uint8_t polarity = 0, role = 0;
++        uint32_t status = 0;
++        if (!dali_pmif_transfer(14, 0x419, &polarity, false, &status) ||
++            !dali_pmif_transfer(14, 0x41a, &role, false, &status) || role != 0x05) {
++            u2Log("DALI U3 PHY: TCPC orientation unavailable polarity=%02x role=%02x pmif=%08x\n",
++                polarity, role, status);
++            return false;
++        }
++        orientationFlip = (polarity & 1U) != 0;
++        static const uint8_t normalEfuse[8] = {0x0c, 0x29, 0x0a, 0x08, 0x05, 0x06, 0x07, 0x07};
++        static const uint8_t flipEfuse[8]   = {0x04, 0x27, 0x0a, 0x08, 0x05, 0x07, 0x07, 0x07};
++        const uint8_t *efuse = orientationFlip ? flipEfuse : normalEfuse;
++        fields[0].value = orientationFlip ? 1U << 18 : 0; /* UDS v2 selector */
++        fields[1].value = (uint32_t)efuse[0] << 27;
++        fields[2].value = (uint32_t)efuse[1] << 16;
++        fields[8].value = (uint32_t)efuse[2] << 1;
++        fields[9].value = (uint32_t)efuse[3] << 6;
++        fields[10].value = efuse[4];
++        fields[11].value = (uint32_t)efuse[5] << 13;
++        fields[12].value = (uint32_t)efuse[6] << 18;
++        fields[13].value = efuse[7];
++        if (!global.open(0x16773000ULL, 0x200U) ||
++            !lane.open(0x16773400ULL, 0x500U) ||
++            !selector.open(0x1002d600ULL, 0x4U)) {
++            u2Log("DALI U3 PHY: DT mappings failed; lane untouched\n");
++            return false;
++        }
++        uint32_t selectorState = selector.read(0);
++        if (selectorState == ~0U || (selectorState & (1U << 19))) {
++            u2Log("DALI U3 PHY: DP lane ownership active/rejected selector=%08x\n", selectorState);
++            return false;
++        }
++        for (unsigned i = 0; i < 22; ++i) {
++            uint32_t current = read(fields[i]);
++            if (current == ~0U) {
++                u2Log("DALI U3 PHY: snapshot failed bank=%u offset=%03x\n",
++                    (unsigned)fields[i].bank, fields[i].offset);
++                return false;
++            }
++            fields[i].saved = current & fields[i].mask;
++        }
++        snapshotted = true;
++        for (unsigned i = 0; i < 22; ++i) {
++            Field &field = fields[i];
++            if (i == 0) {
++                uint8_t polarityAgain = 0, roleAgain = 0;
++                if (!dali_pmif_transfer(14, 0x419, &polarityAgain, false, &status) ||
++                    !dali_pmif_transfer(14, 0x41a, &roleAgain, false, &status) ||
++                    roleAgain != 0x05 || ((polarityAgain ^ polarity) & 1U)) {
++                    u2Log("DALI U3 PHY: orientation changed before selector write\n");
++                    return false;
++                }
++            }
++            uint32_t current = read(field);
++            if (current == ~0U || (current & field.mask) != field.saved) {
++                u2Log("DALI U3 PHY: snapshot changed bank=%u offset=%03x read=%08x\n",
++                    (unsigned)field.bank, field.offset, current);
++                return false;
++            }
++            if ((current & field.mask) == field.value) { continue; }
++            field.dirty = true;
++            write(field, (current & ~field.mask) | field.value);
++            uint32_t after = read(field);
++            if (after == ~0U || (after & field.mask) != field.value) {
++                u2Log("DALI U3 PHY: field rejected bank=%u offset=%03x read=%08x\n",
++                    (unsigned)field.bank, field.offset, after);
++                return false;
++            }
++        }
++        u2Log("DALI U3 PHY: native host lane ready=1 orientation=%s tcpc=%02x efuse=%02x/%02x/%02x/%02x\n",
++            orientationFlip ? "flip" : "normal", polarity,
++            efuse[0], efuse[1], efuse[5], efuse[6]);
++        return true;
++    }
++
++    bool restore() {
++        if (!snapshotted) { return true; }
++        bool ok = true;
++        for (unsigned i = 22; i-- > 0;) {
++            Field &field = fields[i];
++            if (!field.dirty) { continue; }
++            uint32_t current = read(field);
++            if (current == ~0U) { ok = false; continue; }
++            write(field, (current & ~field.mask) | field.saved);
++            uint32_t after = read(field);
++            bool matched = after != ~0U && (after & field.mask) == field.saved;
++            field.dirty = !matched;
++            ok = matched && ok;
++            if (!matched) {
++                u2Log("DALI U3 PHY: restore failed bank=%u offset=%03x read=%08x\n",
++                    (unsigned)field.bank, field.offset, after);
++            }
++        }
++        u2Log("DALI U3 PHY: owned lane/selector restored=%u\n", ok);
++        return ok;
++    }
++
++    bool changed() const {
++        for (unsigned i = 0; i < 22; ++i) { if (fields[i].dirty) { return true; } }
++        return false;
++    }
++};
++
+@@ -870,0 +1020 @@
++    ScopedDaliUsb3Phy nativeUsb3;
+@@ -881,0 +1032,3 @@
++                if (nativeReady && engineProbe) {
++                    nativeReady = nativeUsb3.apply() && hostStillHalted(ip, xhci, op);
++                }
+@@ -945,0 +1099 @@
++    bool usb3PhyRestored = true;
+@@ -947,0 +1102,7 @@
++            if (engineProbe) {
++                usb3PhyRestored = nativeUsb3.restore();
++                if (!usb3PhyRestored) {
++                    u2Log("DALI U3 PHY: cleanup incomplete; retaining host resources\n");
++                    return false;
++                }
++            }
+@@ -957,0 +1119 @@
++            usb3PhyRestored = !(engineProbe && nativeUsb3.changed());
+@@ -968,0 +1131,4 @@
++    if (!usb3PhyRestored) {
++        u2Log("DALI U3 PHY: shutdown state unconfirmed; retaining platform resources\n");
++        return false;
++    }
+@@ -989 +1155 @@
+-    bool retrySafe = restored && u3Restored && ppRestored && phyRestored &&
++    bool retrySafe = restored && u3Restored && ppRestored && phyRestored && usb3PhyRestored &&
