@@ -175,7 +175,7 @@ jobs:
           grep -Fq 'kHwrscsPmicMask = 0x80U' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           grep -Fq 'kRequestGateOffsets[8]' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           grep -Fq 'releaseResourcesAndRestore(ip, requestGates,' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
-          grep -Fq 'if (clockReady) {' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'if (clockReady && analogReady) {' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: PHY reads skipped U2 MAC reset status'
           grep -Fq 'host-hwrscs-version' xnu/iokit/Kernel/arm/DaliUSBPMIC.cpp
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: SPM force='
