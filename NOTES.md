@@ -1763,3 +1763,13 @@ CI39738640192 kernel Build passed, but Verify SWEET init diagnostics stopped at 
 
 
 Full retry CI39739616951 targets workflow-fix commit f13953b (driver patch0132 remains8ff279d). Package target usb-analog-vusb-39739616951/helper package-analog-vusb-39739616951.py. Previous39738640192 failed the obsolete clock-only string check after compilation; do not use it as a successful candidate. No active trial; Android originals verified.
+
+## 2026-10-23 — Offline audit: TCPC attached-source termination and current limit
+
+XNU's Type-C handoff is correct to arm both CC pins as default Rp while waiting for a partner (`ROLE_CTRL=0x05`). After three stable Rd samples, however, it changes only the polarity bit (`0x419`) and enables VBUS; it never changes `ROLE_CTRL`, and the periodic check requires it to remain `0x05` throughout the powered host scan (`expected-DaliUSBPower-0128.cpp:361-400`).
+
+The local MT6379 driver has an attached-source branch in `mt6379_set_cc()`: for `pull == TYPEC_CC_RP` and `typec_state == typec_attached_src`, it sets the unused CC pin to Rd according to polarity before encoding ROLE_CTRL (`audit/tcpc_mt6379.c:1681-1717`). Given the TCPCI field layout (`../Kernel/Xiaomi_Kernel_OpenSource/include/linux/usb/tcpci.h`), that callback would encode CC1-active Rp/CC2 Rd as `0x09`, or CC1 Rd/CC2-active Rp as `0x06` at default Rp; with the live DT's `tcpc,rp-level = <1>` (1.5 A), corresponding values are `0x19`/`0x16`. These values are source-derived expectations, not observed Android register readbacks: the saved attached-host captures report Type-C source/host roles but do not dump TCPC ROLE_CTRL.
+
+There is also a power-policy delta: the live DT advertises Rp level 1 (1.5 A), and the Android attached-host debug capture reports the VBUS regulator at 1400 mA. XNU explicitly arms default Rp and programs a 500 mA current limit. That may matter if the stick has high startup current, but there is no evidence it draws more than 500 mA; stable VBUS/LED alone cannot rule out a brief droop. Do not raise the limit speculatively.
+
+Treat this as a new, testable CC-role/current discrepancy, not a confirmed explanation for xHCI `CCS=0`. A future diagnostic should record ROLE_CTRL, CC status/orientation, PMIC current/fault, OTG_STS, DP/DM and PORTSC across attach/source-on. Keep this separate from the host-ready-before-VBUS sequencing candidate where possible. No source, device, network, build or test changes were made in this offline audit.
