@@ -1,6 +1,10 @@
 --- a/iokit/Kernel/arm/DaliUSBHost.cpp
 +++ b/iokit/Kernel/arm/DaliUSBHost.cpp
-@@ -481,0 +482,149 @@
+@@ -479,6 +479,155 @@
+     }
+ };
+-
++
 +/* The native MTU3 host path powers the XSPHY U3 instance as well as U2.
 + * Live Dali DT names the lane/global windows and supplies the U3 orientation
 + * switch. Values below are read-only MTK eFuse data captured from the target
@@ -150,15 +154,34 @@
 +    }
 +};
 +
-@@ -870,0 +1020 @@
+ /* MT6379 chip74 normal-mode power with optional native host calibration.
+  * Calibration reads efuse shadow bytes; never programs any fuse. Every
+  * changed operational register is snapshotted and restored on shutdown.
+@@ -868,6 +1017,7 @@
+     uint32_t savedCK = 0;
+     ScopedU2Phy nativePhy;
+     ScopedRepeater nativeRepeater;
 +    ScopedDaliUsb3Phy nativeUsb3;
-@@ -881,0 +1032,3 @@
+     ScopedMtu3HostMac hostMac;
+     bool hostMacReady = !engineProbe;
+     if (ready) {
+@@ -879,6 +1029,9 @@
+                 nativeReady = (!repeaterProbe || nativeRepeater.powerOn(engineProbe)) &&
+                     hostStillHalted(ip, xhci, op);
+                 nativeReady = nativeReady && nativePhy.powerOn(engineProbe) && hostStillHalted(ip, xhci, op);
 +                if (nativeReady && engineProbe) {
 +                    nativeReady = nativeUsb3.apply() && hostStillHalted(ip, xhci, op);
 +                }
-@@ -945,0 +1099 @@
+                 if (nativeReady && engineProbe && repeaterProbe) {
+                     nativeReady = nativeRepeater.setHostMode() && hostStillHalted(ip, xhci, op);
+                 }
+@@ -943,8 +1096,16 @@
+         }
+     }
+     bool phyRestored = true;
 +    bool usb3PhyRestored = true;
-@@ -947,0 +1102,7 @@
+     if (phyProbe && ready) {
+         if (ppRestored && hostStillHalted(ip, xhci, op)) {
 +            if (engineProbe) {
 +                usb3PhyRestored = nativeUsb3.restore();
 +                if (!usb3PhyRestored) {
@@ -166,13 +189,34 @@
 +                    return false;
 +                }
 +            }
-@@ -957,0 +1119 @@
+             phyRestored = nativePhy.restore();
+             if (ckTouched) {
+                 uint32_t current = ip.read(0x9c);
+@@ -955,6 +1116,7 @@
+             }
+         } else {
+             phyRestored = false;
 +            usb3PhyRestored = !(engineProbe && nativeUsb3.changed());
-@@ -968,0 +1131,4 @@
+             u2Log("DALI PHY: restore guard failed; reboot required\n");
+         }
+     }
+@@ -966,6 +1128,10 @@
+         u2Log("DALI HOST: DMA shutdown unconfirmed; retaining platform resources\n");
+         return false;
+     }
 +    if (!usb3PhyRestored) {
 +        u2Log("DALI U3 PHY: shutdown state unconfirmed; retaining platform resources\n");
 +        return false;
 +    }
-@@ -989 +1155 @@
+     bool hostMacRestored = hostMac.restore();
+     if (!hostMacRestored) {
+         u2Log("DALI MTU3: MAC restore failed; retaining platform resources\n");
+@@ -986,7 +1152,7 @@
+     uint32_t after = ip.read(0x50);
+     bool restored = after == saved;
+     u2Log("DALI U2: restore want=%08x read=%08x match=%u\n", saved, after, restored);
 -    bool retrySafe = restored && u3Restored && ppRestored && phyRestored &&
 +    bool retrySafe = restored && u3Restored && ppRestored && phyRestored && usb3PhyRestored &&
+         repeaterRestored && hostMacRestored;
+     __atomic_store_n(&hostRetrySafe, retrySafe, __ATOMIC_RELEASE);
+     return retrySafe;
