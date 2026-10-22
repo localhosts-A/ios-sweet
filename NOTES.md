@@ -1,3 +1,9 @@
+## CURRENT HANDOFF — patch0130 trial rebooted; ORIGINAL RESTORATION PENDING (2026-10-22)
+
+The user explicitly confirmed current cable-swap availability. Candidate `shim/out-dali/usb-repeater-host-order-39719999704` passed fresh Android physical original size/SHA256 checks and fastboot identity/slot/unlocked/partition-size checks. Its helper flashed temporary `init_boot_b` then `boot_b`, requested reboot successfully, and recorded `trial_rebooted`. Original `init_boot_b`/`boot_b` restoration is now PENDING. The user was told to swap the PC cable for direct OTG + U-disk, keep connected about one minute, and photograph the console. No hardware result for patch0130 yet; USB attachment/MSC/read/root remain unproven. No userdata/GPT/U-disk writes.
+
+On fastboot return, immediately run this candidate's `device_pair.py recover` (original init_boot_b then boot_b) and `device_pair.py verify` after Android completes boot. Verify full physical original partition sizes/SHA256 before another trial. Trial log: `research/dali-usb-root/ci-artifacts/run39719999704-trial.log`. Source c94cedd/CI39719999704/package validation details below. Do not confuse earlier restored-trial statuses with this ACTIVE trial.
+
 ## CURRENT HANDOFF — patch0130 complete candidate ready; Android originals verified (2026-10-22)
 
 Patch0130 commit c94cedd7c1db01fd3a51dfe71e34d7665a20af44 fixes the repeater efuse bank D12->D22 and moves host properties after repeater/SoC PHY power-on, with final host-field readback and read-only post-scan DP/DM monitor. Full fork CI39719999704 succeeded. Actual32/32 source files match the staged source;12/12 efuse destinations/masks independently match vendor expressions; ARM64 compile, exact patch replay, linked marker checks, timer/PA/scalar-DMA instruction audits and paired image/ADT/CPIO/AVB checks passed.
