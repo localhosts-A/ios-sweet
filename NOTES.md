@@ -1,3 +1,9 @@
+## CURRENT HANDOFF — patch0131 trial rebooted; ORIGINAL RESTORATION PENDING (2026-10-22)
+
+The user explicitly confirmed current cable-swap availability and requested the trial. Candidate `shim/out-dali/usb-post-phy-reset-39722551298` passed immediate Android full physical original sizes/SHA256 and fastboot identity/slot/unlocked/partition sizes. The helper successfully flashed temporary init_boot_b then boot_b and requested reboot. Manifest trial_rebooted: ACTIVE TRIAL, ORIGINAL PAIR RESTORATION PENDING. The user was told to swap the PC cable for direct OTG+U-disk, hold~60s and photograph logs. Patch0131 hardware attachment/read/root result is not yet known. No userdata/GPT/U-disk writes.
+
+On fastboot return immediately run `python3 shim/out-dali/usb-post-phy-reset-39722551298/device_pair.py recover shim/out-dali/usb-post-phy-reset-39722551298`, then its verify mode after Android completes boot. Recover original init_boot_b then boot_b and verify full physical original sizes/SHA256 before another trial. Trial log: `research/dali-usb-root/ci-artifacts/run39722551298-trial.log`. The earlier ready/restored statuses below predate this ACTIVE trial.
+
 ## CURRENT HANDOFF — patch0131 complete candidate ready; originals physically verified (2026-10-22)
 
 Patch0131 source commit b064a98645e47bd546c11b1793fd2ea0696e2c3a / full CI39722551298 SUCCESS. Adds the native post-PHY whole-IP reset and host-port replay before host MAC tuning and DMA, plus snapshotted/restored repeater SQD clearing. Local ARM64 compile and exact patch replay pass. Actual CI32/32 source files byte-match; new reset markers linked; existing timer instruction/PA widening/scalar DMA helper audits and full paired image headers/segments/entry/RAM/ADT/CPU/GIC/RTC/PMIC/watchdog/LZ4/CPIO/current-image AVB checks passed. This corrects a source-backed sequence difference, not a proven hardware attach fix.
