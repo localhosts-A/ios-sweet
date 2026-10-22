@@ -266,6 +266,12 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI MSC: ready blocks='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI ROOT: selected read-only du0'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI RPTR: native host calibration ready='
+          grep -Fq 'const uint16_t targets[] = {0xd22, 0xd22, 0xd22,' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq '{0xd22, 0xfd, 0, false}' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'nativeRepeater.setHostMode()' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI RPTR: efuse defaults ready='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI RPTR: post-power host readback='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI PHY: post-scan line valid='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI PHY: slew calibration ready='
           grep -Fq 'uint32_t fm = phy.read(0x10c);' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           grep -Fq 'valid=%u fm=%u value=%u' xnu/iokit/Kernel/arm/DaliUSBHost.cpp

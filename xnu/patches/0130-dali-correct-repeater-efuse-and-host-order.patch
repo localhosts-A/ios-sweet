@@ -1,0 +1,133 @@
+diff --git a/iokit/Kernel/arm/DaliUSBHost.cpp b/iokit/Kernel/arm/DaliUSBHost.cpp
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -422,17 +422,19 @@
+  * Calibration reads efuse shadow bytes; never programs any fuse. Every
+  * changed operational register is snapshotted and restored on shutdown.
+  */
+ class ScopedRepeater {
+     struct Field { uint16_t reg; uint8_t mask, saved; bool dirty; };
++    uint8_t intrCal = 0, termCal = 0;
++    bool calibrationReady = false;
+     Field fields[27] = {
+         {0xd00, 1, 0, false}, {0xd03, 3, 0, false},
+-        {0xd12, 0x2d, 0, false}, {0xd34, 1, 0, false},
++        {0xd12, 0x20, 0, false}, {0xd34, 1, 0, false},
+         {0xd89, 0xc0, 0, false}, {0xd8b, 0x20, 0, false},
+         {0xd92, 7, 0, false}, {0xd94, 2, 0, false},
+         {0xd13, 0x78, 0, false}, {0xd21, 0x80, 0, false},
+-        {0xd22, 0xf0, 0, false}, {0xd11, 0x3f, 0, false},
++        {0xd22, 0xfd, 0, false}, {0xd11, 0x3f, 0, false},
+         {0xd1a, 0x0f, 0, false}, {0xd28, 0xf0, 0, false},
+         {0xd29, 0x1f, 0, false}, {0xd2a, 0x1f, 0, false},
+         {0xd30, 0x7f, 0, false}, {0xd24, 0x77, 0, false},
+         {0xd14, 7, 0, false}, {0xd27, 0xc0, 0, false},
+         {0xd20, 4, 0, false}, {0xd8a, 7, 0, false},
+@@ -485,11 +487,12 @@
+         uint8_t intr = 0, term = 0;
+         if (!read(0xd11, &intr) || !read(0xd1a, &term)) { return false; }
+         intr &= 0x3f; term &= 15;
+         bool ok = true;
+         /* Vendor top81/82 contains one-bit enables: only observed ones are set. */
+-        const uint16_t targets[] = {0xd12, 0xd12, 0xd12, 0xd13, 0xd13, 0xd13, 0xd13,
++        /* EUSB_RSV_81 bits6/5/4 target PHYA_EU2_CR0_2(+0x22), not U2_CR0_2(+0x12). */
++        const uint16_t targets[] = {0xd22, 0xd22, 0xd22, 0xd13, 0xd13, 0xd13, 0xd13,
+             0xd21, 0xd22, 0xd22, 0xd22, 0xd22};
+         const uint8_t sourceMasks[] = {0x40, 0x20, 0x10, 8, 4, 2, 1, 0x10, 8, 4, 2, 1};
+         const uint8_t targetMasks[] = {1, 8, 4, 0x40, 0x20, 0x10, 8, 0x80, 0x80, 0x40, 0x20, 0x10};
+         for (unsigned i = 0; i < 12 && ok; ++i) {
+             if (e[i < 7 ? 5 : 6] & sourceMasks[i]) {
+@@ -509,19 +512,19 @@
+         /* Native defaults, oscillator bias and IBAND precede power-on. */
+         ok = ok && change(0xd18, 0xf0, 0x60) && change(0xd14, 7, 7) &&
+             change(0xd27, 0xc0, 0) && change(0xd20, 4, 4) &&
+             change(0xd8a, 7, 3) && change(0xd35, 6, 6) &&
+             change(0xd24, 0x10, 0x10) && change(0xd31, 0xff, 0x52);
+-        /* Live Dali host: VRT2, SQTH0, DISC13, PE2, EQ4, INTR+3, TERM-2.
+-         * Vendor falls back to the unshifted calibration when offset overflows.
++        /* Native power-on applies defaults here. Host mode properties follow
++         * repeater + SoC PHY power-on, after RG_INIT_SW_PHY_SEL is released.
+          */
+-        uint8_t hostIntr = intr <= 60 ? intr + 3 : intr;
+-        uint8_t hostTerm = term >= 2 ? term - 2 : term;
+-        ok = ok && change(0xd10, 0x70, 0x20) && change(0xd18, 0xff, 0xd0) &&
+-            change(0xd1b, 0x7f, 0x24) && change(0xd11, 0x3f, hostIntr) &&
+-            change(0xd1a, 15, hostTerm);
+-        u2Log("DALI RPTR: native host calibration ready=%u; efuse shadow read-only\n", ok);
++        intrCal = intr; termCal = term;
++        calibrationReady = ok;
++        uint8_t mapped = 0;
++        ok = read(0xd22, &mapped) && ok;
++        u2Log("DALI RPTR: efuse defaults ready=%u top81=%02x top82=%02x d22=%02x\n",
++            ok, e[5], e[6], mapped);
+         return ok;
+     }
+ public:
+     bool powerOn(bool calibrated = false) {
+         uint8_t chip = 0, reset = 0;
+@@ -562,10 +565,30 @@
+         uint8_t bg = 0, osc = 0;
+         bool got = read(0xd00, &bg) && read(0xd03, &osc);
+         ok = ok && got && (bg & 1) && (osc & 3) == 2;
+         u2Log("DALI RPTR: basic power ready=%u chip=%02x d00=%02x d03=%02x calibrated=%u\n",
+             ok, chip, bg, osc, calibrated);
++        return ok;
++    }
++    bool setHostMode() {
++        if (!saved || !calibrationReady) { return false; }
++        /* ssusb_phy_power_on() precedes ssusb_phy_set_mode(USB_HOST).
++         * Apply native Dali VRT2/SQTH0/DISC13/PE2/EQ4/INTR+3/TERM-2 only now.
++         */
++        uint8_t hostIntr = intrCal <= 60 ? intrCal + 3 : intrCal;
++        uint8_t hostTerm = termCal >= 2 ? termCal - 2 : termCal;
++        bool ok = change(0xd10, 0x70, 0x20) && change(0xd18, 0xff, 0xd0) &&
++            change(0xd1b, 0x7f, 0x24) && change(0xd11, 0x3f, hostIntr) &&
++            change(0xd1a, 15, hostTerm);
++        uint8_t vrt = 0, disc = 0, eye = 0, intr = 0, term = 0;
++        bool got = read(0xd10, &vrt) && read(0xd18, &disc) && read(0xd1b, &eye) &&
++            read(0xd11, &intr) && read(0xd1a, &term);
++        ok = ok && got && (vrt & 0x70) == 0x20 && disc == 0xd0 &&
++            (eye & 0x7f) == 0x24 && (intr & 0x3f) == hostIntr && (term & 15) == hostTerm;
++        u2Log("DALI RPTR: native host calibration ready=%u; efuse shadow read-only\n", ok);
++        u2Log("DALI RPTR: post-power host readback=%u vrt=%02x disc=%02x eye=%02x intr=%02x term=%02x\n",
++            ok, vrt, disc, eye, intr, term);
+         return ok;
+     }
+     bool restore() {
+         if (!saved) { return true; }
+         bool ok = off();
+@@ -741,10 +764,13 @@
+             nativeReady = savedCK != ~0U && hostStillHalted(ip, xhci, op);
+             if (nativeReady) {
+                 nativeReady = (!repeaterProbe || nativeRepeater.powerOn(engineProbe)) &&
+                     hostStillHalted(ip, xhci, op);
+                 nativeReady = nativeReady && nativePhy.powerOn(engineProbe) && hostStillHalted(ip, xhci, op);
++                if (nativeReady && engineProbe && repeaterProbe) {
++                    nativeReady = nativeRepeater.setHostMode() && hostStillHalted(ip, xhci, op);
++                }
+                 if (nativeReady) {
+                     uint32_t roleBefore = ip.read(0x50);
+                     nativeReady = roleBefore == enabled && ip.read(0x9c) == savedCK;
+                     if (nativeReady) {
+                         ckTouched = true;
+@@ -787,12 +813,18 @@
+                 }
+                 u2Log("DALI U2: PORTSC sample=%u port=%u raw=%08x ccs=%u ped=%u speed=%u\n",
+                     sample, port + 1, sc, sc & 1U, (sc >> 1) & 1U, (sc >> 10) & 0xfU);
+             }
+         }
+-        if (engineProbe && nativeReady && hostMacReady) { ppRestored = integratedStorage(ip, op, rootMode); }
+-        else if (powerProbe) {
++        if (engineProbe && nativeReady && hostMacReady) {
++            ppRestored = integratedStorage(ip, op, rootMode);
++            if (ppRestored && hostStillHalted(ip, xhci, op)) {
++                uint32_t monitor = phy.read(0x324); /* Native USB20_GPIO_DP/DM_RO. */
++                u2Log("DALI PHY: post-scan line valid=%u monitor=%08x dp=%u dm=%u\n",
++                    monitor != ~0U, monitor, monitor & 1U, (monitor >> 1) & 1U);
++            }
++        } else if (powerProbe) {
+             u2Log("DALI PP: halted PORTSC writes disabled; integrated engine required\n");
+         }
+     }
+     bool phyRestored = true;
+     if (phyProbe && ready) {
