@@ -1,3 +1,15 @@
+## CURRENT HANDOFF — patch0132 complete candidate ready; originals physically verified (2026-10-22)
+
+Native Android capture complete/retrieved: same1f75:0903/480Mbps, block249905152 sectors/127951437824bytes, successful repeater host fields match the XNU photo (VRT24/DISCd0/EYE24/INTR26/TERM06/D22=34). Files research/dali-usb-root/native-analog-0131 (ignored), capture-0131-state.json=complete_retrieved. Configured internal VUSB supply native1b95=01/1e0d=0b/1e0c=00; not a voltage measurement and not proof of ABL state. No further Android capture swap is needed.
+
+Driver patch0132 commit8ff279d adds the source-backed missing native regulator_enable operation with restricted SID5 VUSB identity/voltage-read/enable-register access, actual enable/normal-state health checks and enable-bit-only reversible cleanup after confirmed DMA/USB/IP/resource shutdown. No voltage/mode programming. Workflow-only commitf13953b updates the existing clock prerequisite assertion to include analog readiness. Full retry CI39739616951 SUCCESS; first39738640192 compiled but failed the obsolete clock-only source-string assertion. No failed-run candidate accepted/flashed.
+
+Candidate `shim/out-dali/usb-analog-vusb-39739616951` fully packaged and validated. Actual CI32/32 source bytes match expected (both DaliUSBHost.cpp and DaliPMIF.cpp changed); new rail/health/restore markers linked; timer instructions/PA widening/scalar DMA helper audits and full paired image headers/segments/entry/RAM/ADT/CPU/GIC/RTC/PMIC/WDT/LZ4/CPIO/current-image AVB checks pass. Kernel SHA256 431955c07122aef37d5f1de08790b70a4cc8f5092afd712836c43e7aa2e9006a; boot SHA256 ddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39; init_boot SHA256 de81a6ddbf8d95bb630c6437063836dcaf5a38d9baa6fdf108daa49115cd2c31; payload SHA256 9a61800e349289c9287c0cece0b2458ac0ad549c7323202f14581d7c6ab9a76c. Payload29306976bytes/11segments/ADT8136bytes; unchanged12MiB read-only RAMroot at0x2024e8000. Current-image AVB alias resolves correctly.
+
+Fresh Android preflight passed device/model/slot_b/boot_completed/root and full physical original boot_b/init_boot_b sizes/SHA256. Manifest android_preflight_verified; NO ACTIVE TRIAL OR PENDING RESTORATION. Latest XNU hardware still no attach/read/root; firmware rail-off hypothesis and patch0132 hardware success remain unproven. No userdata/GPT/U-disk writes.
+
+Next: current physical cable-swap readiness question is pending. When user is ready run this candidate's device_pair.py trial; on fastboot return immediately recover original init_boot_b then boot_b and physically verify both full partition hashes in completed Android. Logs/helper: research/dali-usb-root/ci-artifacts/run39739616951*.log / package-analog-vusb-39739616951.py. Use workdisk TMPDIR; /tmp nearly full. Hardware result should inspect DALI VUSB33 before/read/changed along with port CCS and descriptors/MSC, not assume 5V phone ADC proves device attachment.
+
 ## CURRENT HANDOFF — known-good native capture retrieved; patch0132 compiled (2026-10-22)
 
 Native capture completed/retrieved in research/dali-usb-root/native-analog-0131; summary.json verifies actual1f75:0903 at480Mbps with block249905152x512=127951437824bytes. Host IPPC U2=a4c/U3=20c. Native repeater D10=24/D11=26/D18=d0/D1a=06/D1b=24/D22=34 exactly match photographed XNU host readbacks; device->host changes only D11/D18/D1a/D1b among captured controls. Native D16=04/D17=00/D88=00/D89=40/D8a=33/D8b=46/top0e=74. VUSB1b95=01/1e0c=00/1e0d=0b (3000mV). This does NOT establish ABL/XNU rail state. Capture manifest complete_retrieved; no duplicate capture needed. Android remains original full pair restored/physically verified; no active trial/pending restore.
@@ -1728,3 +1740,12 @@ CI39719999704 completed SUCCESS. Artifact download hit /tmp tmpfs ENOSPC in gh t
 
 
 Patch0131 b064a98645e47bd546c11b1793fd2ea0696e2c3a pushed to fork/port/dali-mt6991; full CI39722551298 running. Mistaken push to origin (upstream) was rejected403 and the initial dispatch39722396824 targeted old52b6558; canceled that run, then pushed to fork and dispatched the correct code. No device effect. Packaging helper staged as research/dali-usb-root/ci-artifacts/package-post-phy-reset-39722551298.py. Original pair remains recovered/physically verified; no active trial.
+
+
+Patch0132 committed8ff279d and pushed to fork/port/dali-mt6991. Correct full XNU CI39738640192 running; packaging helper staged as package-analog-vusb-39738640192.py. Native capture complete_retrieved confirms real USB stick/480Mbps/block device; no repeat cable capture required. Original full pair remains restored/physically verified; no active trial.
+
+
+CI39738640192 kernel Build passed, but Verify SWEET init diagnostics stopped at stale source-string assertion `if (clockReady) {` after patch0132 strengthened it to `if (clockReady && analogReady) {`. Updated that existing assertion only in workflow commit f13953b, preserving both prerequisites. A complete inspection of118 staged source-string assertions now matches. No driver code changed in this CI-only commit; no failed-run image is accepted/flashed. Full rerun pending. Original pair remains restored/verified.
+
+
+Full retry CI39739616951 targets workflow-fix commit f13953b (driver patch0132 remains8ff279d). Package target usb-analog-vusb-39739616951/helper package-analog-vusb-39739616951.py. Previous39738640192 failed the obsolete clock-only string check after compilation; do not use it as a successful candidate. No active trial; Android originals verified.
