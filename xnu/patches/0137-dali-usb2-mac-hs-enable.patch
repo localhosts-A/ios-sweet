@@ -1,0 +1,91 @@
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -42,6 +42,7 @@
+     uint32_t xhciSts, xhciPw1, xhciPw2, xhciU2, xhciU3;
+     uint32_t u2Saved, u2Want, u2Read;
+     uint32_t rptrChip, rptrD00, rptrD03;
++    uint32_t macHsPre, macHsPost, macUsb3;
+     bool valid, u2Ctrl, u2MacReady, utmiReady, hostMacReady;
+     bool rptrEntryRejected, rptrPowerOk, rptrCalOk;
+     bool powerProbe, phyProbe, repeaterProbe, engineProbe;
+@@ -81,6 +82,8 @@
+         daliScanDigest.u2Ctrl, daliScanDigest.utmiReady, daliScanDigest.hostMacReady,
+         daliScanDigest.powerProbe, daliScanDigest.phyProbe,
+         daliScanDigest.repeaterProbe, daliScanDigest.engineProbe);
++    u2Log("DALI DIAG: mac hs=%08x->%08x usb3cfg=%08x\n",
++        daliScanDigest.macHsPre, daliScanDigest.macHsPost, daliScanDigest.macUsb3);
+     u2Log("DALI DIAG: rptr entry=%u power=%u cal=%u chip=%02x d00=%02x d03=%02x\n",
+         daliScanDigest.rptrEntryRejected, daliScanDigest.rptrPowerOk,
+         daliScanDigest.rptrCalOk, daliScanDigest.rptrChip,
+@@ -152,13 +155,21 @@
+     struct Field { uint32_t offset, mask, value, saved; bool dirty, leaveDisabled; };
+     WriteMapping mac;
+     bool opened = false;
+-    Field fields[6] = {
++public:
++    uint32_t hsPre = 0, hsPost = 0, usb3Config = 0;
++private:
++    Field fields[7] = {
+         {0x1420, 0x3ffffU, 1U, 0, false, false},       /* gen1-txdeemph */
+         {0x1428, 0x3ffffU, 1U, 0, false, false},       /* CP5/CP7 txdeemph */
+         {0x2450, 0x00000fffU, 0x474U, 0, false, false},/* eusb2-cm-l1 */
+         {0x0c84, 0x00000003U, 0U, 0, false, true},     /* force-vbus=false */
+         {0x2420, 1U << 26, 1U << 26, 0, false, false},/* SOF_KEEP */
+         {0x1680, 0x3fffU << 16, 1U << 16, 0, false, false}, /* ldm-resp-delay=1 */
++        /* Vendor mtu3_set_speed() enables the USB2 MAC high-speed function in
++         * host mode (U3D_POWER_MANAGEMENT.HS_ENABLE); XNU never did, so the
++         * USB2 MAC can stay disabled after the post-PHY IP reset.
++         */
++        {0x2404, 1U << 5, 1U << 5, 0, false, false},   /* HS_ENABLE */
+     };
+ public:
+     bool apply() {
+@@ -167,7 +178,9 @@
+             return false;
+         }
+         opened = true;
+-        for (unsigned i = 0; i < 6; ++i) {
++        hsPre = mac.read(0x2404); /* read-only: U3D_POWER_MANAGEMENT */
++        usb3Config = mac.read(0x141c); /* read-only: U3D_USB3_CONFIG */
++        for (unsigned i = 0; i < sizeof(fields) / sizeof(fields[0]); ++i) {
+             uint32_t value = mac.read(fields[i].offset);
+             if (value == ~0U) {
+                 u2Log("DALI MTU3: snapshot failed offset=%04x\n", fields[i].offset);
+@@ -175,7 +188,7 @@
+             }
+             fields[i].saved = value & fields[i].mask;
+         }
+-        for (unsigned i = 0; i < 6; ++i) {
++        for (unsigned i = 0; i < sizeof(fields) / sizeof(fields[0]); ++i) {
+             Field &field = fields[i];
+             uint32_t current = mac.read(field.offset);
+             if (current == ~0U || (current & field.mask) != field.saved) {
+@@ -193,14 +206,16 @@
+                 return false;
+             }
+         }
+-        u2Log("DALI MTU3: host init tuning ready fields=6\n");
++        hsPost = mac.read(0x2404);
++        u2Log("DALI MTU3: host init tuning ready fields=%u hs=%08x/%08x usb3=%08x\n",
++            (unsigned)(sizeof(fields) / sizeof(fields[0])), hsPre, hsPost, usb3Config);
+         return true;
+     }
+ 
+     bool restore() {
+         if (!opened) { return true; }
+         bool ok = true;
+-        for (unsigned i = 6; i-- > 0;) {
++        for (unsigned i = sizeof(fields) / sizeof(fields[0]); i-- > 0;) {
+             Field &field = fields[i];
+             if (!field.dirty) { continue; }
+             uint32_t current = mac.read(field.offset);
+@@ -1164,6 +1179,9 @@
+             }
+         }
+         daliScanDigest.hostMacReady = hostMacReady;
++        daliScanDigest.macHsPre = hostMac.hsPre;
++        daliScanDigest.macHsPost = hostMac.hsPost;
++        daliScanDigest.macUsb3 = hostMac.usb3Config;
+         uint32_t xhciSts = ip.read(0x18), xhciPw1 = ip.read(0x10), xhciPw2 = ip.read(0x14);
+         uint32_t xhciU2 = ip.read(0x50), xhciU3 = ip.read(0x30);
+         u2Log("DALI OTG: pre-xhci sts=%08x pw1=%08x pw2=%08x u2=%08x u3=%08x\n",

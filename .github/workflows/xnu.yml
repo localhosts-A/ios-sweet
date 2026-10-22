@@ -201,7 +201,7 @@ jobs:
           grep -Fq '{0x2450, 0x00000fffU, 0x474U, 0, false, false}' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           grep -Fq '{0x1680, 0x3fffU << 16, 1U << 16, 0, false, false}' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           grep -Fq 'bool hostMacRestored = hostMac.restore();' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
-          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI MTU3: host init tuning ready fields=6'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI MTU3: host init tuning ready fields=%u hs=%08x/%08x usb3=%08x'
           grep -Fq 'ip.write(0x30, wantedU3);' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           grep -Fq 'ip.write(0x30, u3);' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U3: host enable saved='
@@ -308,6 +308,10 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI DIAG: xhci sts=%08x pw1=%08x pw2=%08x u2=%08x u3=%08x'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI DIAG: u2 saved=%08x want=%08x read=%08x ctrl=%u utmi=%u mac=%u probes=%u%u%u%u'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI DIAG: rptr entry=%u power=%u cal=%u chip=%02x d00=%02x d03=%02x'
+          grep -Fq '{0x2404, 1U << 5, 1U << 5, 0, false, false}' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'DALI DIAG: mac hs=%08x->%08x usb3cfg=%08x' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI DIAG: mac hs=%08x->%08x usb3cfg=%08x'
+          grep -Fq 'uint32_t hsPre = 0, hsPost = 0, usb3Config = 0;' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI PHY: slew calibration ready='
           grep -Fq 'uint32_t fm = phy.read(0x10c);' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           grep -Fq 'valid=%u fm=%u value=%u' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
