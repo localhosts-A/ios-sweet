@@ -229,7 +229,10 @@ jobs:
           grep -Fq 'class ScopedDaliUsb3Phy' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           grep -Fq 'const uint8_t expectedRole = (polarity & 1U) ? 0x06 : 0x09;' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           ! grep -Fq 'role != 0x05' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'roleAgain != expectedRole' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          ! grep -Fq 'roleAgain != 0x05' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U3 PHY: attached-source orientation mismatch'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U3 PHY: orientation recheck failed before selector polarity='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U3 PHY: native host lane ready=1 orientation='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI U3 PHY: owned lane/selector restored='
           grep -Fq 'portRestored && asleep && releaseResourcesAndRestore' xnu/iokit/Kernel/arm/DaliUSBHost.cpp

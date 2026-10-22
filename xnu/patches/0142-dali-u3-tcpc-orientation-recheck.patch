@@ -1,0 +1,21 @@
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -654,12 +654,14 @@
+         for (unsigned i = 0; i < 22; ++i) {
+             Field &field = fields[i];
+             if (i == 0) {
+                 uint8_t polarityAgain = 0, roleAgain = 0;
+-                if (!dali_pmif_transfer(14, 0x419, &polarityAgain, false, &status) ||
+-                    !dali_pmif_transfer(14, 0x41a, &roleAgain, false, &status) ||
+-                    roleAgain != 0x05 || ((polarityAgain ^ polarity) & 1U)) {
+-                    u2Log("DALI U3 PHY: orientation changed before selector write\n");
++                bool tcpcRead = dali_pmif_transfer(14, 0x419, &polarityAgain, false, &status) &&
++                    dali_pmif_transfer(14, 0x41a, &roleAgain, false, &status);
++                if (!tcpcRead || roleAgain != expectedRole ||
++                    ((polarityAgain ^ polarity) & 1U)) {
++                    u2Log("DALI U3 PHY: orientation recheck failed before selector polarity=%02x/%02x role=%02x expected=%02x pmif=%08x\n",
++                        polarity, polarityAgain, roleAgain, expectedRole, status);
+                     return false;
+                 }
+             }
+             uint32_t current = read(field);
