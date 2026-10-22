@@ -1,3 +1,19 @@
+## CURRENT HANDOFF — native USB analog capture armed; original pair verified (2026-10-22)
+
+Patch0131 photo145226 confirms successful post-PHY reset/readback/xHCI but still port2 PP1/CCS0/PLS5 and root unavailable. Original init_boot_b then boot_b restored; completed Android full physical original sizes/SHA256 verified. NO ACTIVE TRIAL OR PENDING RESTORATION. No userdata/GPT/U-disk writes.
+
+Extended existing read-only tools/dali-usb-host-capture.sh with fixed-layout/chip-checked, bounded targeted PMIC reads: MT6379 D00..D35, D88..D8B, D91/D92/D94, top0E and efuse shadows323..327/381..382; MT6373 VUSB1b95/1e0c/1e0d. No full PMIC dump, interrupt-status reads or hardware writes. Capture deployed/running as root under Android, state waiting-host independently confirmed. Launch ADB process timed out because the background shell held the session, but capture is live; DO NOT start a duplicate. Paths/state are in ignored research/dali-usb-root/capture-0131-state.json. The 600s attachment window expires normally if no host is seen.
+
+User action requested: keep Android, swap PC cable for direct OTG+same U-disk, hold30s, then reconnect PC and reply. No photo or new kernel trial. On return read capture state/log, retrieve snapshots, confirm actual 1f75:0903 device/480Mbps before treating host snapshots as known-good, compare repeater masks/analog supply with native source and XNU. If attachment window expired, re-arm under a new output path after checking old results. No next kernel candidate has been chosen.
+
+## CURRENT HANDOFF — patch0131 still no attach; original pair restored/physically verified (2026-10-22)
+
+Photo IMG_20261022_145226.jpg confirms post-PHY IP reset ready=1/controls1/clocks1/halted1 and post-power host readback1: VRT24/DISCd0/EYE24/INTR26/TERM06. Native slew remains valid0/fm0/fallback3. xHCI runs/completes No-op path and port2 reads PP1/CCS0/PLS5/raw2a0; prior scans cleaned and kept VBUS through rescan10. Phone-side ADC~4983mV at ticks490/500. At~T97368ms vfs_mountroot reports bdevvp failed open @vfs_subr.c:2168. No descriptor/MSC/capacity/sector/root success. The latest visible scan has not reached its attach timeout yet, so do not invent its exact timeout value. Patch0131 does not solve connection detection.
+
+Fastboot returned. Candidate usb-post-phy-reset-39722551298 device_pair.py recover restored original init_boot_b then boot_b and rebooted Android. verify passed completed Android Dali/model/slot_b/root and both full physical original sizes/SHA256. Manifest originals_verified with photo observation. NO ACTIVE TRIAL OR PENDING RESTORATION. No userdata/GPT/U-disk writes. Logs run39722551298-{recover,verify}.log.
+
+Next: collect a known-good native attached-host repeater/PHY state if accessible and compare the remaining signal/rail path. Do not produce another candidate based only on timeout changes or a successful reset log. Need distinguish internal analog supply, connector VBUS, repeater DP/DM and SoC eUSB link. Native repeater probe/IRQ additionally touches top0e bit1 and D16 bit3; current firmware D16 and native-host state have not been captured, so no write conclusion yet.
+
 ## CURRENT HANDOFF — patch0131 trial rebooted; ORIGINAL RESTORATION PENDING (2026-10-22)
 
 The user explicitly confirmed current cable-swap availability and requested the trial. Candidate `shim/out-dali/usb-post-phy-reset-39722551298` passed immediate Android full physical original sizes/SHA256 and fastboot identity/slot/unlocked/partition sizes. The helper successfully flashed temporary init_boot_b then boot_b and requested reboot. Manifest trial_rebooted: ACTIVE TRIAL, ORIGINAL PAIR RESTORATION PENDING. The user was told to swap the PC cable for direct OTG+U-disk, hold~60s and photograph logs. Patch0131 hardware attachment/read/root result is not yet known. No userdata/GPT/U-disk writes.
