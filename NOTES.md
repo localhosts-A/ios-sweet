@@ -1,12 +1,14 @@
-## CURRENT HANDOFF — offline audit: patch0138 CHP_EN guard mismatch (2026-10-23)
+## CURRENT HANDOFF — offline audit: 0138 guard bug and incomplete host-state transition (2026-10-23)
 
-Android with its OTG switch on reads the same U-disk, but user confirms patch0138 still fails under XNU. The XNU failure remains before USB enumeration: earlier scans show port2 `PP=1, CCS=0, PLS=5` (RxDetect), no USB descriptors/MSC/read/root. `bdevvp failed` is downstream of the missing USB block device.
+Android with OTG enabled reads the same U-disk. XNU still fails before enumeration; earlier scans show port2 `PP=1, CCS=0, PLS=5` (RxDetect), no USB descriptors/MSC/read/root. `bdevvp failed` follows the missing USB block device.
 
-Concrete patch0138 bug: the saved live FDT `atag,chipid.sw_ver` and `native-u2-calibration.json` both say revision 1. Vendor XS-PHY code clears ACR0.CHP_EN only when `chp_en_disable` is set and `sw_ver == 0`, after the LPM-PLL setup. Patch0138 unconditionally clears bit1 before that setup, overriding XNU's existing revision guard. This can disable the USB2 PHY charge pump on this revision. Remove that extra early clear and preserve CHP_EN for revision1. This is not proven to be the sole cause: patch0137 failed before the extra clear existed.
+Patch0138 has a concrete silicon-revision mismatch: saved live FDT `atag,chipid.sw_ver` and calibration `sw_revision` are both 1. MTK only clears XS-PHY ACR0.CHP_EN when `chp_en_disable` and `sw_ver==0`, after LPM PLL setup. Patch0138 clears it unconditionally before that setup, overriding XNU's existing revision guard. Remove the early write and retain the guarded path. This can disable the USB2 PHY charge pump during a scan, but it is not the only root cause; patch0137 failed before this change.
 
-Still-open root-cause leads: XNU `SSUSB_OTG_STS=0` vs native `0x13401340` (native bit9 is VBUS_VALID), and native MTK prepares PHY/host/xHCI before enabling VBUS while XNU sources VBUS before launching its host worker. These may be related; patch0138's exact final digest is not saved. Do not force-write status bit9 or modify undocumented `IP_PW_STS1` bit9.
+Further status comparison: Android device mode reports `STS1=0x01013d0f`, `OTG_STS=0x16c016c0`; native host reports `0x01013f0f`, `0x13401340`; earlier XNU host reports device-mode `STS1=0x01013d0f`, `OTG_STS=0`. `IP_PW_STS1` bit9 is undocumented and unused by vendor code; do not write it. Do not force-write `OTG_STS`. No missing VSV voter: `mediatek,vs-voter` is absent in live DT. `mediatek,uds` targets the `usb3-phy` selector and does not establish a USB2 route issue.
 
-Next offline candidate: remove the revision-inaccurate CHP_EN write, preserve the native revision guard, and build a single safe native-order host-ready-before-VBUS scan with synchronized OTG_STS, DTM1/ACR6, live DP/DM and PORTSC diagnostics. Fresh physical read-only preflight is required before another flash because the local 0138 restore metadata conflicts. No device or network access was used for this analysis.
+The host-ready-before-VBUS order gap remains plausible. A safe implementation needs a staged worker: prepare PHY/repeater/host/xHCI with transfers blocked, signal readiness, let `DaliUSBPower` enable and confirm VBUS, then release attach scanning. The current xHCI health callback rejects startup unless PMIC VBUS/OTG is already active, so moving `dali_usb_host_launch()` alone will fail. Preserve the source lease and cleanup guards. Exact patch0138 final digest is unavailable.
+
+Next offline candidate should fix the CHP_EN guard and implement this staged host/VBUS handshake, logging OTG_STS, DTM1/ACR6, DP/DM and PORTSC around source-on. Fresh physical read-only preflight is required before another flash because local 0138 restore metadata conflicts. No device access or network access was used.
 
 ---
 
