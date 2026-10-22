@@ -1,4 +1,12 @@
-## ACTIVE patch0125 U3-host-port trial — attach observed; hub/addressing failure; original restoration PENDING (2026-10-22)
+## CURRENT HANDOFF — patch0128 held-VBUS trial complete; originals verified (2026-10-22 11:13)
+
+Latest photo IMG_20261022_111356.jpg: XNU host init and xHCI running; USB2 port2 is logically powered (PP=1) but still CCS=0/PLS=5 (RxDetect). Phone ADC/TCPC reads near 4.98V through the held-VBUS scan/rescan. There is no USB attach, descriptor enumeration, MSC, capacity/sector read or root-disk success. A later bsd_init vfs_mountroot line reports bdevvp failed / handshake structure not initialized; since no USB root disk appeared, this follows the missing device, but the photo does not prove the full panic cause. VBUS ADC confirms voltage at the phone measurement point at that time, not loaded voltage/current at the flash drive.
+
+Patch0128 commit adac17c0a3f8696078bf34b7b1d9b64a57294b2d, CI 39714413880 SUCCESS, package and preflight passed. After the phone returned to fastboot, device_pair.py recover restored original init_boot_b then boot_b. device_pair.py verify passed Android Dali/slot_b/boot_completed/root and both full physical original partition sizes/SHA256. trial-state.json is originals_verified; no candidate active. No userdata/GPT/U-disk writes.
+
+New source finding: the Linux XSphy path ignores a 200us FM_VALID timeout but still reads FM_OUT; XNU used valid?FM_OUT:0 and forced fallback 3 when valid was false. Patch0129 changes this to always read/log FM_OUT, retaining the existing <=7 range check and rollback. This is a grounded calibration-path fix, not a proven attach fix. Patch0129 exact replay against expected XNU source passes. Fork CI/build and package remain pending; no new image is flashed. Next prepare one consolidated candidate, then trial only when the user is ready to swap to OTG/U-disk.
+
+## Historical: Patch0125 U3-host-port trial — attach observed; hub/addressing failure (recovered 2026-10-22)
 
 Patch0125 commit `77003876f15831c32470ad7bf2205d36008ba1fc`; full CI `39669053779` SUCCESS. Actual kernel SHA256 `e410fc2ceb63fab716a6e026ebf0f972eb44cc8625e9ff62ed6f49807942ea56`; 32/32 source files match the staged native tree; U3 control/restore markers and full image checks pass. Candidate pair `shim/out-dali/usb-u3-host-39669053779`: boot SHA `ddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39`, init_boot SHA `e9ed115e0f05c7e772ea30fd6223ceb52062db904ccd21470b5a3d06922f359a`, payload29289968/11 segments/ADT8136/root2024e4000. Patch0125 sets the saved U3 IPPC port to host/active before U2 only when the integrated engine is enabled, logs U3 MAC reset status, and restores the exact saved U3 register after controller stop. It does not initialize or tune the U3 PHY.
 

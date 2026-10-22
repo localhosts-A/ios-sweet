@@ -1,0 +1,26 @@
+diff --git a/iokit/Kernel/arm/DaliUSBHost.cpp b/iokit/Kernel/arm/DaliUSBHost.cpp
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -329,19 +329,20 @@
+             change(0x100, 0xffffffU, 1024) && change(0x100, 1U << 24, 1U << 24);
+         bool valid = false;
+         for (unsigned n = 0; ok && n < 20; ++n) {
+             if (phy.read(0x110) & 1) { valid = true; break; }
+             IODelay(10);
+         }
+-        uint32_t fm = valid ? phy.read(0x10c) : 0;
++        /* Match Linux XSphy: poll FM_VALID for diagnostics, but always sample FM_OUT. */
++        uint32_t fm = phy.read(0x10c);
+         bool stopped = change(0x100, 1U << 24, 0);
+         stopped = change(0x110, 1U << 8, 0) && stopped;
+         uint32_t slew = fm && fm != ~0U ? (((26U * 17U * 1024U) / fm) + 500U) / 1000U : 3;
+         ok = ok && stopped && slew <= 7 && change(0x314, 7U << 12, slew << 12);
+         bool oscillatorOff = change(0x314, 1U << 15, 0);
+-        u2Log("DALI PHY: slew calibration ready=%u valid=%u value=%u\n", ok && oscillatorOff, valid, slew);
++        u2Log("DALI PHY: slew calibration ready=%u valid=%u fm=%u value=%u\n", ok && oscillatorOff, valid, fm, slew);
+         return ok && oscillatorOff;
+     }
+ public:
+     bool powerOn(bool calibrated = false) {
+         if (!phy.open(0x16730000, 0x400)) { return false; }
+         for (auto &field : fields) {

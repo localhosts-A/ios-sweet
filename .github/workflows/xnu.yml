@@ -267,6 +267,9 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI ROOT: selected read-only du0'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI RPTR: native host calibration ready='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI PHY: slew calibration ready='
+          grep -Fq 'uint32_t fm = phy.read(0x10c);' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'valid=%u fm=%u value=%u' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI PHY: slew calibration ready=%u valid=%u fm=%u value=%u'
           grep -Fq 'host-u2-native-config' xnu/iokit/Kernel/arm/DaliUSBPMIC.cpp
           grep -Fq 'PE_parse_boot_argn("daliusbphy"' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           grep -Fq 'change(0x320, 3U << 8, 0)' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
