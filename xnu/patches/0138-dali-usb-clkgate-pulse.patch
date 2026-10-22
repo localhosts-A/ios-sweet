@@ -1,0 +1,80 @@
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -43,7 +43,9 @@
+     uint32_t u2Saved, u2Want, u2Read;
+     uint32_t rptrChip, rptrD00, rptrD03;
+     uint32_t macHsPre, macHsPost, macUsb3;
++    uint32_t phyAcr0, phyDtm0, phyDtm1, phyFm, phySlew, aoClkBefore, aoClkAfter;
+     bool valid, u2Ctrl, u2MacReady, utmiReady, hostMacReady;
++    bool phyFmValid;
+     bool rptrEntryRejected, rptrPowerOk, rptrCalOk;
+     bool powerProbe, phyProbe, repeaterProbe, engineProbe;
+ };
+@@ -84,6 +86,11 @@
+         daliScanDigest.repeaterProbe, daliScanDigest.engineProbe);
+     u2Log("DALI DIAG: mac hs=%08x->%08x usb3cfg=%08x\n",
+         daliScanDigest.macHsPre, daliScanDigest.macHsPost, daliScanDigest.macUsb3);
++    u2Log("DALI DIAG: phy acr0=%08x dtm0=%08x dtm1=%08x fm=%u fmvalid=%u slew=%u\n",
++        daliScanDigest.phyAcr0, daliScanDigest.phyDtm0, daliScanDigest.phyDtm1,
++        daliScanDigest.phyFm, daliScanDigest.phyFmValid, daliScanDigest.phySlew);
++    u2Log("DALI DIAG: usbclk gate=%08x->%08x\n",
++        daliScanDigest.aoClkBefore, daliScanDigest.aoClkAfter);
+     u2Log("DALI DIAG: rptr entry=%u power=%u cal=%u chip=%02x d00=%02x d03=%02x\n",
+         daliScanDigest.rptrEntryRejected, daliScanDigest.rptrPowerOk,
+         daliScanDigest.rptrCalOk, daliScanDigest.rptrChip,
+@@ -391,6 +398,9 @@
+         uint32_t slew = fm && fm != ~0U ? (((26U * 17U * 1024U) / fm) + 500U) / 1000U : 3;
+         ok = ok && stopped && slew <= 7 && change(0x314, 7U << 12, slew << 12);
+         bool oscillatorOff = change(0x314, 1U << 15, 0);
++        daliScanDigest.phyFm = fm;
++        daliScanDigest.phyFmValid = valid;
++        daliScanDigest.phySlew = slew;
+         u2Log("DALI PHY: slew calibration ready=%u valid=%u fm=%u value=%u\n", ok && oscillatorOff, valid, fm, slew);
+         return ok && oscillatorOff;
+     }
+@@ -426,6 +436,8 @@
+             change(0x300, 7U << 24, 0) &&
+             change(0x318, (3U << 30) | (1U << 25), 1U << 30);
+         if (ok) { IODelay(800); }
++        /* Live DT sets mediatek,chp-en-disable; vendor clears ACR0.CHP_EN. */
++        ok = ok && change(0x300, 1U << 1, 0);
+         /* Exact live-DT LPM PLL timings and FS_CR; no efuse/eye overwrite. */
+         ok = ok && change(0x364, 3U << 18, 1U << 18) &&
+             change(0x004, 1U << 16, 1U << 16) && change(0x000, 0xffffff00U, 0x1e1e1900U) &&
+@@ -1198,6 +1210,9 @@
+             u2Log("DALI U2: PHY dtm0=%08x dtm1=%08x reserve=%08x/%08x ref=%08x\n",
+                 phy.read(0x368), phy.read(0x36c), phy.read(0x330), phy.read(0x334),
+                 phy.read(0x344));
++            daliScanDigest.phyAcr0 = phy.read(0x300);
++            daliScanDigest.phyDtm0 = phy.read(0x368);
++            daliScanDigest.phyDtm1 = phy.read(0x36c);
+         } else { u2Log("DALI U2: PHY mapping failed\n"); }
+         for (unsigned sample = 0; sample < 3; ++sample) {
+             if (sample) { IOSleep(100); }
+@@ -1397,6 +1412,26 @@
+     if (!snapshotStable) {
+         kprintf("DALI HOST: SPM/gate snapshot changed; controller untouched\n"); return;
+     }
++    /* Match vendor ssusb_reset(): MTK gates the USB MAC/PHY clock for 1 ms and
++     * releases it before requesting host power. The fastboot handoff leaves the
++     * USB2 MAC/PHY state machines in device mode; XNU never pulsed this gate.
++     */
++    uint32_t aoClkBefore = requestGates.read(0);
++    daliScanDigest.aoClkBefore = aoClkBefore;
++    if (aoClkBefore == ~0U || (aoClkBefore & 0x13U)) {
++        kprintf("DALI HOST: USB clkgate pulse rejected read=%08x\n", aoClkBefore);
++        return;
++    }
++    requestGates.write(0, aoClkBefore | 0x13U);
++    IODelay(1000); /* Native ssusb_reset() gates USB clocks for 1 ms. */
++    requestGates.write(0, aoClkBefore & ~0x13U);
++    uint32_t aoClkAfter = requestGates.read(0);
++    daliScanDigest.aoClkAfter = aoClkAfter;
++    if (aoClkAfter != aoClkBefore) {
++        kprintf("DALI HOST: USB clkgate pulse restore failed read=%08x\n", aoClkAfter);
++        return;
++    }
++    kprintf("DALI HOST: USB clkgate pulse before=%08x after=%08x\n", aoClkBefore, aoClkAfter);
+     /* Match the vendor v2 path: unlock request gates, then clear default
+      * MT6989+ FORCE_HW_REQ bits before requesting the six SPM resources.
+      */

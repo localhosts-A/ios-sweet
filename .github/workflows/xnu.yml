@@ -312,6 +312,11 @@ jobs:
           grep -Fq 'DALI DIAG: mac hs=%08x->%08x usb3cfg=%08x' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI DIAG: mac hs=%08x->%08x usb3cfg=%08x'
           grep -Fq 'uint32_t hsPre = 0, hsPost = 0, usb3Config = 0;' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'requestGates.write(0, aoClkBefore | 0x13U);' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'ok = ok && change(0x300, 1U << 1, 0);' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HOST: USB clkgate pulse before=%08x after=%08x'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI DIAG: phy acr0=%08x dtm0=%08x dtm1=%08x fm=%u fmvalid=%u slew=%u'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI DIAG: usbclk gate=%08x->%08x'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI PHY: slew calibration ready='
           grep -Fq 'uint32_t fm = phy.read(0x10c);' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           grep -Fq 'valid=%u fm=%u value=%u' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
