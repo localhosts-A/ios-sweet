@@ -170,6 +170,17 @@ jobs:
           ! grep -Fq 'change(0x300, 1U << 1, 0);' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI OTG: attach accepted tick='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI OTG: pre-host tick='
+          grep -Fq 'attachedRole = c2 == 2 ? 0x06 : 0x09;' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
+          grep -Fq 'write8(0x41a, attachedRole)' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'attached-source CC role programmed'
+          grep -Fq 'rearmCount < 3' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
+          grep -Fq 'return finishLocked("detached", true);' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI OTG FINAL:'
+          grep -Fq 'startupStage = "get-device-descriptor-prefix";' xnu/iokit/Kernel/arm/DaliXHCI.cpp
+          grep -Fq 'startupStage = "msc-read-capacity";' xnu/iokit/Kernel/arm/DaliXHCI.cpp
+          grep -Fq 'startupStage = "hfs-read-mbr";' xnu/iokit/Kernel/arm/DaliXHCI.cpp
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI USB SCAN FINAL:'
+          grep -Fq 'rootReads.firstRead = true;' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           grep -Fq 'channel != 2 && channel != 5 && channel != 7' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
           grep -Fq 'readDiagnosticADC(2, &dp)' xnu/iokit/Kernel/arm/DaliUSBPower.cpp
           grep -Fq 'readDiagnosticADC(5, &ibus)' xnu/iokit/Kernel/arm/DaliUSBPower.cpp

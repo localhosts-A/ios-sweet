@@ -1,0 +1,589 @@
+--- a/iokit/Kernel/arm/DaliUSBPower.cpp
++++ b/iokit/Kernel/arm/DaliUSBPower.cpp
+@@ -227,10 +227,11 @@
+ 
+ bool DaliUSBPower::sourceOn()
+ {
+-    uint8_t cc = 0, power = 0, otg = 0;
++    uint8_t cc = 0, power = 0, otg = 0, role = 0;
+     unsigned mv = 0;
+-    if (!snapshot(&cc, &power, &otg, &mv) || (power & 0x37) || (otg & 1) ||
+-        mv > 800 || (cc & 0x30) || (cc & 0xf) != attachedCC) { return false; }
++    if (!snapshot(&cc, &power, &otg, &mv) || !read8(0x41a, &role) ||
++        role != attachedRole || (power & 0x37) || (otg & 1) || mv > 800 ||
++        (cc & 0x30) || (cc & 0xf) != attachedCC) { return false; }
+     /* Do not adopt or shut down another source: all these must start off. */
+     if (!read8(0x11c, &savedCVHi) || !read8(0x11d, &savedCVLo) ||
+         !read8(0x11e, &savedCurrent)) { return false; }
+@@ -238,36 +239,32 @@
+     if (!dali_cp_prepare_source()) { return false; }
+     chargerTouched = true;
+     /* min4850mV + (selector26 - minselector20)*25mV =5000mV.
+-     * Big-endian selector, current table index0=500mA, default Rp advertisement.
++     * Keep the 500mA source ceiling. CC role now mirrors the native
++     * attached-source policy: Rp on the detected contact, Rd on the idle pin.
+      */
+     if (!write8(0x11c, 0) || !write8(0x11d, 26) || !update(0x11e, 7, 0) ||
+         !protectedIdle(false)) { return false; }
+     /* Recheck after CP configuration and before enabling physical source. */
+-    if (!snapshot(&cc, &power, &otg, &mv) || (power & 0x37) || (otg & 1) ||
+-        mv > 800 || (cc & 0x30) || (cc & 0xf) != attachedCC) { return false; }
++    if (!snapshot(&cc, &power, &otg, &mv) || !read8(0x41a, &role) ||
++        role != attachedRole || (power & 0x37) || (otg & 1) || mv > 800 ||
++        (cc & 0x30) || (cc & 0xf) != attachedCC) { return false; }
+     if (!update(0x108, 1, 1)) { return false; }
+-    kprintf("DALI OTG: 5V/500mA source enabled; waiting for VBUS measurement\n");
++    kprintf("DALI OTG: 5V/500mA source enabled role=%02x; waiting for VBUS measurement\n", role);
+     return true;
+ }
+ 
+-void DaliUSBPower::finishLocked(const char *reason)
+-{
+-    if (state == Finished) { return; }
++bool DaliUSBPower::finishLocked(const char *reason, bool rearm)
++{
++    if (state == Finished) { return false; }
+     unsigned endingState = (unsigned)state;
+-    state = Finished; /* Never rearm automatically after detach/error. */
+-    /* Worker read callbacks never take this power lock. Stop publication and
+-     * wait for outstanding reads/controller reset before removing its source.
+-     * Even a failed join must not prevent electrical source shutdown.
+-     */
++    state = Finished; /* Quiesce this session while ownership is cleaned up. */
+     bool hostJoined = !hostEngine || dali_usb_host_stop();
+-    kprintf("DALI OTG: ending tick=%u state=%u touched role=%u cp=%u charger=%u tcpc=%u\n",
+-        ticks, endingState, roleTouched, cpAttempted, chargerTouched, tcpcTouched);
++    kprintf("DALI OTG: ending tick=%u state=%u touched role=%u cp=%u charger=%u tcpc=%u rearm=%u/%u\n",
++        ticks, endingState, roleTouched, cpAttempted, chargerTouched, tcpcTouched,
++        rearm, rearmCount);
+     bool chargerOK = true, cpOK = true, roleOK = true, tcpcOK = true;
+     bool sourceOffConfirmed = !chargerTouched;
+     if (chargerTouched) {
+-        /* Vendor off path enables PP_CV_FLOW_IDLE before regulator-disable.
+-         * Attempt physical disable even when protected operation failed.
+-         */
+         bool idleOK = protectedIdle(true);
+         bool offOK = update(0x108, 1, 0);
+         uint8_t otg = 1;
+@@ -281,46 +278,87 @@
+             chargerOK = a && b && c && chargerOK;
+             if (cpAttempted) { cpOK = dali_cp_restore_source(); }
+         } else {
+-            cpOK = false; /* Keep routing stable until reboot if source-off unconfirmed. */
++            cpOK = false; /* Keep routing stable until source-off is confirmed. */
+         }
+     } else if (cpAttempted) {
+         cpOK = dali_cp_restore_source();
+     }
++    bool roleOpenOK = true;
+     if (roleTouched) {
+-        /* Stop advertising before restoring original sink configuration. */
+         bool a = write8(0x41a, 0x0f);
+         bool b = update(0x419, 1, savedPolarity);
+         bool c = update(0x41c, 0x40, savedPowerCtrl);
+-        /* Never restore a sink termination when our source-off is unknown. */
+-        bool d = sourceOffConfirmed && write8(0x41a, savedRole);
+-        roleOK = a && b && c && d;
+-    }
+-    if (tcpcTouched) {
+-        if (sourceOffConfirmed) {
+-            bool a = update(0x490, 0x0b, savedSys2);
+-            bool b = update(0x48f, 0x20, savedSys1);
+-            tcpcOK = a && b;
+-        } else { tcpcOK = false; } /* Keep detection awake if source-off unknown. */
+-    }
+-    kprintf("DALI OTG: TCPC wake cleanup=%s\n",
+-        !tcpcTouched ? "untouched" : tcpcOK ? "restored" : "FAILED");
++        roleOpenOK = a && b && c;
++        roleOK = roleOpenOK;
++    }
+     uint8_t cc = 0, power = 0, otg = 0;
+     unsigned mv = 0;
+     bool measured = snapshot(&cc, &power, &otg, &mv);
+     if (chargerTouched && chargerOK) {
+-        /* Observe passive voltage decay, no forced-discharge programming. */
++        /* Observe passive voltage decay; never program forced discharge. */
+         for (unsigned i = 0; i < 20 && measured && mv > 800; ++i) {
+             IOSleep(25);
+             measured = snapshot(&cc, &power, &otg, &mv);
+         }
+     }
+-    kprintf("DALI OTG: end=%s charger=%s cp=%s role=%s VBUS=%umV valid=%u otg=%02x\n",
++    bool safeForRearm = rearm && rearmCount < 3 && hostJoined && chargerOK && cpOK &&
++        roleOpenOK && sourceOffConfirmed && measured && !(otg & 1) && mv <= 800 &&
++        !(power & 0x37) && !adcFault;
++    if (safeForRearm) {
++        uint8_t rp = 0, checkCC = 0, checkPower = 0, checkOtg = 0;
++        unsigned checkMv = 0;
++        bool rpWritten = write8(0x41a, 0x05) && read8(0x41a, &rp) && rp == 0x05;
++        IODelay(30);
++        bool quiet = rpWritten && snapshot(&checkCC, &checkPower, &checkOtg, &checkMv) &&
++            !(checkPower & 0x37) && !(checkOtg & 1) && checkMv <= 800;
++        if (quiet) {
++            ++rearmCount;
++            attachedCC = 0; attachedRole = 0; stable = 0; stateTicks = 0;
++            chargerTouched = false; cpAttempted = false; adcFault = false;
++            startedMs = stateStartedMs = physicalMs();
++            state = Waiting;
++            kprintf("DALI OTG: end=%s rearmed=1 attempt=%u role=%02x VBUS=%umV; waiting for reattach\n",
++                reason, rearmCount, rp, checkMv);
++            if (hostObserve) { dali_usb_host_report(); }
++            kprintf("DALI OTG FINAL: end=%s state=%u rearmed=1/%u cc=%02x power=%02x otg=%02x role=%02x VBUS=%umV valid=1\n",
++                reason, endingState, rearmCount, checkCC, checkPower, checkOtg, rp, checkMv);
++            return true;
++        }
++        roleOK = false;
++        kprintf("DALI OTG: rearm rejected role=%02x cc=%02x power=%02x otg=%02x VBUS=%umV\n",
++            rp, checkCC, checkPower, checkOtg, checkMv);
++    }
++    if (roleTouched) {
++        bool restored = sourceOffConfirmed && write8(0x41a, savedRole);
++        roleOK = roleOK && restored;
++    }
++    if (tcpcTouched) {
++        bool a = sourceOffConfirmed && update(0x490, 0x0b, savedSys2);
++        bool b = sourceOffConfirmed && update(0x48f, 0x20, savedSys1);
++        tcpcOK = a && b;
++    }
++    kprintf("DALI OTG: TCPC wake cleanup=%s\n",
++        !tcpcTouched ? "untouched" : tcpcOK ? "restored" : "FAILED");
++    uint8_t finalCC = 0, finalPower = 0, finalOtg = 0;
++    unsigned finalMv = 0;
++    bool finalMeasured = snapshot(&finalCC, &finalPower, &finalOtg, &finalMv);
++    uint8_t finalRole = 0xff;
++    bool finalRoleRead = read8(0x41a, &finalRole);
++    kprintf("DALI OTG: end=%s rearmed=0 charger=%s cp=%s role=%s VBUS=%umV valid=%u otg=%02x\n",
+         reason, !chargerTouched ? "untouched" : chargerOK ? "restored" : "FAILED",
+         !cpAttempted ? "untouched" : cpOK ? "restored" : "FAILED",
+-        !roleTouched ? "untouched" : roleOK ? "restored" : "FAILED", mv, measured, otg);
++        !roleTouched ? "untouched" : roleOK ? "restored" : "FAILED",
++        finalMv, finalMeasured, finalOtg);
+     kprintf("DALI ADC: final status=%s\n", adcFault ? "FAILED; reboot required" : "no ADC error recorded");
+-    if (!chargerOK || !cpOK || !roleOK || !tcpcOK || adcFault || !hostJoined) { kprintf("DALI OTG: cleanup incomplete; reboot required\n"); }
++    if (!chargerOK || !cpOK || !roleOK || !tcpcOK || adcFault || !hostJoined) {
++        kprintf("DALI OTG: cleanup incomplete; reboot required\n");
++    }
+     if (hostObserve && hostJoined) { dali_usb_host_report(); }
++    kprintf("DALI OTG FINAL: end=%s state=%u rearmed=0/%u cc=%02x power=%02x otg=%02x role=%02x role_valid=%u VBUS=%umV valid=%u cleanup=%u%u%u%u%u\n",
++        reason, endingState, rearmCount, finalCC, finalPower, finalOtg,
++        finalRole, finalRoleRead, finalMv, finalMeasured,
++        chargerOK, cpOK, roleOK, tcpcOK, hostJoined);
++    return false;
+ }
+ 
+ bool DaliUSBPower::tickLocked()
+@@ -432,7 +470,8 @@
+         }
+         kprintf("DALI OTG: tick=%u state=%u cc=%02x power=%02x VBUS=%umV otg=%02x role=%02x sys1=%02x sys2=%02x\n",
+             ticks, state, cc, power, mv, otg, role, sys1, sys2);
+-        if (role != 0x05 || !(sys1 & 0x20) || (sys2 & 0x0b) != 3) {
++        uint8_t expectedRole = state == Waiting ? 0x05 : attachedRole;
++        if (role != expectedRole || !(sys1 & 0x20) || (sys2 & 0x0b) != 3) {
+             finishLocked("TCPC wake/role changed"); return false;
+         }
+     }
+@@ -456,7 +495,15 @@
+             }
+             kprintf("DALI OTG: attach accepted tick=%u cc=%02x role=%02x power=%02x otg=%02x fault=%02x VBUS=%umV\n",
+                 ticks, cc, role, power, otg, fault, mv);
+-            if (!update(0x419, 1, c2 == 2 ? 1 : 0) || !sourceOn()) {
++            attachedRole = c2 == 2 ? 0x06 : 0x09;
++            uint8_t roleRead = 0;
++            bool oriented = update(0x419, 1, c2 == 2 ? 1 : 0) &&
++                write8(0x41a, attachedRole) && read8(0x41a, &roleRead) &&
++                roleRead == attachedRole;
++            IODelay(30);
++            kprintf("DALI OTG: attached-source CC role programmed cc=%02x polarity=%u want=%02x read=%02x ok=%u\n",
++                cc, c2 == 2 ? 1U : 0U, attachedRole, roleRead, oriented);
++            if (!oriented || !sourceOn()) {
+                 finishLocked("source prepare failed"); return false;
+             }
+             state = Rising; stateTicks = 0; stateStartedMs = physicalMs();
+@@ -466,7 +513,7 @@
+         return true;
+     }
+     if (!attached || (cc & 15) != attachedCC) {
+-        finishLocked("detached"); return false;
++        return finishLocked("detached", true);
+     }
+     if (!(otg & 1) || (power & 0x23) || mv > 5500) {
+         finishLocked("source status invalid"); return false;
+--- a/iokit/Kernel/arm/DaliUSBPower.h
++++ b/iokit/Kernel/arm/DaliUSBPower.h
+@@ -8,7 +8,8 @@
+ class DaliUSBPower {
+     IOLock *lock = nullptr;
+     enum State { Initial, Waiting, Rising, Powered, Finished } state = Initial;
+-    unsigned ticks = 0, stateTicks = 0, stable = 0, attachedCC = 0;
++    unsigned ticks = 0, stateTicks = 0, stable = 0, attachedCC = 0, rearmCount = 0;
++    uint8_t attachedRole = 0;
+     uint8_t savedRole = 0, savedPolarity = 0, savedPowerCtrl = 0;
+     uint8_t savedCVHi = 0, savedCVLo = 0, savedCurrent = 0;
+     uint32_t status = 0;
+@@ -32,7 +33,7 @@
+     bool wakeDetection();
+     bool protectedIdle(bool idle);
+     bool sourceOn();
+-    void finishLocked(const char *reason);
++    bool finishLocked(const char *reason, bool rearm = false);
+     bool tickLocked();
+ public:
+     bool init(bool observeHost = false, bool hwrscsV2 = false, bool vusbAlwaysOn = false,
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -48,6 +48,14 @@
+     bool phyFmValid;
+     bool rptrEntryRejected, rptrPowerOk, rptrCalOk;
+     bool powerProbe, phyProbe, repeaterProbe, engineProbe;
++    const char *usbStage;
++    uint32_t usbPortSC;
++    uint16_t usbVendor, usbProduct;
++    uint64_t usbBlocks, hfsOffset, hfsBytes, rootFirstOffset, rootFirstBytes, rootReadBytes;
++    uint32_t usbSector;
++    unsigned usbPort, usbSpeed, usbReadRequests, usbReadSuccesses, usbReadFailures;
++    unsigned rootReadRequests, rootReadFailures;
++    bool usbBOT, usbMSC, usbHFS, usbRootPublished, rootFirstRead;
+ };
+ DaliScanDigest daliScanDigest = {};
+ 
+@@ -952,6 +960,8 @@
+ 
+ /* DMA must stop/reset before releasing PHY and platform clocks. */
+ bool integratedStorage(WriteMapping &ip, unsigned op, bool rootMode) {
++    daliScanDigest.usbStage = "not-started";
++    daliScanDigest.usbPortSC = ~0U;
+     if (!hostDMAValidated) { u2Log("DALI XHCI: DMA policy unverified; engine untouched\n"); return true; }
+     struct Cookie {
+         WriteMapping *ip; WriteMapping *controller;
+@@ -964,6 +974,7 @@
+     if (!registers.open(0x16700000, 0x1000) || !spm.open(0x1c004000, 0x1000) ||
+         !bus.open(0x1c00d000, 0x1000) || !vlp.open(0x1c016000, 0x1000) ||
+         !top.open(0x10000000, 0x800) || !ao.open(0x16790000, 0x100)) {
++        daliScanDigest.usbStage = "health-mapping";
+         u2Log("DALI XHCI: independent AO health mappings unavailable; engine untouched\n"); return true;
+     }
+     bool phyLineReady = phyLine.open(0x16730000, 0x400);
+@@ -1038,24 +1049,80 @@
+     };
+     callbacks.log = u2Log;
+     DaliXHCI controller;
++    daliScanDigest.usbStage = "controller-start";
+     bool success = controller.start(callbacks);
++    daliScanDigest.usbStage = controller.stage();
++    daliScanDigest.usbPort = controller.selectedPort();
++    daliScanDigest.usbPortSC = controller.portStatus();
++    daliScanDigest.usbSpeed = controller.deviceSpeed();
++    daliScanDigest.usbVendor = controller.vendorId();
++    daliScanDigest.usbProduct = controller.productId();
++    daliScanDigest.usbBOT = controller.hasBOT();
++    daliScanDigest.usbMSC = controller.hasMSC();
++    daliScanDigest.usbBlocks = controller.blocks();
++    daliScanDigest.usbSector = controller.sectorSize();
+     uint64_t first = 0, length = 0;
+-    if (success) { success = controller.findHFS(&first, &length); }
++    if (success) {
++        daliScanDigest.usbStage = "hfs-probe";
++        success = controller.findHFS(&first, &length);
++        daliScanDigest.usbStage = controller.stage();
++        daliScanDigest.usbPortSC = controller.portStatus();
++        daliScanDigest.usbReadRequests = controller.totalReadRequests();
++        daliScanDigest.usbReadSuccesses = controller.successfulReadRequests();
++        daliScanDigest.usbReadFailures = controller.failedReadRequests();
++        daliScanDigest.usbHFS = controller.hasHFS();
++        if (success) { daliScanDigest.hfsOffset = first; daliScanDigest.hfsBytes = length; }
++    }
+     if (success && rootMode) {
++        struct RootReadStats {
++            DaliXHCI *controller;
++            unsigned requests, failures;
++            uint64_t bytes, firstOffset, firstBytes;
++            bool firstRead;
++        } rootReads{};
++        rootReads.controller = &controller;
+         auto reader = [](void *p, uint64_t off, size_t size, void *data) {
+-            return static_cast<DaliXHCI *>(p)->read(off, size, data) ? 0 : EIO;
++            auto *stats = static_cast<RootReadStats *>(p);
++            ++stats->requests;
++            if (!stats->controller->read(off, size, data)) { ++stats->failures; return EIO; }
++            stats->bytes += size;
++            if (!stats->firstRead) {
++                stats->firstRead = true; stats->firstOffset = off; stats->firstBytes = size;
++            }
++            return 0;
+         };
+-        success = dali_usb_disk_supply(&controller, reader, first, length) == 0;
++        daliScanDigest.usbStage = "root-publish";
++        int supplyError = dali_usb_disk_supply(&rootReads, reader, first, length);
++        success = supplyError == 0;
++        daliScanDigest.usbRootPublished = success;
++        if (!success) {
++            u2Log("DALI ROOT: read-only disk supply failed error=%d\n", supplyError);
++            daliScanDigest.usbStage = "root-publish-failed";
++        }
+         if (success) {
++            daliScanDigest.usbStage = "root-active";
+             __atomic_store_n(&hostRootActive, true, __ATOMIC_RELEASE);
+             u2Log("DALI ROOT: read-only USB partition available; source health monitoring active\n");
+             while (controller.sourceHealthy()) { IOSleep(100); }
+         }
+         /* Wait for any serialized block read before the stack object dies. */
+-        dali_usb_disk_detach(&controller);
++        dali_usb_disk_detach(&rootReads);
+         __atomic_store_n(&hostRootActive, false, __ATOMIC_RELEASE);
++        daliScanDigest.rootReadRequests = rootReads.requests;
++        daliScanDigest.rootReadFailures = rootReads.failures;
++        daliScanDigest.rootReadBytes = rootReads.bytes;
++        daliScanDigest.rootFirstRead = rootReads.firstRead;
++        daliScanDigest.rootFirstOffset = rootReads.firstOffset;
++        daliScanDigest.rootFirstBytes = rootReads.firstBytes;
++        if (rootReads.firstRead) { daliScanDigest.usbStage = "root-read-confirmed"; }
+     }
+     bool stopped = controller.stop();
++    daliScanDigest.usbPortSC = controller.portStatus();
++    daliScanDigest.usbReadRequests = controller.totalReadRequests();
++    daliScanDigest.usbReadSuccesses = controller.successfulReadRequests();
++    daliScanDigest.usbReadFailures = controller.failedReadRequests();
++    if (!daliScanDigest.rootFirstRead && !daliScanDigest.usbHFS && !daliScanDigest.usbMSC &&
++        !daliScanDigest.usbBOT) { daliScanDigest.usbStage = controller.stage(); }
+     u2Log("DALI XHCI: integrated result=%u stopped=%u\n", success, stopped);
+     return stopped;
+ }
+@@ -1547,11 +1614,27 @@
+ 
+ void dali_usb_host_report()
+ {
+-    if (!u2Report.called || !u2Report.requested) { return; }
+-    kprintf("DALI U2 REPORT: saved results begin reached=%u truncated=%u\n",
+-        u2Report.reached, u2Report.truncated);
+-    kprintf("%s", u2Report.text);
+-    kprintf("DALI U2 REPORT: end; saved text only, no hardware access\n");
++    if (!u2Report.called) { return; }
++    if (u2Report.requested) {
++        kprintf("DALI U2 REPORT: saved results begin reached=%u truncated=%u\n",
++            u2Report.reached, u2Report.truncated);
++        kprintf("%s", u2Report.text);
++        kprintf("DALI U2 REPORT: end; saved text only, no hardware access\n");
++    }
++    uint32_t portSC = daliScanDigest.usbPortSC;
++    kprintf("DALI USB SCAN FINAL: stage=%s port=%u portsc_valid=%u portsc=%08x ccs=%u ped=%u pls=%u speed=%u vid=%04x pid=%04x bot=%u msc=%u blocks=%llu sector=%u hfs=%u hfs_off=%llu hfs_bytes=%llu reads=%u/%u/%u root=%u root_reads=%u root_errors=%u root_bytes=%llu first=%u:%llu+%llu truncated=%u\n",
++        daliScanDigest.usbStage ? daliScanDigest.usbStage : "not-run",
++        daliScanDigest.usbPort, portSC != ~0U, portSC, portSC & 1U, (portSC >> 1) & 1U,
++        (portSC >> 5) & 15U, daliScanDigest.usbSpeed,
++        daliScanDigest.usbVendor, daliScanDigest.usbProduct,
++        daliScanDigest.usbBOT, daliScanDigest.usbMSC, daliScanDigest.usbBlocks,
++        daliScanDigest.usbSector, daliScanDigest.usbHFS,
++        daliScanDigest.hfsOffset, daliScanDigest.hfsBytes,
++        daliScanDigest.usbReadRequests, daliScanDigest.usbReadSuccesses,
++        daliScanDigest.usbReadFailures, daliScanDigest.usbRootPublished,
++        daliScanDigest.rootReadRequests, daliScanDigest.rootReadFailures,
++        daliScanDigest.rootReadBytes, daliScanDigest.rootFirstRead,
++        daliScanDigest.rootFirstOffset, daliScanDigest.rootFirstBytes, u2Report.truncated);
+ }
+ 
+ namespace {
+--- a/iokit/Kernel/arm/DaliXHCI.cpp
++++ b/iokit/Kernel/arm/DaliXHCI.cpp
+@@ -356,6 +356,7 @@
+         return false;
+     }
+     value = rd(reg);
++    lastPortSC = value;
+     ops.log("DALI XHCI: port power ready port=%u raw=%08x pp=%u ccs=%u pls=%u\n",
+         port, value, (value >> 9) & 1, value & 1, (value >> 5) & 15);
+     IOSleep(20);
+@@ -366,6 +367,7 @@
+     attachmentLineSampling = false;
+     if (!attached) {
+         value = rd(reg);
++        lastPortSC = value;
+         ops.log("DALI XHCI: attachment snapshot port=%u raw=%08x pp=%u ccs=%u ped=%u pls=%u speed=%u\n",
+             port, value, (value >> 9) & 1, value & 1, (value >> 1) & 1,
+             (value >> 5) & 15, (value >> 10) & 15);
+@@ -374,13 +376,17 @@
+     }
+     startupStage = "debounce";
+     for (unsigned n = 0; n < 10; ++n) {
+-        if (!live() || (rd(reg) & 9) != 1) { return false; }
++        if (!live()) { return false; }
++        value = rd(reg);
++        lastPortSC = value;
++        if ((value & 9) != 1) { return false; }
+         IOSleep(10); /* USB2 connection debounce, independent of Type-C debounce. */
+     }
+     startupStage = "port-reset";
+     value = rd(reg); wr(reg, (value & neutral) | 0x200 | 16); /* USB2 reset. */
+     if (!wait(reg, 16, 0, 1000) || !(rd(reg) & 2)) { return false; }
+-    unsigned speed = (rd(reg) >> 10) & 15;
++    lastPortSC = rd(reg);
++    speed = (lastPortSC >> 10) & 15;
+     if (speed != 1 && speed != 3) { return false; } /* FS or HS; no LS MSC. */
+     return true;
+ }
+@@ -463,7 +469,8 @@
+     return control(0, 9, uint16_t(configValue), 0, nullptr, 0);
+ }
+ bool DaliXHCI::enumerate() {
+-    unsigned speed = (rd(op + 0x400 + (port - 1) * 16) >> 10) & 15;
++    speed = (rd(op + 0x400 + (port - 1) * 16) >> 10) & 15;
++    startupStage = "enable-slot";
+     if (!command(9, 0, 0, 0, &slot) || slot != 1) { return false; }
+     auto *dcbaa = reinterpret_cast<volatile uint64_t *>(bytes);
+     dcbaa[slot] = physical + 0x9000;
+@@ -477,26 +484,34 @@
+     ep0[2] = uint32_t(physical + controlRing.offset) | 1;
+     ep0[3] = uint32_t((physical + controlRing.offset) >> 32); ep0[4] = 8;
+     publish();
++    startupStage = "address-device";
+     if (!command(11, physical + 0x4000, 0, slot << 24)) { return false; }
+     uint8_t device[18] = {}; unsigned got = 0;
++    startupStage = "get-device-descriptor-prefix";
+     if (!control(0x80, 6, 0x100, 0, device, 8, &got) || got != 8 ||
+         device[0] != 18 || device[1] != 1 || device[4] == 9) { return false; }
+     unsigned maxPacket = device[7];
+     if (maxPacket != 8 && maxPacket != 16 && maxPacket != 32 && maxPacket != 64) { return false; }
+     if (speed == 3 && maxPacket != 64) { return false; }
+     if (maxPacket != packet) {
++        startupStage = "update-ep0-packet-size";
+         dmaZero(input, 0x1000); input[1] = 2;
+         consume(); dmaCopy(ep0, bytes + 0x9000 + contextBytes, contextBytes);
+         ep0[1] = (ep0[1] & 0xffff) | (maxPacket << 16);
+         publish();
+         if (!command(13, physical + 0x4000, 0, slot << 24)) { return false; }
+     }
++    startupStage = "get-device-descriptor";
+     if (!control(0x80, 6, 0x100, 0, device, sizeof(device), &got) || got != sizeof(device)) { return false; }
++    vendor = le16(device + 8); product = le16(device + 10);
+     uint8_t config[1024] = {};
++    startupStage = "get-configuration-header";
+     if (!device[17] || !control(0x80, 6, 0x200, 0, config, 9, &got) || got != 9 || config[1] != 2) { return false; }
+     unsigned total = le16(config + 2);
++    startupStage = "get-configuration";
+     if (total < 9 || total > sizeof(config) || !config[5] ||
+         !control(0x80, 6, 0x200, 0, config, total, &got) || got != total) { return false; }
++    startupStage = "select-bot-interface";
+     bool candidate = false, found = false;
+     unsigned bulkCount = 0;
+     for (unsigned offset = 0; offset < total;) {
+@@ -521,26 +536,36 @@
+         offset += length;
+     }
+     found = found || (candidate && bulkCount == 2 && epIn && epOut);
+-    if (!found || !configureEndpoints(config[5])) { return false; }
++    if (!found) { return false; }
++    startupStage = "configure-bot-endpoints";
++    if (!configureEndpoints(config[5])) { return false; }
++    botFound = true;
+     ops.log("DALI USB: device=%04x:%04x speed=%u BOT interface=%u ep=%u/%u\n",
+-        le16(device + 8), le16(device + 10), speed, interface, epIn, epOut);
++        vendor, product, speed, interface, epIn, epOut);
+     uint8_t inquiry[36] = {}, cdb[16] = {0x12, 0, 0, 0, 36};
++    startupStage = "bot-inquiry";
+     if (!scsi(cdb, 6, inquiry, sizeof(inquiry)) || (inquiry[0] & 31) != 0) { return false; }
+     bool ready = false;
+     for (unsigned attempt = 0; attempt < 3; ++attempt) {
++        startupStage = "bot-test-unit-ready";
+         bzero(cdb, sizeof(cdb)); bool checkCondition = false;
+         if (scsi(cdb, 6, nullptr, 0, &checkCondition)) { ready = true; break; }
+         if (!checkCondition || __atomic_load_n(&faulted, __ATOMIC_ACQUIRE)) { return false; }
++        startupStage = "bot-request-sense";
+         uint8_t sense[18] = {}; cdb[0] = 3; cdb[4] = sizeof(sense);
+         if (!scsi(cdb, 6, sense, sizeof(sense)) || ((sense[2] & 15) != 2 && (sense[2] & 15) != 6)) { return false; }
+         IOSleep(100);
+     }
+     if (!ready) { return false; }
++    startupStage = "msc-read-capacity";
+     uint8_t capacity[8] = {}; bzero(cdb, sizeof(cdb)); cdb[0] = 0x25;
+     if (!scsi(cdb, 10, capacity, sizeof(capacity))) { return false; }
+     uint32_t last = be32(capacity); blockBytes = be32(capacity + 4);
++    startupStage = "msc-validate-capacity";
+     if (last == ~0U || blockBytes < 512 || blockBytes > 4096 || (blockBytes & (blockBytes - 1))) { return false; }
+     blockCount = uint64_t(last) + 1; configured = true;
++    mscReady = true;
++    startupStage = "msc-ready";
+     ops.log("DALI MSC: ready blocks=%llu sector=%u; SCSI writes disabled\n", blockCount, blockBytes);
+     return true;
+ }
+@@ -564,11 +589,15 @@
+     return true;
+ }
+ bool DaliXHCI::readBlocks(uint64_t lba, unsigned count, void *destination) {
++    ++readRequests;
+     if (!ready() || !count || count > 65535 || count > dataBytes / blockBytes ||
+-        lba >= blockCount || count > blockCount - lba || lba > 0xffffffffULL) { return false; }
++        lba >= blockCount || count > blockCount - lba || lba > 0xffffffffULL) {
++        ++readFailures; return false;
++    }
+     uint8_t cdb[10] = {0x28}; putBE32(cdb + 2, uint32_t(lba));
+     cdb[7] = uint8_t(count >> 8); cdb[8] = uint8_t(count);
+-    if (scsi(cdb, sizeof(cdb), destination, count * blockBytes)) { return true; }
++    if (scsi(cdb, sizeof(cdb), destination, count * blockBytes)) { ++readSuccesses; return true; }
++    ++readFailures;
+     fail(); return false;
+ }
+ bool DaliXHCI::read(uint64_t offset, size_t length, void *destination) {
+@@ -595,6 +624,7 @@
+ bool DaliXHCI::findHFS(uint64_t *first, uint64_t *length) {
+     if (!first || !length || !ready()) { return false; }
+     uint8_t sector[4096] = {};
++    startupStage = "hfs-read-mbr";
+     if (!read(0, blockBytes, sector)) { return false; }
+     uint64_t candidates[5] = {0}, sizes[5] = {capacity()}; unsigned count = 1;
+     if (sector[510] == 0x55 && sector[511] == 0xaa) {
+@@ -614,6 +644,7 @@
+         uint64_t offset = candidates[i] + 1024;
+         if (sizes[i] < 2048 || offset < candidates[i]) { continue; }
+         uint64_t aligned = offset & ~(uint64_t(blockBytes) - 1);
++        startupStage = "hfs-read-volume-header";
+         if (!read(aligned, blockBytes, sector)) { return false; }
+         const uint8_t *header = sector + offset - aligned;
+         uint16_t signature = (uint16_t(header[0]) << 8) | header[1];
+@@ -624,9 +655,12 @@
+         if (allocation < 512 || (allocation & (allocation - 1)) || !total ||
+             uint64_t(allocation) * total > sizes[i]) { continue; }
+         *first = candidates[i]; *length = uint64_t(allocation) * total;
++        hfsFound = true;
++        startupStage = "hfs-found";
+         ops.log("DALI ROOT: HFS volume signature=%04x offset=%llu bytes=%llu\n", signature, *first, *length);
+         return true;
+     }
++    startupStage = "hfs-no-valid-volume";
+     return false;
+ }
+ bool DaliXHCI::start(const DaliXHCIOps &callbacks, unsigned maxMilliseconds) {
+--- a/iokit/Kernel/arm/DaliXHCI.h
++++ b/iokit/Kernel/arm/DaliXHCI.h
+@@ -37,10 +37,15 @@
+     unsigned op = 0, runtime = 0, doors = 0, slot = 0, port = 0;
+     unsigned contextBytes = 0, eventIndex = 0, eventCycle = 1;
+     unsigned epIn = 0, epOut = 0, inPacket = 0, outPacket = 0, interface = 0;
++    unsigned speed = 0;
++    uint16_t vendor = 0, product = 0;
++    uint32_t lastPortSC = ~0U;
++    unsigned readRequests = 0, readSuccesses = 0, readFailures = 0;
+     unsigned operationBudgetMs = 0;
+     uint64_t startedMs = 0;
+     const char *startupStage = "idle";
+     bool dmaPublished = false, running = false, faulted = false, configured = false;
++    bool botFound = false, mscReady = false, hfsFound = false;
+     bool prepared = false, controllerResetPending = false;
+     bool attachmentLineSampling = false;
+     void fail() { __atomic_store_n(&faulted, true, __ATOMIC_RELEASE); }
+@@ -78,5 +83,18 @@
+     bool sourceHealthy() const { return ready() && ops.alive(ops.cookie, false); }
+     uint64_t capacity() const { return blockCount * blockBytes; }
+     uint32_t sectorSize() const { return blockBytes; }
++    const char *stage() const { return startupStage; }
++    unsigned selectedPort() const { return port; }
++    unsigned deviceSpeed() const { return speed; }
++    uint32_t portStatus() const { return lastPortSC; }
++    uint16_t vendorId() const { return vendor; }
++    uint16_t productId() const { return product; }
++    uint64_t blocks() const { return blockCount; }
++    bool hasBOT() const { return botFound; }
++    bool hasMSC() const { return mscReady; }
++    bool hasHFS() const { return hfsFound; }
++    unsigned totalReadRequests() const { return readRequests; }
++    unsigned successfulReadRequests() const { return readSuccesses; }
++    unsigned failedReadRequests() const { return readFailures; }
+ };
+ #endif
