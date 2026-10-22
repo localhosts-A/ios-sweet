@@ -1,15 +1,10 @@
-## CURRENT HANDOFF — offline audit: 0138 guard bug and incomplete host-state transition (2026-10-23)
+## CURRENT HANDOFF — Android restored and verified; consolidated diagnostic image next (2026-10-23)
 
-Android with OTG enabled reads the same U-disk. XNU still fails before enumeration; earlier scans show port2 `PP=1, CCS=0, PLS=5` (RxDetect), no USB descriptors/MSC/read/root. `bdevvp failed` follows the missing USB block device.
+The phone is connected through ADB. Read-only status is Android Dali, model 25060RK16C, slot _b, Android 17, boot_completed=1. `shim/out-dali/usb-clkgate-39797603879/device_pair.py verify ...` completed: original boot_b/init_boot_b full physical sizes and SHA256 match the saved backup pair; manifest state is `originals_verified`. No fastboot device is currently listed. No partition or USB setting was changed; ADB daemon startup was the only side effect.
 
-Patch0138 has a concrete silicon-revision mismatch: saved live FDT `atag,chipid.sw_ver` and calibration `sw_revision` are both 1. MTK only clears XS-PHY ACR0.CHP_EN when `chp_en_disable` and `sw_ver==0`, after LPM PLL setup. Patch0138 clears it unconditionally before that setup, overriding XNU's existing revision guard. Remove the early write and retain the guarded path. This can disable the USB2 PHY charge pump during a scan, but it is not the only root cause; patch0137 failed before this change.
+The offline audit withdrew the host-before-VBUS theory: Android enables external MT6379 VBUS before MTU3/PHY/xHCI, and XNU also validates VBUS before host launch. The native regulator-enable sequence largely matches XNU. Remaining candidates are XNU's attached-source TCPC role, 500mA versus native configured 1400mA source limit, OTG/IPPC host signature, and USB2 signal state. Patch0138's unconditional CHP_EN clear is incorrect for revision 1.
 
-Further status comparison: Android device mode reports `STS1=0x01013d0f`, `OTG_STS=0x16c016c0`; native host reports `0x01013f0f`, `0x13401340`; earlier XNU host reports device-mode `STS1=0x01013d0f`, `OTG_STS=0`. `IP_PW_STS1` bit9 is undocumented and unused by vendor code; do not write it. Do not force-write `OTG_STS`. No missing VSV voter: `mediatek,vs-voter` is absent in live DT. `mediatek,uds` targets the `usb3-phy` selector and does not establish a USB2 route issue.
-
-The host-ready-before-VBUS order gap remains plausible. A safe implementation needs a staged worker: prepare PHY/repeater/host/xHCI with transfers blocked, signal readiness, let `DaliUSBPower` enable and confirm VBUS, then release attach scanning. The current xHCI health callback rejects startup unless PMIC VBUS/OTG is already active, so moving `dali_usb_host_launch()` alone will fail. Preserve the source lease and cleanup guards. Exact patch0138 final digest is unavailable.
-
-Next offline candidate should fix the CHP_EN guard and implement this staged host/VBUS handshake, logging OTG_STS, DTM1/ACR6, DP/DM and PORTSC around source-on. Fresh physical read-only preflight is required before another flash because local 0138 restore metadata conflicts. No device access or network access was used.
-
+Next prepare one consolidated instrumented candidate before a hardware session: correct the revision-1 CHP_EN guard; add attach-time ROLE_CTRL/CC/fault and MT6379 static ADC reads for DP/IBUS/DM; retain existing IPPC/PHY/repeater/PORTSC logs. Keep CC termination and source current limit unchanged. Do not flash until candidate source, CI and package checks pass and the user reviews/approves the exact paired image. AGENTS.md requires confirmation before each destructive step. At test time, redo physical identity/slot/original-backup preflight and restore the original pair immediately after the bounded capture.
 ---
 
 ## CURRENT HANDOFF — patch0132 complete candidate ready; originals physically verified (2026-10-22)
