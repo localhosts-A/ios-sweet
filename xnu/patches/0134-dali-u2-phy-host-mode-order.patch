@@ -1,0 +1,86 @@
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -379,4 +379,3 @@
+             change(0x004, 1U << 16, 1U << 16) && change(0x000, 0xffffff00U, 0x1e1e1900U) &&
+-            change(0x310, 7U << 8, 7U << 8) &&
+-            change(0x36c, (1U << 9) | 2U, 1U << 9);
++            change(0x310, 7U << 8, 7U << 8);
+         if (calibrated) {
+@@ -387,2 +386,11 @@
+         return ok;
++    }
++    bool setHostMode() {
++        constexpr uint32_t hostModeMask = (1U << 9) | 2U;
++        bool wrote = saved && change(0x36c, hostModeMask, 1U << 9);
++        uint32_t dtm1 = saved ? phy.read(0x36c) : ~0U;
++        bool ready = wrote && dtm1 != ~0U && (dtm1 & hostModeMask) == (1U << 9);
++        u2Log("DALI PHY: host mode ready=%u dtm1=%08x forceIddig=%u rgIddig=%u\n",
++            ready, dtm1, (dtm1 >> 9) & 1U, (dtm1 >> 1) & 1U);
++        return ready;
+     }
+@@ -874,2 +882,3 @@
+         ReadMapping *spm; ReadMapping *bus; ReadMapping *vlp; ReadMapping *top; ReadMapping *ao;
++        ReadMapping *phyLine; bool phyLineReady;
+         unsigned op;
+@@ -877,3 +886,3 @@
+     WriteMapping registers;
+-    ReadMapping spm, bus, vlp, top, ao;
++    ReadMapping spm, bus, vlp, top, ao, phyLine;
+     if (!registers.open(0x16700000, 0x1000) || !spm.open(0x1c004000, 0x1000) ||
+@@ -883,3 +892,5 @@
+     }
+-    Cookie cookie{&ip, &registers, &spm, &bus, &vlp, &top, &ao, op};
++    bool phyLineReady = phyLine.open(0x16730000, 0x400);
++    if (!phyLineReady) { u2Log("DALI PHY: live line monitor mapping unavailable\n"); }
++    Cookie cookie{&ip, &registers, &spm, &bus, &vlp, &top, &ao, &phyLine, phyLineReady, op};
+     DaliXHCIOps callbacks{};
+@@ -889,2 +900,8 @@
+     callbacks.write = [](void *p, unsigned offset, uint32_t v) { static_cast<Cookie *>(p)->controller->write(offset, v); };
++    if (phyLineReady) {
++        callbacks.lineState = [](void *p) {
++            auto *c = static_cast<Cookie *>(p);
++            return c->phyLineReady ? c->phyLine->read(0x324) : ~0U;
++        };
++    }
+     callbacks.alive = [](void *p, bool resetPending) {
+@@ -1037,2 +1054,5 @@
+                 }
++                if (nativeReady) {
++                    nativeReady = nativePhy.setHostMode() && hostStillHalted(ip, xhci, op);
++                }
+                 if (nativeReady && engineProbe) {
+--- a/iokit/Kernel/arm/DaliXHCI.cpp
++++ b/iokit/Kernel/arm/DaliXHCI.cpp
+@@ -97,4 +97,13 @@
+     uint64_t start = milliseconds();
++    uint64_t lastLineSample = ~0ULL;
+     do {
+         if (!live()) { return false; }
++        uint64_t now = milliseconds();
++        if (attachmentLineSampling && ops.lineState &&
++            (lastLineSample == ~0ULL || now - lastLineSample >= 500)) {
++            uint32_t line = ops.lineState(ops.cookie);
++            ops.log("DALI PHY: live attachment line elapsed=%llu monitor=%08x valid=%u dp=%u dm=%u\n",
++                now - start, line, line != ~0U, line & 1U, (line >> 1) & 1U);
++            lastLineSample = now;
++        }
+         uint32_t value = rd(reg);
+@@ -354,3 +363,6 @@
+     /* Android reports this USB2 stick ~2.9s after xHCI host registration. */
+-    if (!wait(reg, 1, 1, 5000)) {
++    attachmentLineSampling = true;
++    bool attached = wait(reg, 1, 1, 5000);
++    attachmentLineSampling = false;
++    if (!attached) {
+         value = rd(reg);
+--- a/iokit/Kernel/arm/DaliXHCI.h
++++ b/iokit/Kernel/arm/DaliXHCI.h
+@@ -20,2 +20,4 @@
+     bool (*alive)(void *, bool controllerResetPending);
++    /* Optional read-only USB2 PHY DP/DM monitor, used only during attach wait. */
++    uint32_t (*lineState)(void *);
+     void (*log)(const char *, ...);
+@@ -42,2 +44,3 @@
+     bool prepared = false, controllerResetPending = false;
++    bool attachmentLineSampling = false;
+     void fail() { __atomic_store_n(&faulted, true, __ATOMIC_RELEASE); }
