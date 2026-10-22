@@ -297,6 +297,17 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI OTG: pre-host sts=%08x pw1=%08x pw2=%08x u2=%08x u3=%08x'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI OTG: post-phy sts=%08x pw1=%08x pw2=%08x u2=%08x u3=%08x'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI OTG: pre-xhci sts=%08x pw1=%08x pw2=%08x u2=%08x u3=%08x'
+          grep -Fq 'struct DaliScanDigest' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'void printScanDigest()' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'daliScanDigest.preSts = otg;' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'daliScanDigest.u2Want = wanted;' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'daliScanDigest.rptrPowerOk = nativeRepeater.lastPowerOk;' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          grep -Fq 'bzero(&daliScanDigest, sizeof(daliScanDigest));' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI DIAG: pre  sts=%08x pw1=%08x pw2=%08x u2=%08x u3=%08x'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI DIAG: post sts=%08x pw1=%08x pw2=%08x u2=%08x u3=%08x'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI DIAG: xhci sts=%08x pw1=%08x pw2=%08x u2=%08x u3=%08x'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI DIAG: u2 saved=%08x want=%08x read=%08x ctrl=%u utmi=%u mac=%u probes=%u%u%u%u'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI DIAG: rptr entry=%u power=%u cal=%u chip=%02x d00=%02x d03=%02x'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI PHY: slew calibration ready='
           grep -Fq 'uint32_t fm = phy.read(0x10c);' xnu/iokit/Kernel/arm/DaliUSBHost.cpp
           grep -Fq 'valid=%u fm=%u value=%u' xnu/iokit/Kernel/arm/DaliUSBHost.cpp

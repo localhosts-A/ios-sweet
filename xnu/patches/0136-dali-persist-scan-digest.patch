@@ -1,0 +1,193 @@
+--- a/iokit/Kernel/arm/DaliUSBHost.cpp
++++ b/iokit/Kernel/arm/DaliUSBHost.cpp
+@@ -33,6 +33,21 @@
+ };
+ U2Report u2Report = {};
+ 
++/* The framebuffer console keeps only its last lines, so the early host
++ * bring-up reads are repeated once at the end of every scan.
++ */
++struct DaliScanDigest {
++    uint32_t preSts, prePw1, prePw2, preU2, preU3;
++    uint32_t postSts, postPw1, postPw2, postU2, postU3;
++    uint32_t xhciSts, xhciPw1, xhciPw2, xhciU2, xhciU3;
++    uint32_t u2Saved, u2Want, u2Read;
++    uint32_t rptrChip, rptrD00, rptrD03;
++    bool valid, u2Ctrl, u2MacReady, utmiReady, hostMacReady;
++    bool rptrEntryRejected, rptrPowerOk, rptrCalOk;
++    bool powerProbe, phyProbe, repeaterProbe, engineProbe;
++};
++DaliScanDigest daliScanDigest = {};
++
+ void u2Log(const char *format, ...) {
+     char line[256];
+     va_list args;
+@@ -50,6 +65,28 @@
+     u2Report.text[u2Report.size] = 0;
+ }
+ 
++void printScanDigest() {
++    if (!daliScanDigest.valid) { return; }
++    u2Log("DALI DIAG: pre  sts=%08x pw1=%08x pw2=%08x u2=%08x u3=%08x\n",
++        daliScanDigest.preSts, daliScanDigest.prePw1, daliScanDigest.prePw2,
++        daliScanDigest.preU2, daliScanDigest.preU3);
++    u2Log("DALI DIAG: post sts=%08x pw1=%08x pw2=%08x u2=%08x u3=%08x\n",
++        daliScanDigest.postSts, daliScanDigest.postPw1, daliScanDigest.postPw2,
++        daliScanDigest.postU2, daliScanDigest.postU3);
++    u2Log("DALI DIAG: xhci sts=%08x pw1=%08x pw2=%08x u2=%08x u3=%08x\n",
++        daliScanDigest.xhciSts, daliScanDigest.xhciPw1, daliScanDigest.xhciPw2,
++        daliScanDigest.xhciU2, daliScanDigest.xhciU3);
++    u2Log("DALI DIAG: u2 saved=%08x want=%08x read=%08x ctrl=%u utmi=%u mac=%u probes=%u%u%u%u\n",
++        daliScanDigest.u2Saved, daliScanDigest.u2Want, daliScanDigest.u2Read,
++        daliScanDigest.u2Ctrl, daliScanDigest.utmiReady, daliScanDigest.hostMacReady,
++        daliScanDigest.powerProbe, daliScanDigest.phyProbe,
++        daliScanDigest.repeaterProbe, daliScanDigest.engineProbe);
++    u2Log("DALI DIAG: rptr entry=%u power=%u cal=%u chip=%02x d00=%02x d03=%02x\n",
++        daliScanDigest.rptrEntryRejected, daliScanDigest.rptrPowerOk,
++        daliScanDigest.rptrCalOk, daliScanDigest.rptrChip,
++        daliScanDigest.rptrD00, daliScanDigest.rptrD03);
++}
++
+ class ReadMapping {
+     IOMemoryDescriptor *memory = nullptr;
+     IOMemoryMap *map = nullptr;
+@@ -699,6 +736,7 @@
+         /* Exact e45c319 >=E3 normal path plus Dali live-DT host properties.
+          * Read all calibration inputs before any calibration write.
+          */
++        lastCalOk = false;
+         uint8_t e[7] = {};
+         const uint16_t regs[] = {0x323, 0x324, 0x325, 0x326, 0x327, 0x381, 0x382};
+         for (unsigned i = 0; i < 7; ++i) { if (!read(regs[i], &e[i])) { return false; } }
+@@ -739,13 +777,18 @@
+         calibrationReady = ok;
+         uint8_t mapped = 0;
+         ok = read(0xd22, &mapped) && ok;
++        lastCalOk = ok;
+         u2Log("DALI RPTR: efuse defaults ready=%u top81=%02x top82=%02x d22=%02x\n",
+             ok, e[5], e[6], mapped);
+         return ok;
+     }
+ public:
++    bool lastEntryRejected = false, lastPowerOk = false, lastCalOk = false;
++    uint8_t lastChip = 0, lastD00 = 0, lastD03 = 0;
+     bool powerOn(bool calibrated = false) {
+         uint8_t chip = 0, reset = 0;
++        lastEntryRejected = false;
++        lastPowerOk = false;
+         if (!read(0, &chip) || chip != 0x74 || !read(0xd91, &reset) || reset != 0) {
+             u2Log("DALI RPTR: chip/reset guard rejected chip=%02x reset=%02x; untouched\n", chip, reset);
+             return false;
+@@ -756,6 +799,7 @@
+         /* Only the photographed firmware-off handoff, no LP or active owner. */
+         if (fields[0].saved != 4 || fields[1].saved != 1 || fields[2].saved != 0x78 ||
+             fields[4].saved != 0 || fields[5].saved != 0x46) {
++            lastEntryRejected = true;
+             u2Log("DALI RPTR: entry guard rejected; controls untouched\n"); return false;
+         }
+         for (auto &field : fields) {
+@@ -784,6 +828,10 @@
+         uint8_t bg = 0, osc = 0;
+         bool got = read(0xd00, &bg) && read(0xd03, &osc);
+         ok = ok && got && (bg & 1) && (osc & 3) == 2;
++        lastPowerOk = ok;
++        lastChip = chip;
++        lastD00 = bg;
++        lastD03 = osc;
+         u2Log("DALI RPTR: basic power ready=%u chip=%02x d00=%02x d03=%02x calibrated=%u\n",
+             ok, chip, bg, osc, calibrated);
+         return ok;
+@@ -992,6 +1040,16 @@
+     uint32_t otg = ip.read(0x18), pw1 = ip.read(0x10), pw2 = ip.read(0x14);
+     u2Log("DALI OTG: pre-host sts=%08x pw1=%08x pw2=%08x u2=%08x u3=%08x\n",
+         otg, pw1, pw2, saved, u3);
++    daliScanDigest.valid = true;
++    daliScanDigest.powerProbe = powerProbe;
++    daliScanDigest.phyProbe = phyProbe;
++    daliScanDigest.repeaterProbe = repeaterProbe;
++    daliScanDigest.engineProbe = engineProbe;
++    daliScanDigest.preSts = otg;
++    daliScanDigest.prePw1 = pw1;
++    daliScanDigest.prePw2 = pw2;
++    daliScanDigest.preU2 = saved;
++    daliScanDigest.preU3 = u3;
+     uint32_t cmd = xhci.read(op), sts = xhci.read(op + 4);
+     if (saved == ~0U || u3 == ~0U || (saved & 3U) != 3U ||
+         (u3 & 3U) != 3U || !(ip.read(8) & 1U) || cmd != 0U ||
+@@ -1031,6 +1089,11 @@
+     u2Log("DALI U2: enable saved=%08x want=%08x read=%08x ctrl=%u forceIddig=%u rgIddig=%u otgSel=%u\n",
+         saved, wanted, enabled, u2Control, (enabled >> 11) & 1U,
+         (enabled >> 10) & 1U, (enabled >> 7) & 1U);
++    daliScanDigest.u2Saved = saved;
++    daliScanDigest.u2Want = wanted;
++    daliScanDigest.u2Read = enabled;
++    daliScanDigest.u2Ctrl = u2Control;
++    daliScanDigest.u2MacReady = u2MacReady;
+     u2Log("DALI U2: MAC ready=%u sts=%08x/%08x\n",
+         u2MacReady, ip.read(0x10), ip.read(0x14));
+     bool ppRestored = true, nativeReady = true, ckTouched = false;
+@@ -1048,6 +1111,12 @@
+             if (nativeReady) {
+                 nativeReady = (!repeaterProbe || nativeRepeater.powerOn(engineProbe)) &&
+                     hostStillHalted(ip, xhci, op);
++                daliScanDigest.rptrEntryRejected = nativeRepeater.lastEntryRejected;
++                daliScanDigest.rptrPowerOk = nativeRepeater.lastPowerOk;
++                daliScanDigest.rptrCalOk = nativeRepeater.lastCalOk;
++                daliScanDigest.rptrChip = nativeRepeater.lastChip;
++                daliScanDigest.rptrD00 = nativeRepeater.lastD00;
++                daliScanDigest.rptrD03 = nativeRepeater.lastD03;
+                 nativeReady = nativeReady && nativePhy.powerOn(engineProbe) && hostStillHalted(ip, xhci, op);
+                 if (nativeReady && engineProbe) {
+                     nativeReady = nativeUsb3.apply() && hostStillHalted(ip, xhci, op);
+@@ -1077,17 +1146,33 @@
+                 }
+             }
+             u2Log("DALI PHY: UTMI16/host ready=%u\n", nativeReady);
++            daliScanDigest.utmiReady = nativeReady;
+         }
++        uint32_t postSts = ip.read(0x18), postPw1 = ip.read(0x10), postPw2 = ip.read(0x14);
++        uint32_t postU2 = ip.read(0x50), postU3 = ip.read(0x30);
+         u2Log("DALI OTG: post-phy sts=%08x pw1=%08x pw2=%08x u2=%08x u3=%08x\n",
+-            ip.read(0x18), ip.read(0x10), ip.read(0x14), ip.read(0x50), ip.read(0x30));
++            postSts, postPw1, postPw2, postU2, postU3);
++        daliScanDigest.postSts = postSts;
++        daliScanDigest.postPw1 = postPw1;
++        daliScanDigest.postPw2 = postPw2;
++        daliScanDigest.postU2 = postU2;
++        daliScanDigest.postU3 = postU3;
+         if (engineProbe && nativeReady) {
+             hostMacReady = hostMac.apply();
+             if (!hostMacReady) {
+                 u2Log("DALI MTU3: native host tuning failed; xHCI start skipped\n");
+             }
+         }
++        daliScanDigest.hostMacReady = hostMacReady;
++        uint32_t xhciSts = ip.read(0x18), xhciPw1 = ip.read(0x10), xhciPw2 = ip.read(0x14);
++        uint32_t xhciU2 = ip.read(0x50), xhciU3 = ip.read(0x30);
+         u2Log("DALI OTG: pre-xhci sts=%08x pw1=%08x pw2=%08x u2=%08x u3=%08x\n",
+-            ip.read(0x18), ip.read(0x10), ip.read(0x14), ip.read(0x50), ip.read(0x30));
++            xhciSts, xhciPw1, xhciPw2, xhciU2, xhciU3);
++        daliScanDigest.xhciSts = xhciSts;
++        daliScanDigest.xhciPw1 = xhciPw1;
++        daliScanDigest.xhciPw2 = xhciPw2;
++        daliScanDigest.xhciU2 = xhciU2;
++        daliScanDigest.xhciU3 = xhciU3;
+         ReadMapping phy;
+         if (phy.open(0x16730000, 0x400)) {
+             u2Log("DALI U2: PHY acr0=%08x acr4=%08x acr6=%08x dcr1=%08x\n",
+@@ -1181,6 +1266,7 @@
+     u2Log("DALI U2: restore want=%08x read=%08x match=%u\n", saved, after, restored);
+     bool retrySafe = restored && u3Restored && ppRestored && phyRestored && usb3PhyRestored &&
+         repeaterRestored && hostMacRestored;
++    printScanDigest();
+     __atomic_store_n(&hostRetrySafe, retrySafe, __ATOMIC_RELEASE);
+     return retrySafe;
+ }
+@@ -1204,6 +1290,7 @@
+         (engineProbe != 0 && engineProbe != 1) || (rootMode != 0 && rootMode != 1) ||
+         (engineProbe && (!repeaterProbe || !hostDMAValidated)) || (rootMode && !engineProbe)) { return; }
+     bzero(&u2Report, sizeof(u2Report));
++    bzero(&daliScanDigest, sizeof(daliScanDigest));
+     u2Report.called = true;
+     u2Report.requested = portProbe == 1;
+     u2Log("DALI HOST: guarded MTU3 v2 host power-up begin; U2=%u PHY=%u engine=%u root=%u\n",
