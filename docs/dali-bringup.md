@@ -133,10 +133,19 @@ output path, not a UFS handshake failure.
 
 Patch 0152 makes Dali skip `sweet_usb_probe()` after UFS setup while retaining
 the call for other SWEET targets. The CI gate checks both the MT6991 compatible
-classification and the conditional call site. Patch 0152 still needs full CI
-and offline candidate verification. It has not been flashed. The stock boot
+classification and the conditional call site. CI run 40746241772 passed, and
+the offline candidate is packaged at
+`shim/out-dali/ufs-40746241772/candidate/`.
+
+Exact pair hashes: boot
+`ddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39`;
+init_boot
+`74a4b1bcfd551455f3ddf8c65476231820cdc971a8dc82b726e29da0540a9f74`.
+All 19 package checksum entries and the boot/init_boot, AVB, CPIO, payload, and
+ADT checks pass. No 0152 device preflight or trial has occurred. The stock boot
 pair from the 0151 test was restored and physically hash-verified; a fresh
-host poll now sees neither ADB nor Fastboot enumerated.
+host poll now sees neither ADB nor Fastboot enumerated. Any new trial requires
+approval of these exact hashes and a fresh read-only preflight.
 
 `build-dali-initboot.sh` makes a newc CPIO containing `sweet.payload`, wraps
 it in a 64 KiB independent-block LZ4 frame, and adds an AVB v1 hash footer

@@ -1,4 +1,4 @@
-## CURRENT HANDOFF — 0151 restored; 0152 Dali USB-probe fix in CI preparation (2026-10-29)
+## CURRENT HANDOFF — 0152 candidate ready; awaiting exact-hash trial approval (2026-10-29)
 
 The approved 0151 pair was tested once. Its UFS trace shows `fDeviceInit` cleared after one READ_FLAG poll, root LUN 2 became ready, READ CAPACITY succeeded, and GPT discovery found `unixnu_logs` and `unixnu_data`. The trace does not confirm a root mount. The SWEET log range remained 4,198,400 zero bytes.
 
@@ -6,7 +6,21 @@ The user's photo `IMG_20261029_020026.jpg` shows an SP1 synchronous exception. S
 
 Recovery is complete: original `init_boot_b` and `boot_b` were restored and physically hash-verified. Android returned with `boot_completed=1` on slot `_b`. Stock hashes are `boot_b` `6dc40de74fa7de4f435c513047c51fe10634c1891666031039c52a08b27a3cd5` and `init_boot_b` `08794a432befcf0504ee4933a51260cb6ccc4785b69f345c4b5968e8e6053d2d`. Latest ADB and Fastboot host polls are empty; these stored restoration records are the latest successful device-state evidence.
 
-Patch `xnu/patches/0152-dali-skip-qcom-usb-probe.patch` skips `sweet_usb_probe()` only when the Dali MT6991 UFS compatible sets `su.dali`; other SWEET targets retain the call. Patch replay, the workflow source gate, and a single-file XNU compile passed locally. Full XNU CI is pending. No 0152 image has been built or flashed. Next run the full XNU CI, package and offline-verify the exact pair, then request approval for those hashes before a new hardware trial and fresh read-only preflight. This remains a kernel/UFS diagnostic pair, not a complete iOS userspace image.
+Patch `xnu/patches/0152-dali-skip-qcom-usb-probe.patch` skips
+`sweet_usb_probe()` only when the Dali MT6991 UFS compatible sets `su.dali`;
+other SWEET targets retain the call. Local replay, source gates, and the
+single-file compile passed. Full XNU CI run 40746241772 passed.
+
+Offline candidate `shim/out-dali/ufs-40746241772/candidate/` passes all checks.
+Exact pair: boot SHA-256
+`ddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39`;
+init_boot SHA-256
+`74a4b1bcfd551455f3ddf8c65476231820cdc971a8dc82b726e29da0540a9f74`.
+
+No 0152 preflight or trial occurred; the latest host poll sees neither ADB nor
+Fastboot. Obtain approval for these exact hashes, then perform a fresh
+read-only preflight before a bounded trial. This remains a kernel/UFS
+diagnostic pair, not a complete iOS userspace image.
 
 ---
 
