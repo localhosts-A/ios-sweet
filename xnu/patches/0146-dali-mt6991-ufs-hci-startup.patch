@@ -1,6 +1,6 @@
-diff --git a/xnu/bsd/dev/sweet_ufs.c b/xnu/bsd/dev/sweet_ufs.c
---- a/xnu/bsd/dev/sweet_ufs.c
-+++ b/xnu/bsd/dev/sweet_ufs.c
+diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
 @@ -2,10 +2,10 @@
   * SWEET internal UFS root device.
   *
