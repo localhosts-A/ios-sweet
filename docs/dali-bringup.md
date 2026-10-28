@@ -92,8 +92,10 @@ The Dali reset definitions mark status as unavailable (`STATUS_NONE`), and
 HackIOS performs the same masked writes without using a post-write readback as
 a success condition. Patch0147 preserves the reset masks and order, logs each
 write/readback for diagnosis, and no longer treats that readback as reset
-status. It is a diagnostic candidate: compile, CI, and hardware qualification
-are still pending.
+status. Patch0147 passed full CI run 40693712085 and the paired diagnostic
+images are packaged under `shim/out-dali/ufs-40693712085/candidate/`. No fresh
+device preflight or hardware trial has been done for that pair; the reset,
+UFS link, media access, root mount, and persistent logs remain unverified.
 
 Console output is buffered before UFS initialization. The first 16 MiB of
 `unixnu_logs` already contains a `DALIUFSLOG1` area, so the ADT selects a SWEET
