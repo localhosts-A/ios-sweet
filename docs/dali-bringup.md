@@ -286,10 +286,22 @@ Android has an active ramoops backend in reserved RAM:
 
 In the matching Linux `fs/pstore/ram.c`, dump records precede console, pmsg,
 and ftrace. This gives a candidate console base 0xaec0f000. Buffer header is
-12 bytes: signature `0x43474244`, 32-bit start and size, then data. Confirm
-warm-reset retention before implementing a shim writer. Power-off cannot be
-used as a RAM-retention workflow. A benign marker through `/dev/pmsg0` and
-stock Android warm reboot can check the backend without flashing a probe.
+12 bytes: signature `0x43474244`, 32-bit start and size, then data. The local
+Xiaomi kernel source maps `mem_type=0` with `ioremap_wc()`; the XNU diagnostic
+mirror uses `ml_io_map_wcomb()` for the same reserved DDR range. Confirm
+warm-reset retention before relying on this writer. Power-off cannot be used
+as a RAM-retention workflow. A benign marker through `/dev/pmsg0` and stock
+Android warm reboot can check the backend without flashing a probe.
+
+The Dali-only XNU patch 0145 describes the base, total range, console offset,
+and console size as four 64-bit `/chosen` properties. Before UFS root discovery,
+it maps only the 2 MiB console area, replays the most recent 256 KiB from the
+early SWEET console ring, and mirrors later console output. A root-selection
+panic also includes the last UFS initialization stage. The workflow is
+configured to check the linked marker and generated Dali/Sweet ADT distinction.
+These checks validate the source and build output; ramoops retention and
+Android pstore readback still need a hardware qualification path that avoids
+the known log-clearing fastboot recovery.
 
 Six UARTs are registered at 0x16000000 through 0x16050000; ttyS3 is active.
 Board pin routing and external access remain unknown. These UARTs are not
@@ -313,12 +325,13 @@ expose the shim log as console-ramoops-0. Restore original boot/init_boot from
 root ADB immediately after collecting logs. If the chain fails, manual
 fastboot restoration remains the recovery path, but loses the RAM log.
 
-The opt-in logger checks the exact reserved-memory region in the live FDT
+The opt-in shim logger checks the exact reserved-memory region in the live FDT
 before initializing the stock-format console header (including after fastboot
 cleared it). No storage access exists in the shim. It limits output to 16KiB
 and commits header counters after data with a DSB. In this diagnostic,
-framebuffer writes are skipped so the unconfirmed panel path cannot hide
-or interfere with the RAM log. XNU destination writes and entry stay disabled.
+framebuffer writes are skipped so the unconfirmed panel path cannot hide or
+interfere with the RAM log. The shim's XNU destination writes and entry stay
+disabled; the separate patch 0145 XNU-kernel mirror is described above.
 
 Actual ARM64 QEMU checks relocation, valid and invalid payload outcomes,
 exact stock kernel/generic-ramdisk copies, bootconfig preservation, chosen

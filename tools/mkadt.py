@@ -44,6 +44,8 @@ DALI_FB, DALI_FB_SIZE = 0xfc990000, 0x3660000
 DALI_FB_W, DALI_FB_H = 1280, 2772
 DALI_UFS, DALI_UFS_SIZE = 0x16810000, 0x2a00
 DALI_UFS_AO, DALI_UFS_AO_SIZE = 0x168a0000, 0x1000
+DALI_RAMOOPS, DALI_RAMOOPS_SIZE = 0xAEC00000, 0x00410000
+DALI_RAMOOPS_CONSOLE_OFFSET, DALI_RAMOOPS_CONSOLE_SIZE = 0xF000, 0x00200000
 # Preserve the existing DALIUFSLOG1 area in unixnu_logs' first 16 MiB.
 DALI_UFS_LOG_OFFSET = 16 * 1024 * 1024
 DALI_TIMEBASE, DALI_VTIMER_INTID = 13000000, 27
@@ -118,8 +120,15 @@ def build(seed=None, qemu=False, highmem=False, dali=False):
     phandle = iter(range(1, 1000))
     ph = lambda: ('AAPL,phandle', u32(next(phandle)))
 
+    dali_ramoops = [
+        ('dali-ramoops-base', u64(DALI_RAMOOPS)),
+        ('dali-ramoops-size', u64(DALI_RAMOOPS_SIZE)),
+        ('dali-ramoops-console-offset', u64(DALI_RAMOOPS_CONSOLE_OFFSET)),
+        ('dali-ramoops-console-size', u64(DALI_RAMOOPS_CONSOLE_SIZE)),
+    ] if dali else []
     chosen = node('chosen', [
         ph(),
+        *dali_ramoops,
         ('dram-base', u64(phys_base)),
         ('dram-size', u64(mem_size)),
         ('random-seed', seed),

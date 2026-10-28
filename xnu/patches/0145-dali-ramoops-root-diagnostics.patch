@@ -1,0 +1,401 @@
+diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -43,6 +43,8 @@
+ extern ppnum_t pmap_find_phys(pmap_t pmap, addr64_t va);
+ /* osfmk/arm/machine_routines.h, not exported to the BSD layer */
+ extern vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
++/* The ramoops range is shared DDR; mem_type=0 maps it write-combined. */
++extern vm_offset_t ml_io_map_wcomb(vm_offset_t phys_addr, vm_size_t size);
+ /* osfmk/arm/cpu_data.h, not exported to the BSD layer */
+ extern int get_preemption_level(void);
+ extern kern_return_t kernel_thread_start(thread_continue_t, void *, thread_t *);
+@@ -137,6 +139,7 @@
+ 	bool capacity_valid;
+ 	bool log_partition_configured;
+ 	bool log_partition_ready;
++	const char *failure_stage;
+ 	int bmajor, cmajor;
+ 	dev_t bdev;
+ 	bool ready;
+@@ -576,6 +579,7 @@
+ static int
+ ufs_check_mt6991_resources(void)
+ {
++	su.failure_stage = "ao-gate-read";
+ 	uint32_t gate0 = ufs_ao_rd(DALI_UFS_AO_GATE0);
+ 	uint32_t gate1 = ufs_ao_rd(DALI_UFS_AO_GATE1);
+ 	if (gate0 == UINT32_MAX || gate1 == UINT32_MAX) {
+@@ -583,10 +587,12 @@
+ 		return ENXIO;
+ 	}
+ 	printf("SWEET UFS: MT6991 AO gate0=0x%x gate1=0x%x\n", gate0, gate1);
++	su.failure_stage = "ao-gates-enabled";
+ 	if ((gate0 & 1) || (gate1 & 0x18)) {
+ 		printf("SWEET UFS: MT6991 HCI/UniPro clock gates are off\n");
+ 		return ENXIO;
+ 	}
++	su.failure_stage = "mtk-refclk-read";
+ 	uint32_t ip_version = ufs_rd(REG_MTK_IP_VERSION);
+ 	uint32_t ref_clock = ufs_rd(REG_MTK_REF_CLOCK);
+ 	uint32_t xo_ufs = ufs_rd(REG_MTK_XO_UFS);
+@@ -594,6 +600,7 @@
+ 	uint32_t outstanding = ufs_rd(REG_MTK_OUTSTANDING);
+ 	printf("SWEET UFS: MT6991 ip=0x%x refclk=0x%x xo=0x%x options=0x%x outstanding=0x%x\n",
+ 	    ip_version, ref_clock, xo_ufs, options, outstanding);
++	su.failure_stage = "mtk-refclk-check";
+ 	if (ip_version != 0x10470000u || ref_clock == UINT32_MAX || (ref_clock & 3) != 3) {
+ 		printf("SWEET UFS: MT6991 resources are not in the expected active state\n");
+ 		return ENXIO;
+@@ -605,6 +612,7 @@
+ ufs_take_over_host(void)
+ {
+ 	if (su.dali) {
++		su.failure_stage = "mt6991-resource-check";
+ 		int error = ufs_check_mt6991_resources();
+ 		if (error) {
+ 			return error;
+@@ -613,20 +621,24 @@
+ 	uint32_t version = ufs_rd(REG_VER), cap = ufs_rd(REG_CAP);
+ 	uint32_t hce = ufs_rd(REG_HCE), hcs = ufs_rd(REG_HCS);
+ 	ufs_log_host_state("pre-takeover");
++	su.failure_stage = "hci-identity";
+ 	if (su.dali && (version != MT6991_UFS_VERSION || cap != MT6991_UFS_CAP)) {
+ 		printf("SWEET UFS: MT6991 HCI identity mismatch: ver=0x%x cap=0x%x expected=0x%x/0x%x\n",
+ 		    version, cap, MT6991_UFS_VERSION, MT6991_UFS_CAP);
+ 		return ENXIO;
+ 	}
++	su.failure_stage = "hci-ready";
+ 	if (!(hce & 1) || !(hcs & HCS_DP) || !(hcs & HCS_UTRLRDY)) {
+ 		printf("SWEET UFS: host not ready (hce 0x%x hcs 0x%x)\n", hce, hcs);
+ 		return ENXIO;
+ 	}
++	su.failure_stage = "doorbells-idle";
+ 	if (ufs_rd(REG_UTRLDBR) || ufs_rd(REG_UTMRLDBR)) {
+ 		printf("SWEET UFS: transfer/task requests outstanding from the bootloader\n");
+ 		return EBUSY;
+ 	}
+ 	/* With RAM above 4 GiB (mkadt.py --highmem) the DMA memory can be there too. */
++	su.failure_stage = "dma-64as-check";
+ 	if (((su.dma_pa + DMA_SIZE - 1) >> 32) && !(cap & CAP_64AS)) {
+ 		printf("SWEET UFS: DMA memory at 0x%llx but the host has no 64-bit addressing\n",
+ 		    su.dma_pa);
+@@ -640,6 +652,7 @@
+ 	ufs_wr(REG_UTRLBAU, (uint32_t)(list >> 32));
+ 	ufs_wr(REG_UTRLRSR, 1);
+ 	/* Never ring a doorbell unless the host uses our list. */
++	su.failure_stage = "utrl-ownership-check";
+ 	if (ufs_rd(REG_UTRLBA) != (uint32_t)list || ufs_rd(REG_UTRLBAU) != (uint32_t)(list >> 32) ||
+ 	    !(ufs_rd(REG_UTRLRSR) & 1)) {
+ 		printf("SWEET UFS: host did not take our request list\n");
+@@ -864,12 +877,14 @@
+ 	unsigned int lun_size = 0;
+ 	int error;
+ 
++	su.failure_stage = "adt-node";
+ 	if (SecureDTLookupEntry(NULL, "/sweet-ufs", &node) != kSuccess ||
+ 	    SecureDTGetProperty(node, "reg", (void const **)&reg, &size) != kSuccess ||
+ 	    size < 2 * sizeof(uintptr_t)) {
+ 		printf("SWEET UFS: no /sweet-ufs node in the device tree\n");
+ 		return ENXIO;
+ 	}
++	su.failure_stage = "adt-properties";
+ 	if (ufs_dt_string(node, "root-partition", want, sizeof(want), "userdata") ||
+ 	    ufs_dt_string(node, "log-partition", log_want, sizeof(log_want), "")) {
+ 		printf("SWEET UFS: invalid partition-name property\n");
+@@ -898,6 +913,7 @@
+ 		su.dali = true;
+ 	}
+ 	if (su.dali) {
++		su.failure_stage = "dali-log-offset";
+ 		if (SecureDTGetProperty(node, "log-offset", (void const **)&log_offset_prop,
+ 		    &log_offset_size) != kSuccess || log_offset_prop == NULL ||
+ 		    log_offset_size != sizeof(su.log_offset_bytes)) {
+@@ -911,6 +927,7 @@
+ 		}
+ 		printf("SWEET UFS: Dali log data offset=%llu MiB\n", su.log_offset_bytes >> 20);
+ 	}
++	su.failure_stage = "hci-range";
+ 	if (su.dali && (reg[0] != DALI_UFS_HCI_BASE ||
+ 	    reg[1] < REG_MTK_IP_VERSION + sizeof(uint32_t))) {
+ 		printf("SWEET UFS: invalid MT6991 HCI range base=0x%llx size=0x%llx\n",
+@@ -918,8 +935,10 @@
+ 		return EINVAL;
+ 	}
+ 
++	su.failure_stage = "hci-map";
+ 	su.regs = ml_io_map(reg[0], reg[1]);
+ 	if (su.dali) {
++		su.failure_stage = "ao-reg-property";
+ 		if (SecureDTGetProperty(node, "ao-reg", (void const **)&ao_reg, &ao_size) != kSuccess ||
+ 		    ao_reg == NULL || ao_size < 2 * sizeof(uintptr_t) ||
+ 		    ao_reg[0] != DALI_UFS_AO_BASE ||
+@@ -927,22 +946,26 @@
+ 			printf("SWEET UFS: missing MT6991 AO register range\n");
+ 			return ENXIO;
+ 		}
++		su.failure_stage = "ao-map";
+ 		su.ao_regs = ml_io_map(ao_reg[0], ao_reg[1]);
+ 		if (su.ao_regs == 0) {
+ 			printf("SWEET UFS: cannot map MT6991 AO registers\n");
+ 			return ENOMEM;
+ 		}
+ 	}
++	su.failure_stage = "dma-allocate";
+ 	if (kmem_alloc_contig(kernel_map, &su.dma, DMA_SIZE, PAGE_MASK, 0, 0,
+ 	    KMA_DATA | KMA_ZERO | KMA_PERMANENT, VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS) {
+ 		printf("SWEET UFS: no contiguous DMA memory\n");
+ 		return ENOMEM;
+ 	}
++	su.failure_stage = "dma-physical-address";
+ 	ppnum_t pn = pmap_find_phys(kernel_pmap, (addr64_t)su.dma);
+ 	if (!pn) {
+ 		return ENOMEM;
+ 	}
+ 	su.dma_pa = ptoa_64(pn);
++	su.failure_stage = "lun-property";
+ 	if (SecureDTGetProperty(node, "lun", (void const **)&lun_prop,
+ 	    &lun_size) == kSuccess) {
+ 		if (lun_size < sizeof(*lun_prop)) {
+@@ -959,17 +982,21 @@
+ 	su.secsize = DEV_BSIZE;
+ 
+ 	lck_mtx_lock(&sweet_ufs_lock);
++	su.failure_stage = "host-takeover";
+ 	error = ufs_take_over_host();
+ 	if (!error) {
++		su.failure_stage = "scsi-tur";
+ 		static const uint8_t tur[6] = { 0x00 };
+ 		/* The first command after the bootloader may report a unit attention. */
+ 		for (int i = 0; i < 3 && (error = ufs_scsi(tur, sizeof(tur), 0, false)); i++) {
+ 		}
+ 	}
+ 	if (!error) {
++		su.failure_stage = "read-capacity";
+ 		error = ufs_read_capacity();
+ 	}
+ 	if (!error) {
++		su.failure_stage = "gpt-discovery";
+ 		error = ufs_find_partitions(want, log_want);
+ 	}
+ 	lck_mtx_unlock(&sweet_ufs_lock);
+@@ -977,10 +1004,12 @@
+ 		return error;
+ 	}
+ 
++	su.failure_stage = "bsd-block-device";
+ 	su.bmajor = bdevsw_add(-1, &sweet_ufs_bdevsw);
+ 	if (su.bmajor < 0) {
+ 		return ENXIO;
+ 	}
++	su.failure_stage = "bsd-character-device";
+ 	su.cmajor = cdevsw_add_with_bdev(-1, &sweet_ufs_cdevsw, su.bmajor);
+ 	if (su.cmajor < 0) {
+ 		return ENXIO;
+@@ -994,6 +1023,7 @@
+ 		printf("SWEET UFS: ignoring ufsrw on Dali; root writes remain disabled\n");
+ 	}
+ 	su.ready = true;
++	su.failure_stage = "root-ready";
+ 	printf("SWEET UFS: \"%s\" on LUN %u: first block 0x%llx, %llu MiB, %s, DMA at 0x%llx\n",
+ 	    want, su.lun, su.first_block, su.nblocks * UFS_BLOCK >> 20,
+ 	    su.writable ? "read-write" : "read-only", su.dma_pa);
+@@ -1024,6 +1054,28 @@
+ static int sweet_log_chan;
+ static uint32_t sweet_log_secs = SWEET_LOG_SECS;
+ 
++/* Dali ramoops console region; the ADT carries and validates these ranges. */
++#define DALI_RAMOOPS_BASE              0xaec00000ULL
++#define DALI_RAMOOPS_SIZE              0x00410000ULL
++#define DALI_RAMOOPS_CONSOLE_OFFSET    0x0000f000ULL
++#define DALI_RAMOOPS_CONSOLE_SIZE      0x00200000ULL
++#define DALI_RAMOOPS_SIGNATURE         0x43474244U
++#define DALI_RAMOOPS_REPLAY_MAX        (256U << 10)
++
++struct sweet_ramoops_header {
++	volatile uint32_t signature;
++	volatile uint32_t start;
++	volatile uint32_t size;
++};
++
++static volatile struct sweet_ramoops_header *sweet_ramoops_ring;
++static volatile uint8_t *sweet_ramoops_data;
++static _Atomic bool sweet_ramoops_active;
++static _Atomic uint32_t sweet_ramoops_busy;
++static uint32_t sweet_ramoops_capacity;
++
++void sweet_ramoops_append(const char *bytes, int size);
++
+ /* Called for all console output, any context: never blocks. */
+ void sweet_log_append(const char *c, int size);
+ 
+@@ -1037,6 +1089,7 @@
+ 	for (int i = 0; i < size; i++) {
+ 		sweet_log_ring[(at + (uint64_t)i) % SWEET_LOG_SIZE] = c[i];
+ 	}
++	sweet_ramoops_append(c, size);
+ }
+ 
+ /*
+@@ -1067,6 +1120,123 @@
+ sweet_log_position(void)
+ {
+ 	return os_atomic_load(&sweet_log_total, relaxed);
++}
++
++/*
++ * Append console bytes in the Linux persistent_ram_buffer format. The map is
++ * restricted to the 2 MiB console subregion; pmsg, dump and ftrace are untouched.
++ */
++void
++sweet_ramoops_append(const char *bytes, int size)
++{
++	if (!os_atomic_load(&sweet_ramoops_active, acquire) || bytes == NULL || size <= 0) {
++		return;
++	}
++	uint64_t daif;
++	__asm__ volatile("mrs %0, daif\n\tmsr daifset, #3" : "=r" (daif) :: "memory");
++	/* Never block a panic or reentrant console writer; losing this chunk is safe. */
++	if (!os_atomic_cmpxchg(&sweet_ramoops_busy, 0, 1, acquire)) {
++		__asm__ volatile("msr daif, %0" :: "r" (daif) : "memory");
++		return;
++	}
++	uint32_t start = sweet_ramoops_ring->start;
++	uint32_t used = sweet_ramoops_ring->size;
++	bool initialize = false;
++	if (sweet_ramoops_ring->signature != DALI_RAMOOPS_SIGNATURE ||
++	    start >= sweet_ramoops_capacity || used > sweet_ramoops_capacity || start > used) {
++		sweet_ramoops_ring->signature = 0;
++		__asm__ volatile("dsb sy" ::: "memory");
++		start = 0;
++		used = 0;
++		initialize = true;
++	}
++	if ((uint32_t)size > sweet_ramoops_capacity) {
++		uint32_t skip = (uint32_t)size - sweet_ramoops_capacity;
++		bytes += skip;
++		size = (int)sweet_ramoops_capacity;
++	}
++	for (int i = 0; i < size; i++) {
++		sweet_ramoops_data[start] = (uint8_t)bytes[i];
++		start = (start + 1 == sweet_ramoops_capacity) ? 0 : start + 1;
++		if (used < sweet_ramoops_capacity) {
++			used++;
++		}
++	}
++	__asm__ volatile("dsb sy" ::: "memory");
++	sweet_ramoops_ring->size = used;
++	/* Linux rejects start > size; commit size before the write cursor. */
++	__asm__ volatile("dsb sy" ::: "memory");
++	sweet_ramoops_ring->start = start;
++	__asm__ volatile("dsb sy" ::: "memory");
++	if (initialize) {
++		sweet_ramoops_ring->signature = DALI_RAMOOPS_SIGNATURE;
++		__asm__ volatile("dsb sy" ::: "memory");
++	}
++	os_atomic_store(&sweet_ramoops_busy, 0, release);
++	__asm__ volatile("msr daif, %0" :: "r" (daif) : "memory");
++}
++
++static bool
++sweet_ramoops_start(void)
++{
++	DTEntry chosen;
++	const uint64_t *base_prop = NULL, *size_prop = NULL;
++	const uint64_t *offset_prop = NULL, *console_size_prop = NULL;
++	unsigned int base_bytes = 0, size_bytes = 0;
++	unsigned int offset_bytes = 0, console_size_bytes = 0;
++	uint64_t base, total, offset, console_size;
++	static const char marker[] = "\nSWEET DALI RAMOOPS: root diagnostics begin\n";
++
++	if (os_atomic_load(&sweet_ramoops_active, acquire)) {
++		return true;
++	}
++	if (SecureDTLookupEntry(NULL, "/chosen", &chosen) != kSuccess ||
++	    SecureDTGetProperty(chosen, "dali-ramoops-base", (void const **)&base_prop,
++	    &base_bytes) != kSuccess || base_prop == NULL || base_bytes != sizeof(base) ||
++	    SecureDTGetProperty(chosen, "dali-ramoops-size", (void const **)&size_prop,
++	    &size_bytes) != kSuccess || size_prop == NULL || size_bytes != sizeof(total) ||
++	    SecureDTGetProperty(chosen, "dali-ramoops-console-offset", (void const **)&offset_prop,
++	    &offset_bytes) != kSuccess || offset_prop == NULL || offset_bytes != sizeof(offset) ||
++	    SecureDTGetProperty(chosen, "dali-ramoops-console-size", (void const **)&console_size_prop,
++	    &console_size_bytes) != kSuccess || console_size_prop == NULL ||
++	    console_size_bytes != sizeof(console_size)) {
++		return false;
++	}
++	memcpy(&base, base_prop, sizeof(base));
++	memcpy(&total, size_prop, sizeof(total));
++	memcpy(&offset, offset_prop, sizeof(offset));
++	memcpy(&console_size, console_size_prop, sizeof(console_size));
++	if (base != DALI_RAMOOPS_BASE || total != DALI_RAMOOPS_SIZE ||
++	    offset != DALI_RAMOOPS_CONSOLE_OFFSET ||
++	    console_size != DALI_RAMOOPS_CONSOLE_SIZE ||
++	    offset > total || console_size > total - offset ||
++	    console_size <= sizeof(*sweet_ramoops_ring)) {
++		return false;
++	}
++	vm_offset_t mapping = ml_io_map_wcomb((vm_offset_t)(base + offset), (vm_size_t)console_size);
++	if (mapping == 0) {
++		return false;
++	}
++	sweet_ramoops_ring = (volatile struct sweet_ramoops_header *)mapping;
++	sweet_ramoops_data = (volatile uint8_t *)(mapping + sizeof(*sweet_ramoops_ring));
++	sweet_ramoops_capacity = (uint32_t)(console_size - sizeof(*sweet_ramoops_ring));
++	__asm__ volatile("dsb sy" ::: "memory");
++	os_atomic_store(&sweet_ramoops_active, true, release);
++
++	/* Preserve the most recent pre-root output so early failures are recoverable. */
++	uint64_t logged = os_atomic_load(&sweet_log_total, relaxed);
++	uint64_t pos = logged > DALI_RAMOOPS_REPLAY_MAX ? logged - DALI_RAMOOPS_REPLAY_MAX : 0;
++	char chunk[256];
++	while (pos < logged) {
++		uint32_t count = (uint32_t)MIN((uint64_t)sizeof(chunk), logged - pos);
++		for (uint32_t i = 0; i < count; i++) {
++			chunk[i] = sweet_log_ring[(pos + i) % SWEET_LOG_SIZE];
++		}
++		sweet_ramoops_append(chunk, (int)count);
++		pos += count;
++	}
++	sweet_ramoops_append(marker, sizeof(marker) - 1);
++	return true;
+ }
+ 
+ struct sweet_log_header {
+@@ -1158,11 +1328,20 @@
+ 
+ /* Root device for rd=ufsroot0 (IOFindBSDRoot). */
+ int sweet_ufs_rootdev(dev_t *dev);
++const char *sweet_ufs_failure_stage(void);
++
++const char *
++sweet_ufs_failure_stage(void)
++{
++	return su.failure_stage != NULL ? su.failure_stage : "unknown";
++}
+ 
+ int
+ sweet_ufs_rootdev(dev_t *dev)
+ {
++	(void)sweet_ramoops_start();
+ 	if (!su.ready) {
++		su.failure_stage = "root-init";
+ 		int error = sweet_ufs_init();
+ 		if (error) {
+ 			return error;
+diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
+--- a/iokit/bsddev/IOKitBSDInit.cpp
++++ b/iokit/bsddev/IOKitBSDInit.cpp
+@@ -809,10 +809,12 @@
+ //
+ 	if (strcmp(rdBootVar, "ufsroot0") == 0) {
+ 		extern int sweet_ufs_rootdev(dev_t *dev);
++		extern const char *sweet_ufs_failure_stage(void);
+ 		OSSafeReleaseNULL(matching);
+ 		int ufs_error = sweet_ufs_rootdev(root);
+ 		if (ufs_error) {
+-			panic("IOFindBSDRoot: SWEET UFS root %s unavailable: %d", rdBootVar, ufs_error);
++			panic("IOFindBSDRoot: SWEET UFS root %s unavailable: %d stage=%s",
++			    rdBootVar, ufs_error, sweet_ufs_failure_stage());
+ 		}
+ 		strlcpy(rootName, rdBootVar, rootNameSize);
+ 		IOLog("BSD root: %s, major %d, minor %d\n", rootName, major(*root), minor(*root));

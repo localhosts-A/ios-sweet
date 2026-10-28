@@ -159,6 +159,7 @@ The log contains crash reports with backtraces (`CRASH name ...`), IOKit traces 
 | `tools/mkiosroot.sh` | Builds the HFS+ iOS root from the IPSW images |
 | `tools/sweet-root-tweaks.py` | Bring-up changes to the root (Setup skip, activation, daemons) |
 | `tools/sweet-log-pull.sh`, `sweet-log.py` | Read the persistent kernel log from recovery |
+| `tools/verify-dali-ramoops-adt.py` | Verify Dali-only ramoops ranges in the generated ADT |
 | `tools/sweet-crash.py` | Symbolicate console crash reports |
 | `tools/xnu-cc.py` | Local single-file compile check from a CI log |
 | `tools/qemu-sweet.py` | QEMU test boots with framebuffer text decoding |
@@ -191,6 +192,7 @@ Not in git: partition backups, live device trees, recovery images, Apple firmwar
 | 0066–0067 | Fault-region crash info; console mute |
 | 0068 | IOSurface lookup semantics for already-mapped surfaces |
 | 0069 | Batched persistent-log flushes |
+| 0143–0145 | Dali MT6991 UFS root/logs, offset-aware logging, and ramoops root-failure diagnostics |
 
 ## Key hardware facts
 

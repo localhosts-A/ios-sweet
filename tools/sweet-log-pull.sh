@@ -67,7 +67,7 @@ else
 	[ "$blocks" -ge 1025 ] || { echo "userdata is too small for the legacy log area" >&2; exit 1; }
 	skip=$((blocks - 1025))
 fi
-adb_cmd exec-out dd "if=$dev" bs=4096 "skip=$skip" count=1025 2>/dev/null > "$out.bin"
+adb_cmd exec-out dd "if=$dev" bs=4096 "skip=$skip" count=1025 status=none 2>/dev/null > "$out.bin"
 actual=$(stat -c %s "$out.bin")
 [ "$actual" -eq $((1025 * 4096)) ] || { echo "short partition read: got $actual bytes" >&2; exit 1; }
 echo "$partition ($dev): $bytes bytes, read blocks $skip..$((skip + 1024)) ($actual bytes)" >&2

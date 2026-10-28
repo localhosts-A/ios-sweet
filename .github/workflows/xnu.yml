@@ -21,6 +21,8 @@ on:
       - "xnu/patches/**"
       - ".github/workflows/xnu.yml"
       - "tools/enable_xnu_ccache.py"
+      - "tools/mkadt.py"
+      - "tools/verify-dali-ramoops-adt.py"
 
 concurrency:
   group: xnu-${{ github.ref }}
@@ -389,6 +391,11 @@ jobs:
           grep -Fq 'initproc return wait cleared' xnu/bsd/kern/bsd_init.c
           grep -Fq 'execve returned path=%s errno=%d' xnu/bsd/kern/kern_exec.c
           grep -Fq 'sweet_init_trace = sweet_init_call < 16;' xnu/bsd/dev/arm/systemcalls.c
+          grep -Fq 'ml_io_map_wcomb((vm_offset_t)(base + offset)' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'start >= sweet_ramoops_capacity || used > sweet_ramoops_capacity || start > used' xnu/bsd/dev/sweet_ufs.c
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET DALI RAMOOPS: root diagnostics begin'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS root %s unavailable: %d stage=%s'
+          python3 ../tools/verify-dali-ramoops-adt.py
 
       - name: Package build tree for local compiles
         if: always()
