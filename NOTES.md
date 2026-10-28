@@ -6,7 +6,9 @@ Candidate files are under shim/out-dali/ufs-40663192052/candidate/. The kernel-o
 
 The 16 GiB HFSX root image remains installed and readback-verified in unixnu_data (source SHA-256 ea6fe9549adc6a2f4f466079e5fb4e2b7432e80977923dbc98a3c6944c5be3cd). No boot partition or unixnu_logs write was made while preparing this candidate. The UFS controller takeover, root mount, and SWEET log write remain unverified on hardware.
 
-The local D22AP /product ADT input is missing at research/ipsw-x/d22ap.adt. This candidate is suitable for a kernel/UFS-root trial; it does not establish a full iOS userspace boot. Before any trial, get the user's approval, then make a fresh physical backup and hash verification of the current active boot/init_boot pair, flash only that pair, and restore/verify the originals immediately after observation.
+Fresh read-only ADB preflight confirms model 25060RK16C / MT6991, Android boot_completed=1, active slot _b, and the installed iOSRoot HFS+ volume. Physical boot_b/init_boot_b reads were backed up under candidate/backups/ and hash-match the current partition reads: boot_b 6dc40de74fa7de4f435c513047c51fe10634c1891666031039c52a08b27a3cd5 (64 MiB), init_boot_b 08794a432befcf0504ee4933a51260cb6ccc4785b69f345c4b5968e8e6053d2d (8 MiB). The 4 MiB SWEET ring plus 4 KiB header at unixnu_logs +16 MiB was re-read and all zero; snapshot SHA-256 06955cde7f98b9503653b906e9634732d59a17a6dc2cb1a0e453fbdd4adaab86. No flash or log write occurred. Repeat the physical preflight immediately before any authorized trial.
+
+The local D22AP /product ADT input is missing at research/ipsw-x/d22ap.adt. This candidate is suitable for a kernel/UFS-root trial; it does not establish a full iOS userspace boot. Before any trial, get the user's approval, repeat the physical identity/slot/hash and log-area preflight, flash only boot_b and init_boot_b, and restore/verify the originals immediately after observation.
 
 ---
 
