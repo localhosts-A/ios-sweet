@@ -1,8 +1,9 @@
 #!/bin/sh
 # Read the SWEET console log (kernel patch 0047) from recovery with adb root.
 #   tools/sweet-log-pull.sh [-s SERIAL] [-p unixnu_logs|userdata] OUT.txt
-# `unixnu_logs` reads from the start of its dedicated raw partition. `userdata`
-# reads the legacy log area from the end of that partition.
+# `unixnu_logs` preserves its existing DALIUFSLOG1 data in the first 16 MiB;
+# the SWEET ring is read from the verified empty range beginning at +16 MiB.
+# `userdata` reads the legacy log area from the end of that partition.
 set -eu
 
 serial=
@@ -60,8 +61,8 @@ dev=$(adb_cmd shell "$remote" 2>/dev/null | tr -d '\r')
 bytes=$(adb_cmd shell blockdev --getsize64 "$dev" | tr -d '\r')
 blocks=$((bytes / 4096))
 if [ "$partition" = "unixnu_logs" ]; then
-	[ "$blocks" -ge 1025 ] || { echo "unixnu_logs is too small for the log area" >&2; exit 1; }
-	skip=0
+	[ "$blocks" -ge 5121 ] || { echo "unixnu_logs is too small for the SWEET log area at +16 MiB" >&2; exit 1; }
+	skip=4096
 else
 	[ "$blocks" -ge 1025 ] || { echo "userdata is too small for the legacy log area" >&2; exit 1; }
 	skip=$((blocks - 1025))

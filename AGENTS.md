@@ -11,8 +11,11 @@
   and partition backups. The user approved internal UFS for iOS. Read-only GPT
   readback on 2026-10-28 shows `unixnu_data` (31.96875 GiB) and `unixnu_logs`
   (32 MiB) after `userdata` on UFS LUN 2; the root belongs in `unixnu_data` and
-  console logs in `unixnu_logs`. Do not change GPT. `unixnu_data` is currently
-  exFAT and must not be overwritten with HFSX until the user confirms that
-  specific write. Keep bootloaders, recovery, modem, persist and backups intact,
-  and confirm each destructive step with the user before running it.
+  console logs in `unixnu_logs`. Do not change GPT. The user confirmed and the
+  16 GiB HFSX root image is now written and readback-verified in `unixnu_data`;
+  preserve it and do not rewrite it without new confirmation. `unixnu_logs`
+  contains existing `DALIUFSLOG1` data in its first 16 MiB; the SWEET log ring
+  is configured for the verified-zero area beginning at +16 MiB. Keep
+  bootloaders, recovery, modem, persist and backups intact, and confirm each
+  destructive step with the user before running it.
 - Keep device dumps, serial numbers and downloaded Apple artifacts out of git.

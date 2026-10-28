@@ -1,0 +1,67 @@
+diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -127,6 +127,7 @@
+ 	uint64_t first_block, nblocks;          /* partition, in 4 KiB device blocks */
+ 	uint64_t last_lba, capacity_blocks;
+ 	uint64_t log_first_block, log_nblocks;
++	uint64_t log_offset_bytes;
+ 	char log_partition_name[64];
+ 	uint32_t secsize;                       /* logical sector size for the BSD layer */
+ 	bool writable;                          /* boot-arg ufsrw=1 */
+@@ -543,16 +544,17 @@
+ 		} else if (!log_found) {
+ 			printf("SWEET UFS: no GPT log partition named \"%s\"; logging disabled\n", log_want);
+ 		} else if ((root_first <= log_last && log_first <= root_last) ||
+-		    log_last - log_first + 1 < SWEET_LOG_BLOCKS) {
++		    su.log_offset_bytes / UFS_BLOCK >= log_last - log_first + 1 ||
++		    log_last - log_first + 1 - su.log_offset_bytes / UFS_BLOCK < SWEET_LOG_BLOCKS) {
+ 			printf("SWEET UFS: unsafe/undersized log partition \"%s\"; logging disabled\n", log_want);
+-		} else if (!ufs_log_region_available(log_first)) {
++		} else if (!ufs_log_region_available(log_first + su.log_offset_bytes / UFS_BLOCK)) {
+ 			/* The helper reports the read failure or unrecognized content. */
+ 		} else {
+-			su.log_first_block = log_first;
+-			su.log_nblocks = log_last - log_first + 1;
++			su.log_first_block = log_first + su.log_offset_bytes / UFS_BLOCK;
++			su.log_nblocks = log_last - log_first + 1 - su.log_offset_bytes / UFS_BLOCK;
+ 			su.log_partition_ready = true;
+-			printf("SWEET UFS: log partition \"%s\" first=0x%llx blocks=%llu\n",
+-			    log_want, su.log_first_block, su.log_nblocks);
++			printf("SWEET UFS: log partition \"%s\" data first=0x%llx blocks=%llu offset=%llu MiB\n",
++			    log_want, su.log_first_block, su.log_nblocks, su.log_offset_bytes >> 20);
+ 		}
+ 	}
+ 	return 0;
+@@ -849,8 +851,10 @@
+ 	DTEntry node;
+ 	uintptr_t const *reg = NULL;
+ 	uintptr_t const *ao_reg = NULL;
++	uint64_t const *log_offset_prop = NULL;
+ 	unsigned int size = 0;
+ 	unsigned int ao_size = 0;
++	unsigned int log_offset_size = 0;
+ 	char want[64] = "userdata";
+ 	char log_want[64] = "";
+ 	const char *compatible = NULL;
+@@ -893,6 +897,20 @@
+ 	    memcmp(compatible, "mediatek,mt6991-ufshc", sizeof("mediatek,mt6991-ufshc")) == 0) {
+ 		su.dali = true;
+ 	}
++	if (su.dali) {
++		if (SecureDTGetProperty(node, "log-offset", (void const **)&log_offset_prop,
++		    &log_offset_size) != kSuccess || log_offset_prop == NULL ||
++		    log_offset_size != sizeof(su.log_offset_bytes)) {
++			printf("SWEET UFS: missing Dali log partition offset\n");
++			return ENXIO;
++		}
++		memcpy(&su.log_offset_bytes, log_offset_prop, sizeof(su.log_offset_bytes));
++		if (su.log_offset_bytes % UFS_BLOCK) {
++			printf("SWEET UFS: Dali log partition offset is not block aligned\n");
++			return EINVAL;
++		}
++		printf("SWEET UFS: Dali log data offset=%llu MiB\n", su.log_offset_bytes >> 20);
++	}
+ 	if (su.dali && (reg[0] != DALI_UFS_HCI_BASE ||
+ 	    reg[1] < REG_MTK_IP_VERSION + sizeof(uint32_t))) {
+ 		printf("SWEET UFS: invalid MT6991 HCI range base=0x%llx size=0x%llx\n",

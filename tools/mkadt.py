@@ -44,6 +44,8 @@ DALI_FB, DALI_FB_SIZE = 0xfc990000, 0x3660000
 DALI_FB_W, DALI_FB_H = 1280, 2772
 DALI_UFS, DALI_UFS_SIZE = 0x16810000, 0x2a00
 DALI_UFS_AO, DALI_UFS_AO_SIZE = 0x168a0000, 0x1000
+# Preserve the existing DALIUFSLOG1 area in unixnu_logs' first 16 MiB.
+DALI_UFS_LOG_OFFSET = 16 * 1024 * 1024
 DALI_TIMEBASE, DALI_VTIMER_INTID = 13000000, 27
 
 BOOT_MANIFEST_HASH = hashlib.sha384(b'sweet boot manifest').digest()
@@ -248,6 +250,7 @@ def build(seed=None, qemu=False, highmem=False, dali=False):
             ('ao-reg', u64(DALI_UFS_AO, DALI_UFS_AO_SIZE)),
             ('root-partition', cstr(ufs_root_partition)),
             ('log-partition', cstr(ufs_log_partition)),
+            ('log-offset', u64(DALI_UFS_LOG_OFFSET)),
         ])
     ufs = node('sweet-ufs', ufs_props)
 
