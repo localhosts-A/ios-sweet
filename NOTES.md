@@ -1,4 +1,16 @@
-## CURRENT HANDOFF — patch0142 reached xHCI attach scan; originals restored and verified (2026-10-23)
+## CURRENT HANDOFF — Dali internal UFS root/log adaptation prepared (2026-10-28)
+
+Read-only ADB inspection confirms `/dev/block/sdc` is UFS host0 target0 LUN2 at `0x16810000`, with 4096-byte logical/physical blocks. `userdata` is sdc95 (start 27,633,920 / size 421,844,672 Linux 512-byte sectors); the new `unixnu_data` is sdc97 (start 449,478,592 / size 67,043,328 sectors = 31.96875 GiB); `unixnu_logs` is sdc98 (start 516,521,920 / size 65,536 sectors = 32 MiB). The entries are contiguous after userdata. `unixnu_data` currently probes as exFAT label `UNIXNU`; neither new partition is mounted. The unprivileged Android shell cannot read the logs partition contents. No device partition was written.
+
+Added source patch `xnu/patches/0143-dali-mt6991-ufs-root-and-logs.patch`, Dali ADT root/log/AO-register properties in `tools/mkadt.py`, the `unixnu_logs` pull path in `tools/sweet-log-pull.sh`, and updated Dali UFS instructions. The XNU path checks MT6991 AO gate/ref-clock state, MTK IP version, UFSHCI version `0x400` / CAP `0x55c7051f`, records host and READ CAPACITY state, rejects outstanding transfer/task requests, and preserves the already-running Android LK host/link instead of replaying HackIOS's UEFI reset/PHY startup. It selects `unixnu_data`, leaves its BlockIo root read-only even if `ufsrw=1` is passed, and targets console writes only at a unique, non-overlapping `unixnu_logs` GPT range. It writes only if the first 4 MiB + header are blank or carry a valid SWEETLOG header; otherwise it refuses. The pull helper reads `unixnu_logs` by default, or legacy `userdata` tail with `-p userdata`.
+
+Committed locally as “Adapt Dali UFS root and persistent logs.” No build, test, flash, partition write, or XNU UFS hardware read has been performed. The source path remains unverified on the handset; the root partition still contains exFAT and logs partition contents are unknown.
+
+This is source-level work only: no build, flash, partition write, or Dali XNU UFS trial has occurred. `unixnu_data` must receive an HFSX root image before XNU can mount it; its current exFAT contents will be overwritten by that operation. The log partition's current raw contents remain unknown. Next: review the tracked patch and docs, then build only as needed. Get explicit confirmation before writing the HFSX image or starting a boot trial that can write logs.
+
+---
+
+## PREVIOUS HANDOFF — patch0142 reached xHCI attach scan; originals restored and verified (2026-10-23)
 
 The patch0142 trial has ended and the stock pair is back on the phone. Photo `IMG_20261023_034907.jpg` confirms the polarity-matched TCPC/USB3 PHY guard now passes; MT6379 reports CC=`02`, source VBUS≈4.98V, and attached-source role `09`. The polling xHCI engine starts, completes its No-op command, powers USB2 protocol port2, and scans for 5.2s. It times out at `stage=attachment` with PORTSC `0x000002a0` (PP=1, CCS=0, PED=0, PLS=5/RxDetect); the SoC PHY monitor stayed `0` (DP=0, DM=0) during the sample window. The controller was stopped/reset and DMA ownership returned; displayed PHY/repeater/MTU3 controls were restored. XNU then panicked at `vfs_mountroot` because no USB root device was available. No device descriptors, BOT/MSC command, capacity, HFS read or root block read is evidenced.
 

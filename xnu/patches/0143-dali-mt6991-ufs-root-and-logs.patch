@@ -1,0 +1,601 @@
+diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -55,6 +55,7 @@
+ extern void sweet_usb_probe(void);
+ 
+ #define REG_CAP         0x00
++#define REG_VER         0x08
+ #define REG_IS          0x20
+ #define REG_IE          0x24
+ #define REG_HCS         0x30
+@@ -64,11 +65,29 @@
+ #define REG_UTRLDBR     0x58
+ #define REG_UTRLCLR     0x5c
+ #define REG_UTRLRSR     0x60
++#define REG_UTMRLDBR    0x78
++
++#define REG_MTK_IP_VERSION 0x2240
++#define REG_MTK_REF_CLOCK  0x144
++#define REG_MTK_XO_UFS     0x140
++#define REG_MTK_OPTIONS    0x160
++#define REG_MTK_OUTSTANDING 0x14c
++
++#define DALI_UFS_HCI_BASE 0x16810000u
++#define DALI_UFS_AO_BASE  0x168a0000u
++#define DALI_UFS_AO_GATE1  0x004
++#define DALI_UFS_AO_GATE0  0x104
+ 
+ #define HCS_DP          (1u << 0)
+ #define HCS_UTRLRDY     (1u << 1)
+ #define CAP_64AS        (1u << 24)              /* 64-bit DMA addressing */
+ 
++/* Values independently pinned by HackIOS' MT6991 UFSHCI inventory. */
++#define MT6991_UFS_VERSION 0x00000400u
++#define MT6991_UFS_CAP     0x55c7051fu
++#define SWEET_LOG_SIZE     (4u << 20)
++#define SWEET_LOG_BLOCKS   (1 + SWEET_LOG_SIZE / UFS_BLOCK)
++
+ #define UFS_BLOCK       4096u
+ #define BOUNCE_SIZE     (1u << 20)
+ #define PRDT_CHUNK      (256u << 10)            /* PRDT byte count field: 18 bits */
+@@ -100,15 +119,23 @@
+ 
+ static struct {
+ 	vm_offset_t regs;
++	vm_offset_t ao_regs;
+ 	vm_offset_t dma;                        /* kernel VA of the DMA allocation */
+ 	uint64_t dma_pa;
+ 	uint8_t lun;
+ 	uint8_t tag;
+ 	uint64_t first_block, nblocks;          /* partition, in 4 KiB device blocks */
++	uint64_t last_lba, capacity_blocks;
++	uint64_t log_first_block, log_nblocks;
++	char log_partition_name[64];
+ 	uint32_t secsize;                       /* logical sector size for the BSD layer */
+ 	bool writable;                          /* boot-arg ufsrw=1 */
+ 	bool cache;                             /* boot-arg ufscache=1 */
+ 	bool wait;                              /* boot-arg ufswait=1 */
++	bool dali;                              /* MT6991 HCI profile from ADT compatible */
++	bool capacity_valid;
++	bool log_partition_configured;
++	bool log_partition_ready;
+ 	int bmajor, cmajor;
+ 	dev_t bdev;
+ 	bool ready;
+@@ -123,6 +150,12 @@
+ 	return *(volatile uint32_t *)(su.regs + off);
+ }
+ 
++static inline uint32_t
++ufs_ao_rd(uint32_t off)
++{
++	return *(volatile uint32_t *)(su.ao_regs + off);
++}
++
+ static inline void
+ ufs_wr(uint32_t off, uint32_t v)
+ {
+@@ -141,6 +174,39 @@
+ 	clean_dcache64((addr64_t)(su.dma_pa + off), len, TRUE);
+ }
+ 
++static uint32_t
++ufs_be32(const uint8_t *p)
++{
++	return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
++	    ((uint32_t)p[2] << 8) | (uint32_t)p[3];
++}
++
++static int
++ufs_dt_string(DTEntry node, const char *prop, char *out, size_t out_size,
++    const char *fallback)
++{
++	const char *value = NULL;
++	unsigned int size = 0;
++	if (SecureDTGetProperty(node, prop, (void const **)&value, &size) != kSuccess) {
++		if (strlcpy(out, fallback, out_size) >= out_size) {
++			return EINVAL;
++		}
++		return 0;
++	}
++	if (!value || size == 0 || size > out_size || value[size - 1] != '\0') {
++		return EINVAL;
++	}
++	size_t length = 0;
++	while (length < size && value[length] != '\0') {
++		length++;
++	}
++	if (length != size - 1) {
++		return EINVAL;
++	}
++	memcpy(out, value, size);
++	return 0;
++}
++
+ /*
+  * One SCSI command in slot 0, data (if any) to/from the bounce buffer
+  * (to the device when write is set). Returns 0 or an errno.
+@@ -260,7 +326,9 @@
+ static int
+ ufs_read_blocks(uint64_t lba, uint32_t count)
+ {
+-	if (lba > UINT32_MAX || count > BOUNCE_SIZE / UFS_BLOCK) {
++	if (lba > UINT32_MAX || count == 0 || count > BOUNCE_SIZE / UFS_BLOCK ||
++	    (su.capacity_valid && (lba >= su.capacity_blocks ||
++	    count > su.capacity_blocks - lba))) {
+ 		return EINVAL;
+ 	}
+ 	uint8_t cdb[10] = {
+@@ -271,6 +339,63 @@
+ 	return ufs_scsi(cdb, sizeof(cdb), count * UFS_BLOCK, false);
+ }
+ 
++/* READ CAPACITY is a read-only check of the device's actual block geometry. */
++static int
++ufs_read_capacity(void)
++{
++	static const uint8_t cdb[10] = { 0x25 };       /* READ CAPACITY(10) */
++	int error = ufs_scsi(cdb, sizeof(cdb), 8, false);
++	if (error) {
++		printf("SWEET UFS: READ CAPACITY(10) failed (%d)\n", error);
++		return error;
++	}
++	const uint8_t *b = (const uint8_t *)(su.dma + DMA_BOUNCE);
++	uint32_t last = ufs_be32(b);
++	uint32_t block_size = ufs_be32(b + 4);
++	if (last == UINT32_MAX || block_size != UFS_BLOCK) {
++		printf("SWEET UFS: unsupported geometry last_lba=0x%x block_size=%u expected=%u\n",
++		    last, block_size, UFS_BLOCK);
++		return ENXIO;
++	}
++	su.last_lba = last;
++	su.capacity_blocks = (uint64_t)last + 1;
++	su.capacity_valid = true;
++	printf("SWEET UFS: capacity lun=%u last_lba=0x%llx blocks=%llu block_size=%u\n",
++	    su.lun, su.last_lba, su.capacity_blocks, block_size);
++	return 0;
++}
++
++/* Never overwrite an unrecognized pre-existing filesystem/data area. */
++static bool
++ufs_log_region_available(uint64_t first)
++{
++	const uint8_t *b = (const uint8_t *)(su.dma + DMA_BOUNCE);
++	for (uint32_t done = 0; done < SWEET_LOG_BLOCKS;) {
++		uint32_t n = MIN(SWEET_LOG_BLOCKS - done, BOUNCE_SIZE / UFS_BLOCK);
++		int error = ufs_read_blocks(first + done, n);
++		if (error) {
++			printf("SWEET UFS: cannot read log area before write (%d)\n", error);
++			return false;
++		}
++		if (done == 0 && memcmp(b, "SWEETLOG", 8) == 0) {
++			uint32_t version, size;
++			memcpy(&version, b + 8, sizeof(version));
++			memcpy(&size, b + 12, sizeof(size));
++			if (version == 1 && size == SWEET_LOG_SIZE) {
++				return true;
++			}
++		}
++		for (uint32_t i = 0; i < n * UFS_BLOCK; i++) {
++			if (b[i] != 0) {
++				printf("SWEET UFS: log area contains unrecognized data; refusing overwrite\n");
++				return false;
++			}
++		}
++		done += n;
++	}
++	return true;
++}
++
+ /*
+  * WRITE(10) of count device blocks from the bounce buffer to lba. The range
+  * must lie inside the partition: this is the only place data goes out.
+@@ -292,6 +417,25 @@
+ 	return ufs_scsi(cdb, sizeof(cdb), count * UFS_BLOCK, true);
+ }
+ 
++/* Console writes have a separate GPT range and never inherit ufsrw permission. */
++static int
++ufs_write_log_blocks(uint64_t lba, uint32_t count)
++{
++	if (!su.log_partition_ready || count == 0 || count > BOUNCE_SIZE / UFS_BLOCK ||
++	    lba < su.log_first_block || lba - su.log_first_block >= su.log_nblocks ||
++	    count > su.log_nblocks - (lba - su.log_first_block) || lba > UINT32_MAX ||
++	    count - 1 > UINT32_MAX - lba) {
++		printf("SWEET UFS: refusing log write of %u blocks at 0x%llx\n", count, lba);
++		return EPERM;
++	}
++	uint8_t cdb[10] = {
++		0x2a, 0,
++		(uint8_t)(lba >> 24), (uint8_t)(lba >> 16), (uint8_t)(lba >> 8), (uint8_t)lba,
++		0, (uint8_t)(count >> 8), (uint8_t)count, 0
++	};
++	return ufs_scsi(cdb, sizeof(cdb), count * UFS_BLOCK, true);
++}
++
+ static int
+ ufs_sync_cache(void)
+ {
+@@ -300,9 +444,12 @@
+ }
+ 
+ static int
+-ufs_find_partition(const char *want)
++ufs_find_partitions(const char *root_want, const char *log_want)
+ {
+ 	const uint8_t *b = (const uint8_t *)(su.dma + DMA_BOUNCE);
++	if (!su.capacity_valid || (log_want[0] && strcmp(root_want, log_want) == 0)) {
++		return EINVAL;
++	}
+ 	int error = ufs_read_blocks(1, 1);
+ 	if (error) {
+ 		return error;
+@@ -311,21 +458,38 @@
+ 		printf("SWEET UFS: LUN %u has no GPT\n", su.lun);
+ 		return ENXIO;
+ 	}
+-	uint64_t entry_lba;
+-	uint32_t nent, esz;
++	uint64_t entry_lba, first_usable, last_usable;
++	uint32_t header_size, nent, esz;
++	memcpy(&header_size, b + 12, sizeof(header_size));
++	memcpy(&first_usable, b + 40, sizeof(first_usable));
++	memcpy(&last_usable, b + 48, sizeof(last_usable));
+ 	memcpy(&entry_lba, b + 72, 8);
+ 	memcpy(&nent, b + 80, 4);
+ 	memcpy(&esz, b + 84, 4);
+-	if (esz != 128 || nent == 0 || nent * esz > BOUNCE_SIZE) {
++	uint64_t entry_bytes = (uint64_t)nent * esz;
++	if (header_size < 92 || header_size > UFS_BLOCK || first_usable > last_usable ||
++	    last_usable >= su.capacity_blocks || esz != 128 || nent == 0 ||
++	    entry_bytes == 0 || entry_bytes > BOUNCE_SIZE || entry_lba >= su.capacity_blocks ||
++	    (entry_bytes + UFS_BLOCK - 1) / UFS_BLOCK > su.capacity_blocks - entry_lba) {
+ 		printf("SWEET UFS: unsupported GPT entries %u x %u\n", nent, esz);
+ 		return ENXIO;
+ 	}
+-	error = ufs_read_blocks(entry_lba, (nent * esz + UFS_BLOCK - 1) / UFS_BLOCK);
++	uint32_t entry_blocks = (uint32_t)((entry_bytes + UFS_BLOCK - 1) / UFS_BLOCK);
++	error = ufs_read_blocks(entry_lba, entry_blocks);
+ 	if (error) {
+ 		return error;
+ 	}
++	bool root_found = false, log_found = false, log_duplicate = false;
++	uint64_t root_first = 0, root_last = 0, log_first = 0, log_last = 0;
+ 	for (uint32_t i = 0; i < nent; i++) {
+ 		const uint8_t *e = b + i * esz;
++		bool used = false;
++		for (unsigned j = 0; j < 16; j++) {
++			used |= e[j] != 0;
++		}
++		if (!used) {
++			continue;
++		}
+ 		char name[37];
+ 		unsigned c;
+ 		for (c = 0; c < 36; c++) {
+@@ -336,37 +500,132 @@
+ 			name[c] = (char)ch;
+ 		}
+ 		name[c] = 0;
+-		if (strcmp(name, want) != 0) {
++		bool is_root = strcmp(name, root_want) == 0;
++		bool is_log = log_want[0] && strcmp(name, log_want) == 0;
++		if (!is_root && !is_log) {
+ 			continue;
+ 		}
+ 		uint64_t first, last;
+ 		memcpy(&first, e + 32, 8);
+ 		memcpy(&last, e + 40, 8);
+-		if (last < first) {
++		if (last < first || first < first_usable || last > last_usable) {
++			printf("SWEET UFS: invalid GPT range for partition \"%s\"\n", name);
+ 			return ENXIO;
+ 		}
+-		su.first_block = first;
+-		su.nblocks = last - first + 1;
+-		return 0;
++		if (is_root) {
++			if (root_found) {
++				printf("SWEET UFS: duplicate root partition name \"%s\"\n", root_want);
++				return EEXIST;
++			}
++			root_found = true;
++			root_first = first;
++			root_last = last;
++		}
++		if (is_log) {
++			if (log_found) {
++				log_duplicate = true;
++			} else {
++				log_found = true;
++				log_first = first;
++				log_last = last;
++			}
++		}
++	}
++	if (!root_found) {
++		printf("SWEET UFS: no GPT root partition named \"%s\"\n", root_want);
++		return ENOENT;
++	}
++	su.first_block = root_first;
++	su.nblocks = root_last - root_first + 1;
++	if (log_want[0]) {
++		if (log_duplicate) {
++			printf("SWEET UFS: duplicate log partition name \"%s\"; logging disabled\n", log_want);
++		} else if (!log_found) {
++			printf("SWEET UFS: no GPT log partition named \"%s\"; logging disabled\n", log_want);
++		} else if ((root_first <= log_last && log_first <= root_last) ||
++		    log_last - log_first + 1 < SWEET_LOG_BLOCKS) {
++			printf("SWEET UFS: unsafe/undersized log partition \"%s\"; logging disabled\n", log_want);
++		} else if (!ufs_log_region_available(log_first)) {
++			/* The helper reports the read failure or unrecognized content. */
++		} else {
++			su.log_first_block = log_first;
++			su.log_nblocks = log_last - log_first + 1;
++			su.log_partition_ready = true;
++			printf("SWEET UFS: log partition \"%s\" first=0x%llx blocks=%llu\n",
++			    log_want, su.log_first_block, su.log_nblocks);
++		}
++	}
++	return 0;
++}
++
++static void
++ufs_log_host_state(const char *stage)
++{
++	uint32_t version = ufs_rd(REG_VER), cap = ufs_rd(REG_CAP);
++	uint32_t hce = ufs_rd(REG_HCE), hcs = ufs_rd(REG_HCS);
++	uint64_t utrl = ((uint64_t)ufs_rd(REG_UTRLBAU) << 32) | ufs_rd(REG_UTRLBA);
++	printf("SWEET UFS: %s ver=0x%x cap=0x%x hce=0x%x hcs=0x%x is=0x%x ie=0x%x "
++	    "utrl=0x%llx dbr=0x%x rsr=0x%x tm_dbr=0x%x\n",
++	    stage, version, cap, hce, hcs, ufs_rd(REG_IS), ufs_rd(REG_IE), utrl,
++	    ufs_rd(REG_UTRLDBR), ufs_rd(REG_UTRLRSR), ufs_rd(REG_UTMRLDBR));
++}
++
++/* Read the MT6991 AO clocks before touching HCI registers, like HackIOS. */
++static int
++ufs_check_mt6991_resources(void)
++{
++	uint32_t gate0 = ufs_ao_rd(DALI_UFS_AO_GATE0);
++	uint32_t gate1 = ufs_ao_rd(DALI_UFS_AO_GATE1);
++	if (gate0 == UINT32_MAX || gate1 == UINT32_MAX) {
++		printf("SWEET UFS: invalid MT6991 AO MMIO gate0=0x%x gate1=0x%x\n", gate0, gate1);
++		return ENXIO;
+ 	}
+-	printf("SWEET UFS: no GPT partition named \"%s\"\n", want);
+-	return ENOENT;
++	printf("SWEET UFS: MT6991 AO gate0=0x%x gate1=0x%x\n", gate0, gate1);
++	if ((gate0 & 1) || (gate1 & 0x18)) {
++		printf("SWEET UFS: MT6991 HCI/UniPro clock gates are off\n");
++		return ENXIO;
++	}
++	uint32_t ip_version = ufs_rd(REG_MTK_IP_VERSION);
++	uint32_t ref_clock = ufs_rd(REG_MTK_REF_CLOCK);
++	uint32_t xo_ufs = ufs_rd(REG_MTK_XO_UFS);
++	uint32_t options = ufs_rd(REG_MTK_OPTIONS);
++	uint32_t outstanding = ufs_rd(REG_MTK_OUTSTANDING);
++	printf("SWEET UFS: MT6991 ip=0x%x refclk=0x%x xo=0x%x options=0x%x outstanding=0x%x\n",
++	    ip_version, ref_clock, xo_ufs, options, outstanding);
++	if (ip_version != 0x10470000u || ref_clock == UINT32_MAX || (ref_clock & 3) != 3) {
++		printf("SWEET UFS: MT6991 resources are not in the expected active state\n");
++		return ENXIO;
++	}
++	return 0;
+ }
+ 
+ static int
+ ufs_take_over_host(void)
+ {
++	if (su.dali) {
++		int error = ufs_check_mt6991_resources();
++		if (error) {
++			return error;
++		}
++	}
++	uint32_t version = ufs_rd(REG_VER), cap = ufs_rd(REG_CAP);
+ 	uint32_t hce = ufs_rd(REG_HCE), hcs = ufs_rd(REG_HCS);
++	ufs_log_host_state("pre-takeover");
++	if (su.dali && (version != MT6991_UFS_VERSION || cap != MT6991_UFS_CAP)) {
++		printf("SWEET UFS: MT6991 HCI identity mismatch: ver=0x%x cap=0x%x expected=0x%x/0x%x\n",
++		    version, cap, MT6991_UFS_VERSION, MT6991_UFS_CAP);
++		return ENXIO;
++	}
+ 	if (!(hce & 1) || !(hcs & HCS_DP) || !(hcs & HCS_UTRLRDY)) {
+ 		printf("SWEET UFS: host not ready (hce 0x%x hcs 0x%x)\n", hce, hcs);
+ 		return ENXIO;
+ 	}
+-	if (ufs_rd(REG_UTRLDBR)) {
+-		printf("SWEET UFS: requests outstanding from the bootloader\n");
++	if (ufs_rd(REG_UTRLDBR) || ufs_rd(REG_UTMRLDBR)) {
++		printf("SWEET UFS: transfer/task requests outstanding from the bootloader\n");
+ 		return EBUSY;
+ 	}
+ 	/* With RAM above 4 GiB (mkadt.py --highmem) the DMA memory can be there too. */
+-	if (((su.dma_pa + DMA_SIZE - 1) >> 32) && !(ufs_rd(REG_CAP) & CAP_64AS)) {
++	if (((su.dma_pa + DMA_SIZE - 1) >> 32) && !(cap & CAP_64AS)) {
+ 		printf("SWEET UFS: DMA memory at 0x%llx but the host has no 64-bit addressing\n",
+ 		    su.dma_pa);
+ 		return ENXIO;
+@@ -384,6 +643,7 @@
+ 		printf("SWEET UFS: host did not take our request list\n");
+ 		return EIO;
+ 	}
++	ufs_log_host_state("post-takeover");
+ 	return 0;
+ }
+ 
+@@ -588,8 +848,13 @@
+ {
+ 	DTEntry node;
+ 	uintptr_t const *reg = NULL;
++	uintptr_t const *ao_reg = NULL;
+ 	unsigned int size = 0;
++	unsigned int ao_size = 0;
+ 	char want[64] = "userdata";
++	char log_want[64] = "";
++	const char *compatible = NULL;
++	unsigned int compatible_size = 0;
+ 	uint32_t lun = 0;
+ 	uint32_t const *lun_prop = NULL;
+ 	unsigned int lun_size = 0;
+@@ -601,6 +866,11 @@
+ 		printf("SWEET UFS: no /sweet-ufs node in the device tree\n");
+ 		return ENXIO;
+ 	}
++	if (ufs_dt_string(node, "root-partition", want, sizeof(want), "userdata") ||
++	    ufs_dt_string(node, "log-partition", log_want, sizeof(log_want), "")) {
++		printf("SWEET UFS: invalid partition-name property\n");
++		return EINVAL;
++	}
+ 	PE_parse_boot_argn("ufsroot", want, sizeof(want));
+ 	uint32_t rw = 0;
+ 	PE_parse_boot_argn("ufsrw", &rw, sizeof(rw));
+@@ -609,8 +879,42 @@
+ 	PE_parse_boot_argn("ufswait", &wait, sizeof(wait));
+ 	su.cache = (cache == 1);
+ 	su.wait = (wait == 1);
++	su.log_partition_configured = log_want[0] != '\0';
++	if (su.log_partition_configured &&
++	    strlcpy(su.log_partition_name, log_want, sizeof(su.log_partition_name)) >=
++	    sizeof(su.log_partition_name)) {
++		printf("SWEET UFS: log partition name is too long\n");
++		return EINVAL;
++	}
++	if (SecureDTGetProperty(node, "compatible", (void const **)&compatible,
++	    &compatible_size) == kSuccess &&
++	    compatible != NULL &&
++	    compatible_size >= sizeof("mediatek,mt6991-ufshc") &&
++	    memcmp(compatible, "mediatek,mt6991-ufshc", sizeof("mediatek,mt6991-ufshc")) == 0) {
++		su.dali = true;
++	}
++	if (su.dali && (reg[0] != DALI_UFS_HCI_BASE ||
++	    reg[1] < REG_MTK_IP_VERSION + sizeof(uint32_t))) {
++		printf("SWEET UFS: invalid MT6991 HCI range base=0x%llx size=0x%llx\n",
++		    (uint64_t)reg[0], (uint64_t)reg[1]);
++		return EINVAL;
++	}
+ 
+ 	su.regs = ml_io_map(reg[0], reg[1]);
++	if (su.dali) {
++		if (SecureDTGetProperty(node, "ao-reg", (void const **)&ao_reg, &ao_size) != kSuccess ||
++		    ao_reg == NULL || ao_size < 2 * sizeof(uintptr_t) ||
++		    ao_reg[0] != DALI_UFS_AO_BASE ||
++		    ao_reg[1] < DALI_UFS_AO_GATE0 + sizeof(uint32_t)) {
++			printf("SWEET UFS: missing MT6991 AO register range\n");
++			return ENXIO;
++		}
++		su.ao_regs = ml_io_map(ao_reg[0], ao_reg[1]);
++		if (su.ao_regs == 0) {
++			printf("SWEET UFS: cannot map MT6991 AO registers\n");
++			return ENOMEM;
++		}
++	}
+ 	if (kmem_alloc_contig(kernel_map, &su.dma, DMA_SIZE, PAGE_MASK, 0, 0,
+ 	    KMA_DATA | KMA_ZERO | KMA_PERMANENT, VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS) {
+ 		printf("SWEET UFS: no contiguous DMA memory\n");
+@@ -645,7 +949,10 @@
+ 		}
+ 	}
+ 	if (!error) {
+-		error = ufs_find_partition(want);
++		error = ufs_read_capacity();
++	}
++	if (!error) {
++		error = ufs_find_partitions(want, log_want);
+ 	}
+ 	lck_mtx_unlock(&sweet_ufs_lock);
+ 	if (error) {
+@@ -663,8 +970,11 @@
+ 	su.bdev = makedev(su.bmajor, 0);
+ 	devfs_make_node(su.bdev, DEVFS_BLOCK, UID_ROOT, GID_OPERATOR, 0640, "ufsroot0");
+ 	devfs_make_node(makedev(su.cmajor, 0), DEVFS_CHAR, UID_ROOT, GID_OPERATOR, 0640, "rufsroot0");
+-	/* Only now, with the partition bounds known, can writes be allowed. */
+-	su.writable = (rw != 0);
++	/* Dali root stays read-only; only its separate configured log range can write. */
++	su.writable = (rw != 0) && !su.dali;
++	if (su.dali && rw != 0) {
++		printf("SWEET UFS: ignoring ufsrw on Dali; root writes remain disabled\n");
++	}
+ 	su.ready = true;
+ 	printf("SWEET UFS: \"%s\" on LUN %u: first block 0x%llx, %llu MiB, %s, DMA at 0x%llx\n",
+ 	    want, su.lun, su.first_block, su.nblocks * UFS_BLOCK >> 20,
+@@ -679,20 +989,16 @@
+ }
+ 
+ /*
+- * Persistent console log ("sweetlog"). Filming the phone screen is the only
+- * other way to see the console, so every character that reaches the
+- * console (kernel printf and /dev/console writes of daemons, both through
+- * _cnputs) is also kept in a 4 MiB ring, and once the partition is known
+- * and writable a thread copies new ring blocks to the LAST 4 MiB + 4 KiB of
+- * the partition every ufslogsecs seconds (default 10), far behind the HFS
+- * image at its start. Device block 0 of that area is a header:
++ * Persistent console log ("sweetlog"). Every character that reaches the
++ * console is buffered in a 4 MiB ring. A Dali ADT names a separate raw GPT
++ * partition for logs; writes are restricted to that partition's bounds and
++ * never require ufsrw=1. Non-Dali configurations retain the legacy root-tail
++ * log area. Device block 0 of the selected area is a header:
+  *   "SWEETLOG" | u32 version 1 | u32 ring size | u64 total bytes written
+  *   | u64 flush sequence
+  * ring offset of byte n = n % ring size. Read it from a recovery with
+  * tools/sweet-log-pull.sh. Disabled with boot-arg sweetlog=0.
+  */
+-#define SWEET_LOG_SIZE          (4u << 20)
+-#define SWEET_LOG_BLOCKS        (1 + SWEET_LOG_SIZE / UFS_BLOCK)
+ #define SWEET_LOG_SECS          10u
+ 
+ static char sweet_log_ring[SWEET_LOG_SIZE];
+@@ -754,11 +1060,14 @@
+ static void
+ sweet_log_thread(__unused void *arg, __unused wait_result_t wr)
+ {
+-	uint64_t base = su.first_block + su.nblocks - SWEET_LOG_BLOCKS;
++	bool separate = su.log_partition_configured;
++	uint64_t base = separate ? su.log_first_block :
++	    su.first_block + su.nblocks - SWEET_LOG_BLOCKS;
+ 	uint64_t flushed = 0, seq = 0;
+ 	void *bounce = (void *)(su.dma + DMA_BOUNCE);
+ 
+-	printf("SWEET LOG: console log to the last %u KiB of the partition (block 0x%llx)\n",
++	printf("SWEET LOG: console log in %s (%u KiB at block 0x%llx)\n",
++	    separate ? su.log_partition_name : "root partition tail",
+ 	    SWEET_LOG_BLOCKS * UFS_BLOCK >> 10, base);
+ 	for (;;) {
+ 		(void)tsleep(&sweet_log_chan, PZERO, "sweetlog", hz * (int)sweet_log_secs);
+@@ -777,7 +1086,8 @@
+ 			uint32_t n = (uint32_t)MIN(MIN(need, (uint64_t)(SWEET_LOG_SIZE / UFS_BLOCK - blk)),
+ 			    (uint64_t)(BOUNCE_SIZE / UFS_BLOCK));
+ 			memcpy(bounce, sweet_log_ring + (uint64_t)blk * UFS_BLOCK, n * UFS_BLOCK);
+-			error = ufs_write_blocks(base + 1 + blk, n);
++			error = separate ? ufs_write_log_blocks(base + 1 + blk, n) :
++				    ufs_write_blocks(base + 1 + blk, n);
+ 			pos += (uint64_t)(blk + n) * UFS_BLOCK - off;
+ 		}
+ 		if (!error) {
+@@ -787,7 +1097,7 @@
+ 			};
+ 			bzero(bounce, UFS_BLOCK);
+ 			memcpy(bounce, &h, sizeof(h));
+-			error = ufs_write_blocks(base, 1);
++			error = separate ? ufs_write_log_blocks(base, 1) : ufs_write_blocks(base, 1);
+ 		}
+ 		if (!error) {
+ 			error = ufs_sync_cache();
+@@ -808,7 +1118,15 @@
+ 	thread_t thread;
+ 
+ 	PE_parse_boot_argn("sweetlog", &on, sizeof(on));
+-	if (!on || !su.writable || su.nblocks < 2 * SWEET_LOG_BLOCKS) {
++	if (!on) {
++		return;
++	}
++	if (su.log_partition_configured) {
++		if (!su.log_partition_ready || su.log_nblocks < SWEET_LOG_BLOCKS) {
++			printf("SWEET LOG: dedicated log partition unavailable; persistent logging disabled\n");
++			return;
++		}
++	} else if (!su.writable || su.nblocks < 2 * SWEET_LOG_BLOCKS) {
+ 		return;
+ 	}
+ 	PE_parse_boot_argn("ufslogsecs", &sweet_log_secs, sizeof(sweet_log_secs));

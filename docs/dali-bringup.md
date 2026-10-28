@@ -18,6 +18,8 @@ current limits.
 | Generic timer | 13 MHz; virtual timer PPI 11 = GIC INTID 27 | live FDT |
 | UFSHCI | `0x16810000`, size `0x2a00` | live FDT |
 | UFS logical unit | `2` | Linux block-device path `target0:0:0:2` |
+| iOS root GPT partition | `unixnu_data`, 31.96875 GiB, immediately after `userdata`; currently exFAT label `UNIXNU` | read-only ADB by-name/sysfs/blkid readback, 2026-10-28 |
+| persistent log GPT partition | `unixnu_logs`, 32 MiB, immediately after `unixnu_data`; not mounted, format unknown | read-only ADB by-name/sysfs readback, 2026-10-28 |
 | Boot framebuffer | `0xfc990000`, size `0x3660000` | live FDT |
 | Display dimensions | 1280 × 2772; stride 5120 assumed | Android display size and live FDT |
 
@@ -56,13 +58,44 @@ TARGET_BOARD=dali bash shim/build.sh
 ```
 
 Build an XNU payload without an embedded root image, then package it into the
-generic ramdisk in `init_boot`:
+generic ramdisk in `init_boot`. The Dali ADT now selects UFS LUN 2, defaults the
+root partition to `unixnu_data`, and names `unixnu_logs` as the separate log
+target. This boot line opts into the internal UFS root and one-second log flush;
+it deliberately omits `ufsrw=1`, so the root partition remains read-only:
 
 ```sh
 python3 tools/mkpayload.py xnu/out/kernel.development.sweet shim/out-dali/dali.adt \
-    shim/out-dali/dali-payload.bin --cmdline 'debug=0xc cpus=1 keepsyms=1'
+    shim/out-dali/dali-payload.bin \
+    --cmdline 'debug=0xc cpus=1 keepsyms=1 sweettouch=0 sweetkeys=0 sweetbattery=0 rd=ufsroot0 ufsroot=unixnu_data sweetlog=1 ufslogsecs=1'
 bash shim/build-dali-initboot.sh out-dali/dali-payload.bin
 ```
+
+The XNU UFS path first checks the MT6991 AO clock gates, MTK IP version, and
+reference-clock-ready state from HackIOS's read-only snapshot. It then checks
+the HCI version/capability values, confirms the live host is already enabled
+with no outstanding transfer or task requests, and takes over only the transfer list. It records
+READ CAPACITY(10), bounds GPT reads to that capacity, and requires one root
+partition entry. It enables log writes only for one non-overlapping `unixnu_logs`
+entry. It does not replay HackIOS's
+UEFI SiP/PHY/reset/link-start sequence: that code requires a quiescent HCI,
+while this kernel enters from Android LK with the UFS host already running.
+
+Console output is buffered before UFS initialization. Once the controller and
+GPT are usable, the logger writes its 4 MiB ring plus one 4 KiB header block at
+the start of `unixnu_logs`. It first verifies that this area is all zero or has
+the SWEETLOG header from a previous boot; an unrecognized nonempty area disables
+logging without overwriting it. The write path is bounded to that GPT range and
+does not enable writes to `unixnu_data`. Pull the log later from recovery with
+`tools/sweet-log-pull.sh OUT.txt` (or pass `-s SERIAL`); it reads `unixnu_logs`
+by default. If UFS takeover or GPT discovery fails, the log remains only in
+memory for that boot and cannot be persisted through this UFS path.
+
+The current `unixnu_data` readback is exFAT, not the HFSX volume expected by the
+XNU root mount. A root image must be installed there before an internal-UFS boot
+can reach HFS root. `unixnu_logs` is unmounted and has the verified 32 MiB
+partition size, but its raw contents could not be read from the unprivileged
+Android shell. No partition contents have been written by this source update.
+The source changes have not yet been built or tested on the handset.
 
 `build-dali-initboot.sh` makes a newc CPIO containing `sweet.payload`, wraps
 it in a 64 KiB independent-block LZ4 frame, and adds an AVB v1 hash footer

@@ -43,6 +43,7 @@ DALI_GICR, DALI_GICR_SIZE = 0x0c440000, 0x200000
 DALI_FB, DALI_FB_SIZE = 0xfc990000, 0x3660000
 DALI_FB_W, DALI_FB_H = 1280, 2772
 DALI_UFS, DALI_UFS_SIZE = 0x16810000, 0x2a00
+DALI_UFS_AO, DALI_UFS_AO_SIZE = 0x168a0000, 0x1000
 DALI_TIMEBASE, DALI_VTIMER_INTID = 13000000, 27
 
 BOOT_MANIFEST_HASH = hashlib.sha384(b'sweet boot manifest').digest()
@@ -92,6 +93,8 @@ def build(seed=None, qemu=False, highmem=False, dali=False):
         fb, fb_size = DALI_FB, DALI_FB_SIZE
         fb_w, fb_h, fb_stride = DALI_FB_W, DALI_FB_H, DALI_FB_W * 4
         ufs, ufs_size, ufs_lun = DALI_UFS, DALI_UFS_SIZE, 2
+        ufs_compatible = cstr('mediatek,mt6991-ufshc') + cstr('qcom,ufshc')
+        ufs_root_partition, ufs_log_partition = 'unixnu_data', 'unixnu_logs'
         cpu_count = 1  # first boot remains on the firmware-started CPU
         cpu_compat = cstr('arm,armv8')
         board_compat = cstr('xiaomi,sweet') + cstr('xiaomi,dali') + cstr('mediatek,mt6991')
@@ -103,6 +106,8 @@ def build(seed=None, qemu=False, highmem=False, dali=False):
         vtimer_intid = QEMU_VTIMER_INTID if qemu else VTIMER_INTID
         fb, fb_size, fb_w, fb_h, fb_stride = FB, FB_SIZE, FB_W, FB_H, FB_STRIDE
         ufs, ufs_size, ufs_lun = UFS, UFS_SIZE, 0
+        ufs_compatible = cstr('qcom,ufshc')
+        ufs_root_partition = ufs_log_partition = None
         cpu_count = 1 if qemu else 8
         cpu_compat = cstr('qcom,kryo470') + cstr('ARM,v8')
         board_compat = cstr('xiaomi,sweet') + cstr('qcom,sm7150')
@@ -232,12 +237,19 @@ def build(seed=None, qemu=False, highmem=False, dali=False):
     ])
 
     # bsd/dev/sweet_ufs.c: the UFS host ABL leaves running (absolute physical reg).
-    ufs = node('sweet-ufs', [
+    ufs_props = [
         ph(),
-        ('compatible', cstr('qcom,ufshc')),
+        ('compatible', ufs_compatible),
         ('reg', u64(ufs, ufs_size)),
         ('lun', u32(ufs_lun)),
-    ])
+    ]
+    if ufs_root_partition:
+        ufs_props.extend([
+            ('ao-reg', u64(DALI_UFS_AO, DALI_UFS_AO_SIZE)),
+            ('root-partition', cstr(ufs_root_partition)),
+            ('log-partition', cstr(ufs_log_partition)),
+        ])
+    ufs = node('sweet-ufs', ufs_props)
 
     # pmap_compute_max_asids requires the node even when no overrides are set.
     # An absent pmap-max-asids property selects XNU's own MAX_ASIDS default.
