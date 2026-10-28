@@ -1,0 +1,64 @@
+diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -668,15 +668,20 @@
+ }
+ 
+ static int
+-ufs_mtk_ao_set(uint32_t offset, uint32_t bits)
++ufs_mtk_ao_set(const char *stage, uint32_t offset, uint32_t bits)
+ {
+ 	uint32_t value = ufs_ao_rd(offset);
+ 	if (value == UINT32_MAX) {
+ 		return ENXIO;
+ 	}
+-	ufs_ao_wr(offset, value | bits);
+-	value = ufs_ao_rd(offset);
+-	return value == UINT32_MAX ? ENXIO : (value & bits) == bits ? 0 : EIO;
++	uint32_t old_value = value;
++	uint32_t write_value = old_value | bits;
++	/* Match HackIOS/TI syscon reset semantics; readback is diagnostic only. */
++	ufs_ao_wr(offset, write_value);
++	uint32_t readback = ufs_ao_rd(offset);
++	printf("SWEET UFS: AO reset stage=%s offset=0x%x mask=0x%x old=0x%x write=0x%x readback=0x%x\n",
++	    stage, offset, bits, old_value, write_value, readback);
++	return 0;
+ }
+ 
+ static int
+@@ -783,10 +788,12 @@
+ {
+ 	static const uint32_t assert_bits[] = {4, 2, 1};
+ 	static const uint32_t release_bits[] = {1, 2, 4};
++	static const char *const assert_stages[] = {"assert-hci", "assert-crypto", "assert-unipro"};
++	static const char *const release_stages[] = {"release-unipro", "release-crypto", "release-hci"};
+ 	int error = 0;
+ 	su.failure_stage = "host-reset-assert";
+ 	for (unsigned i = 0; i < sizeof(assert_bits) / sizeof(assert_bits[0]); i++) {
+-		error = ufs_mtk_ao_set(0x148, assert_bits[i]);
++		error = ufs_mtk_ao_set(assert_stages[i], 0x148, assert_bits[i]);
+ 		if (error) {
+ 			goto release;
+ 		}
+@@ -794,7 +801,7 @@
+ 	delay(100);
+ 	su.failure_stage = "host-reset-release";
+ 	for (unsigned i = 0; i < sizeof(release_bits) / sizeof(release_bits[0]); i++) {
+-		error = ufs_mtk_ao_set(0x14c, release_bits[i]);
++		error = ufs_mtk_ao_set(release_stages[i], 0x14c, release_bits[i]);
+ 		if (error) {
+ 			goto release;
+ 		}
+@@ -804,8 +811,10 @@
+ release:
+ 	/* A partial reset assertion must not leave one of the host blocks held down. */
+ 	for (unsigned i = 0; i < sizeof(release_bits) / sizeof(release_bits[0]); i++) {
+-		if (ufs_mtk_ao_set(0x14c, release_bits[i]) != 0) {
+-			printf("SWEET UFS: host-reset cleanup release bit=0x%x failed\n", release_bits[i]);
++		int cleanup_error = ufs_mtk_ao_set("cleanup-release", 0x14c, release_bits[i]);
++		if (cleanup_error != 0) {
++			printf("SWEET UFS: host-reset cleanup release bit=0x%x failed error=%d\n",
++			    release_bits[i], cleanup_error);
+ 		}
+ 	}
+ 	return error;

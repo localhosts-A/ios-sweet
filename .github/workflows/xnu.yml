@@ -396,8 +396,15 @@ jobs:
           grep -Fq '#define IS_UFS_ERROR_MASK 0x00070884u' xnu/bsd/dev/sweet_ufs.c
           grep -Fq 'ufs_mtk_link_reset_event(status)' xnu/bsd/dev/sweet_ufs.c
           grep -Fq 'if (hce != 0)' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq '/* Match HackIOS/TI syscon reset semantics; readback is diagnostic only. */' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'static const char *const assert_stages[] = {"assert-hci", "assert-crypto", "assert-unipro"};' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'static const char *const release_stages[] = {"release-unipro", "release-crypto", "release-hci"};' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'ufs_mtk_ao_set(assert_stages[i], 0x148, assert_bits[i])' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'ufs_mtk_ao_set(release_stages[i], 0x14c, release_bits[i])' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'ufs_ao_wr(offset, write_value);' xnu/bsd/dev/sweet_ufs.c
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'uic-link-startup'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'MT6991 host startup failed stage='
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: AO reset stage=%s offset=0x%x mask=0x%x old=0x%x write=0x%x readback=0x%x'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET DALI RAMOOPS: root diagnostics begin'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS root %s unavailable: %d stage=%s'
           python3 ../tools/verify-dali-ramoops-adt.py

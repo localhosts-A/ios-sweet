@@ -72,15 +72,28 @@ python3 tools/mkpayload.py xnu/out/kernel.development.sweet shim/out-dali/dali.a
 bash shim/build-dali-initboot.sh out-dali/dali-payload.bin
 ```
 
-The XNU UFS path first checks the MT6991 AO clock gates, MTK IP version, and
-reference-clock-ready state from HackIOS's read-only snapshot. It then checks
-the HCI version/capability values, confirms the live host is already enabled
-with no outstanding transfer or task requests, and takes over only the transfer list. It records
-READ CAPACITY(10), bounds GPT reads to that capacity, and requires one root
-partition entry. It enables log writes only for one non-overlapping `unixnu_logs`
-entry. It does not replay HackIOS's
-UEFI SiP/PHY/reset/link-start sequence: that code requires a quiescent HCI,
-while this kernel enters from Android LK with the UFS host already running.
+The XNU UFS path checks the MT6991 AO clock gates, MTK IP version,
+reference-clock state, and HCI identity/capabilities before taking ownership.
+Patch 0146 adds a Dali-only startup path for the exact stopped-HCI handoff seen
+in the patch 0145 trial: HCE must be zero and the controller/request queues must
+be idle. It refuses an active, invalid, or busy host. For that stopped state it
+runs bounded MT6991 power, reference-clock, reset, HCE, and UIC LINK_STARTUP
+steps based on the HackIOS Dali sequence, then installs and verifies XNU's
+transfer list only after the host reports link/device readiness. Other Dali HCI
+states are not forcibly adopted or reset. This startup sequence and its SiP,
+reset, and PHY interactions are not yet hardware-qualified. Once the host is
+ready, the driver records READ CAPACITY(10), bounds GPT reads to that capacity,
+and requires one root partition entry. It enables log writes only for one
+non-overlapping `unixnu_logs` entry.
+
+The approved patch0146 trial reached the host-reset sequence, then returned
+`EIO` because an AO reset-bit readback did not contain the bit just written.
+The Dali reset definitions mark status as unavailable (`STATUS_NONE`), and
+HackIOS performs the same masked writes without using a post-write readback as
+a success condition. Patch0147 preserves the reset masks and order, logs each
+write/readback for diagnosis, and no longer treats that readback as reset
+status. It is a diagnostic candidate: compile, CI, and hardware qualification
+are still pending.
 
 Console output is buffered before UFS initialization. The first 16 MiB of
 `unixnu_logs` already contains a `DALIUFSLOG1` area, so the ADT selects a SWEET
@@ -96,7 +109,9 @@ The 16 GiB HFSX root image is installed in `unixnu_data` and its readback hash
 matches the source. The prior exFAT contents in that 16 GiB were overwritten;
 the GPT and `unixnu_logs` were not changed. A read-only scan found the existing
 `DALIUFSLOG1` structure in the first 12 MiB of `unixnu_logs`, while the proposed
-16–20 MiB SWEET area is zero. The UFS source path is not yet hardware-verified.
+16–20 MiB SWEET area was confirmed zero after the patch0146 trial. The current
+hardware evidence reaches reset setup only; UFS link, media access, root mount,
+and persistent logging remain unverified.
 
 `build-dali-initboot.sh` makes a newc CPIO containing `sweet.payload`, wraps
 it in a 64 KiB independent-block LZ4 frame, and adds an AVB v1 hash footer
@@ -106,10 +121,10 @@ footer. `shim/loader.c` removes an optional Android bootconfig trailer,
 finds the final LZ4 frame from the bootloader's concatenated initrd, extracts
 the CPIO entry, and streams XNU segments into their final memory addresses.
 
-The XNU build completed successfully in GitHub Actions run
+The initial Dali XNU build completed successfully in GitHub Actions run
 [39425210357](https://github.com/localhosts-A/ios-sweet/actions/runs/39425210357)
 from commit `e811978` using macOS 13.5, DEVELOPMENT, and SWEET. The resulting
-`kernel.development.sweet` is 17,206,368 bytes with SHA-256
+`kernel.development.sweet` was 17,206,368 bytes with SHA-256
 `5a5dbfb4c72fc71f49b24ec92de6005cb407fcfdd7acdc097b4147c25cce2a42`.
 The workflow applies all patches, including
 `0082-dali-dynamic-framebuffer.patch`, and the XNU build step succeeded.
