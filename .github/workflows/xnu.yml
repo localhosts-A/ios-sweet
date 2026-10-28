@@ -393,6 +393,11 @@ jobs:
           grep -Fq 'sweet_init_trace = sweet_init_call < 16;' xnu/bsd/dev/arm/systemcalls.c
           grep -Fq 'ml_io_map_wcomb((vm_offset_t)(base + offset)' xnu/bsd/dev/sweet_ufs.c
           grep -Fq 'start >= sweet_ramoops_capacity || used > sweet_ramoops_capacity || start > used' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq '#define IS_UFS_ERROR_MASK 0x00070884u' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'ufs_mtk_link_reset_event(status)' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'if (hce != 0)' xnu/bsd/dev/sweet_ufs.c
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'uic-link-startup'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'MT6991 host startup failed stage='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET DALI RAMOOPS: root diagnostics begin'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS root %s unavailable: %d stage=%s'
           python3 ../tools/verify-dali-ramoops-adt.py

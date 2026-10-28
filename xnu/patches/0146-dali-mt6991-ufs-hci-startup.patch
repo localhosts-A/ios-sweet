@@ -1,0 +1,766 @@
+diff --git a/xnu/bsd/dev/sweet_ufs.c b/xnu/bsd/dev/sweet_ufs.c
+--- a/xnu/bsd/dev/sweet_ufs.c
++++ b/xnu/bsd/dev/sweet_ufs.c
+@@ -2,10 +2,10 @@
+  * SWEET internal UFS root device.
+  *
+  * The Qualcomm UFS host (UFSHCI 2.1) is left enabled with the link up by the
+- * bootloader, which loaded our boot image from it. This driver reuses that
+- * state: it points the transfer request list at its own memory (verifying the
+- * host took it before ringing any doorbell) and issues polled SCSI commands,
+- * one at a time, to LUN 0. It finds one GPT partition by name (boot-arg
++ * bootloader. Dali's MT6991 host is instead accepted only in an exact stopped,
++ * idle state; that profile performs a bounded SoC-specific startup before
++ * installing XNU-owned request memory. Both paths issue polled SCSI commands,
++ * one at a time, to the selected LUN. It finds one GPT partition by name (boot-arg
+  * ufsroot=, default "userdata") and exposes it as the BSD disk ufsroot0
+  * (rufsroot0), with 512-byte logical sectors over the device's 4 KiB blocks.
+  * Root on it with rd=ufsroot0.
+@@ -67,7 +67,22 @@
+ #define REG_UTRLDBR     0x58
+ #define REG_UTRLCLR     0x5c
+ #define REG_UTRLRSR     0x60
++#define REG_UTMRLBA     0x70
++#define REG_UTMRLBAU    0x74
+ #define REG_UTMRLDBR    0x78
++#define REG_UTMRLRSR    0x80
++#define REG_UICCMD      0x90
++#define REG_UICCMDARG1  0x94
++#define REG_UICCMDARG2  0x98
++#define REG_UICCMDARG3  0x9c
++#define REG_AHIT        0x18
++#define REG_MEM_CFG     0x300
++
++#define REG_UIC_ERROR_PHY   0x38
++#define REG_UIC_ERROR_DL    0x3c
++#define REG_UIC_ERROR_N     0x40
++#define REG_UIC_ERROR_T     0x44
++#define REG_UIC_ERROR_DME   0x48
+ 
+ #define REG_MTK_IP_VERSION 0x2240
+ #define REG_MTK_REF_CLOCK  0x144
+@@ -82,7 +97,17 @@
+ 
+ #define HCS_DP          (1u << 0)
+ #define HCS_UTRLRDY     (1u << 1)
++#define HCS_UCRDY       (1u << 3)
++#define IS_UIC_ERROR    (1u << 2)
++#define IS_UCCS         (1u << 10)
++#define IS_UFS_ERROR_MASK 0x00070884u     /* MT6991 reference UFSHCI error mask */
+ #define CAP_64AS        (1u << 24)              /* 64-bit DMA addressing */
++
++#define MT6991_UFS_SIP             0xc2000276u
++#define MT6991_UFS_SIP_DEVICE_RST  2u
++#define MT6991_UFS_SIP_REFCLK      (1u << 3)
++#define MT6991_UFS_SIP_MTCMOS      (1u << 9)
++#define MT6991_UFS_LINK_RESET_PHY_ERROR 0x80000010u
+ 
+ /* Values independently pinned by HackIOS' MT6991 UFSHCI inventory. */
+ #define MT6991_UFS_VERSION 0x00000400u
+@@ -164,6 +189,14 @@
+ ufs_wr(uint32_t off, uint32_t v)
+ {
+ 	*(volatile uint32_t *)(su.regs + off) = v;
++	__builtin_arm_dsb(0xf);
++}
++
++static inline void
++ufs_ao_wr(uint32_t off, uint32_t v)
++{
++	*(volatile uint32_t *)(su.ao_regs + off) = v;
++	__builtin_arm_dsb(0xf);
+ }
+ 
+ static void
+@@ -575,9 +608,594 @@
+ 	    ufs_rd(REG_UTRLDBR), ufs_rd(REG_UTRLRSR), ufs_rd(REG_UTMRLDBR));
+ }
+ 
++static int ufs_mtk_check_mt6991_resources(void);
++
++static int
++ufs_wait_reg(uint32_t offset, uint32_t mask, uint32_t expected, uint32_t timeout_us)
++{
++	for (uint32_t elapsed = 0; ; elapsed += 10) {
++		uint32_t value = ufs_rd(offset);
++		if (value == UINT32_MAX) {
++			return ENXIO;
++		}
++		if ((value & mask) == expected) {
++			return 0;
++		}
++		if (elapsed >= timeout_us) {
++			printf("SWEET UFS: timeout waiting offset=0x%x mask=0x%x want=0x%x got=0x%x\n",
++			    offset, mask, expected, value);
++			return ETIMEDOUT;
++		}
++		delay(10);
++	}
++}
++
++static int
++ufs_mtk_sip(uint32_t selector, uint32_t arg1, uint32_t arg2)
++{
++	/* MT6991 UFS SiP ABI, matching the pinned Linux/HackIOS caller. */
++	register uint64_t x0 __asm__("x0") = MT6991_UFS_SIP;
++	register uint64_t x1 __asm__("x1") = selector;
++	register uint64_t x2 __asm__("x2") = arg1;
++	register uint64_t x3 __asm__("x3") = arg2;
++	register uint64_t x4 __asm__("x4") = 0;
++	register uint64_t x5 __asm__("x5") = 0;
++	register uint64_t x6 __asm__("x6") = 0;
++	register uint64_t x7 __asm__("x7") = 0;
++	__asm__ volatile("dsb sy\n\tsmc #0"
++	    : "+r"(x0), "+r"(x1), "+r"(x2), "+r"(x3), "+r"(x4), "+r"(x5), "+r"(x6), "+r"(x7)
++	    : : "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "memory", "cc");
++	int64_t status = (int64_t)x0;
++	if (status != 0) {
++		printf("SWEET UFS: MT6991 SiP selector=0x%x args=0x%x/0x%x status=%lld\n",
++		    selector, arg1, arg2, (long long)status);
++		return EIO;
++	}
++	return 0;
++}
++
++static int
++ufs_mtk_rmw(uint32_t offset, uint32_t clear_mask, uint32_t set_bits)
++{
++	uint32_t value = ufs_rd(offset);
++	if (value == UINT32_MAX) {
++		return ENXIO;
++	}
++	uint32_t expected = (value & ~clear_mask) | set_bits;
++	ufs_wr(offset, expected);
++	value = ufs_rd(offset);
++	return value == UINT32_MAX ? ENXIO : value == expected ? 0 : EIO;
++}
++
++static int
++ufs_mtk_ao_set(uint32_t offset, uint32_t bits)
++{
++	uint32_t value = ufs_ao_rd(offset);
++	if (value == UINT32_MAX) {
++		return ENXIO;
++	}
++	ufs_ao_wr(offset, value | bits);
++	value = ufs_ao_rd(offset);
++	return value == UINT32_MAX ? ENXIO : (value & bits) == bits ? 0 : EIO;
++}
++
++static int
++ufs_mtk_check_stopped(void)
++{
++	uint32_t hce = ufs_rd(REG_HCE), hcs = ufs_rd(REG_HCS);
++	if (hce == UINT32_MAX || hcs == UINT32_MAX) {
++		return ENXIO;
++	}
++	/* HCS[3:0] are status/readiness bits, not proof of active DMA ownership. */
++	if (hce != 0 || (hcs & ~0xfu) != 0) {
++		printf("SWEET UFS: refusing startup from non-stopped HCI hce=0x%x hcs=0x%x\n",
++		    hce, hcs);
++		return EBUSY;
++	}
++	const uint32_t idle_regs[] = {
++		REG_UTRLDBR, REG_UTRLRSR, REG_UTMRLDBR, REG_UTMRLRSR, REG_MEM_CFG, REG_IE
++	};
++	for (unsigned i = 0; i < sizeof(idle_regs) / sizeof(idle_regs[0]); i++) {
++		uint32_t value = ufs_rd(idle_regs[i]);
++		if (value == UINT32_MAX) {
++			return ENXIO;
++		}
++		if (value != 0) {
++			printf("SWEET UFS: refusing startup with active queue state offset=0x%x value=0x%x\n",
++			    idle_regs[i], value);
++			return EBUSY;
++		}
++	}
++	/* Keep the handoff guard strict; the following write also pins polled mode. */
++	ufs_wr(REG_IE, 0);
++	if (ufs_rd(REG_IE) != 0) {
++		return EIO;
++	}
++	return 0;
++}
++
++static int
++ufs_mtk_clear_queue_bases(void)
++{
++	const uint32_t bases[] = {REG_UTRLBA, REG_UTRLBAU, REG_UTMRLBA, REG_UTMRLBAU};
++	for (unsigned i = 0; i < sizeof(bases) / sizeof(bases[0]); i++) {
++		uint32_t old = ufs_rd(bases[i]);
++		if (old == UINT32_MAX) {
++			return ENXIO;
++		}
++		if (old != 0) {
++			ufs_wr(bases[i], 0);
++			old = ufs_rd(bases[i]);
++			if (old == UINT32_MAX) {
++				return ENXIO;
++			}
++			if (old != 0) {
++				printf("SWEET UFS: cannot clear stopped queue base offset=0x%x\n", bases[i]);
++				return EIO;
++			}
++		}
++	}
++	return 0;
++}
++
++static int
++ufs_mtk_device_reset(void)
++{
++	int error;
++	bool release_needed = true;
++	su.failure_stage = "device-reset-assert";
++	error = ufs_mtk_sip(MT6991_UFS_SIP_DEVICE_RST, 0, 0);
++	if (error) {
++		goto release;
++	}
++	su.failure_stage = "device-reset-stop-hce";
++	ufs_wr(REG_HCE, 0);
++	error = ufs_wait_reg(REG_HCE, 1, 0, 100000);
++	delay(10);
++	if (error) {
++		goto release;
++	}
++	su.failure_stage = "device-reset-release";
++	error = ufs_mtk_sip(MT6991_UFS_SIP_DEVICE_RST, 1, 0);
++	release_needed = false;
++	if (!error) {
++		delay(15000);
++	}
++	return error;
++
++release:
++	if (release_needed) {
++		const char *failed_stage = su.failure_stage;
++		su.failure_stage = "device-reset-cleanup";
++		int release_error = ufs_mtk_sip(MT6991_UFS_SIP_DEVICE_RST, 1, 0);
++		su.failure_stage = failed_stage;
++		if (!release_error) {
++			delay(15000);
++		} else {
++			printf("SWEET UFS: device-reset cleanup release failed after stage=%s\n", failed_stage);
++		}
++	}
++	return error;
++}
++
++static int
++ufs_mtk_host_reset(void)
++{
++	static const uint32_t assert_bits[] = {4, 2, 1};
++	static const uint32_t release_bits[] = {1, 2, 4};
++	int error = 0;
++	su.failure_stage = "host-reset-assert";
++	for (unsigned i = 0; i < sizeof(assert_bits) / sizeof(assert_bits[0]); i++) {
++		error = ufs_mtk_ao_set(0x148, assert_bits[i]);
++		if (error) {
++			goto release;
++		}
++	}
++	delay(100);
++	su.failure_stage = "host-reset-release";
++	for (unsigned i = 0; i < sizeof(release_bits) / sizeof(release_bits[0]); i++) {
++		error = ufs_mtk_ao_set(0x14c, release_bits[i]);
++		if (error) {
++			goto release;
++		}
++	}
++	return 0;
++
++release:
++	/* A partial reset assertion must not leave one of the host blocks held down. */
++	for (unsigned i = 0; i < sizeof(release_bits) / sizeof(release_bits[0]); i++) {
++		if (ufs_mtk_ao_set(0x14c, release_bits[i]) != 0) {
++			printf("SWEET UFS: host-reset cleanup release bit=0x%x failed\n", release_bits[i]);
++		}
++	}
++	return error;
++}
++
++static void
++ufs_mtk_log_uic_error(const char *operation, uint32_t status)
++{
++	printf("SWEET UFS: UIC %s error IS=0x%x HCS=0x%x layers=0x%x/0x%x/0x%x/0x%x/0x%x\n",
++	    operation, status, ufs_rd(REG_HCS), ufs_rd(REG_UIC_ERROR_PHY),
++	    ufs_rd(REG_UIC_ERROR_DL), ufs_rd(REG_UIC_ERROR_N), ufs_rd(REG_UIC_ERROR_T),
++	    ufs_rd(REG_UIC_ERROR_DME));
++}
++
++static int
++ufs_mtk_ack_uic(uint32_t mask, bool strict_zero)
++{
++	ufs_wr(REG_IS, mask);
++	uint32_t status = ufs_rd(REG_IS);
++	if (status == UINT32_MAX) {
++		return ENXIO;
++	}
++	if ((strict_zero && status != 0) ||
++	    (!strict_zero && (status & (IS_UFS_ERROR_MASK | IS_UCCS)) != 0)) {
++		printf("SWEET UFS: UIC acknowledgement mask=0x%x left IS=0x%x\n", mask, status);
++		return EIO;
++	}
++	return 0;
++}
++
++/* Match HackIOS' narrowly qualified MT6991 PHY line-reset event at LINK_STARTUP. */
++static int
++ufs_mtk_link_reset_event(uint32_t status)
++{
++	uint32_t hce = ufs_rd(REG_HCE), hcs = ufs_rd(REG_HCS);
++	uint32_t errors[] = {
++		ufs_rd(REG_UIC_ERROR_PHY), ufs_rd(REG_UIC_ERROR_DL), ufs_rd(REG_UIC_ERROR_N),
++		ufs_rd(REG_UIC_ERROR_T), ufs_rd(REG_UIC_ERROR_DME)
++	};
++	printf("SWEET UFS: LINK_STARTUP reset IS=0x%x HCE=0x%x HCS=0x%x layers="
++	    "0x%x/0x%x/0x%x/0x%x/0x%x\n", status, hce, hcs,
++	    errors[0], errors[1], errors[2], errors[3], errors[4]);
++	if (hce == UINT32_MAX || hcs == UINT32_MAX) {
++		return ENXIO;
++	}
++	for (unsigned i = 0; i < sizeof(errors) / sizeof(errors[0]); i++) {
++		if (errors[i] == UINT32_MAX) {
++			return ENXIO;
++		}
++	}
++	if (status != (IS_UIC_ERROR | IS_UCCS) || hce != 1 || (hcs & 0x38) != HCS_UCRDY ||
++	    errors[0] != MT6991_UFS_LINK_RESET_PHY_ERROR || errors[1] != 0 ||
++	    errors[2] != 0 || errors[3] != 0 || errors[4] != 0) {
++		return EIO;
++	}
++	return 0;
++}
++
++static int
++ufs_mtk_uic(const char *stage, uint32_t opcode, uint32_t attribute, uint32_t *value)
++{
++	int error;
++	bool link_startup = opcode == 0x16; /* DME_LINK_STARTUP */
++	su.failure_stage = stage;
++	error = ufs_wait_reg(REG_HCS, HCS_UCRDY, HCS_UCRDY, 500000);
++	if (error) {
++		return error;
++	}
++	uint32_t hcs = ufs_rd(REG_HCS);
++	if (hcs == UINT32_MAX) {
++		return ENXIO;
++	}
++	if (hcs & 0x30) {
++		printf("SWEET UFS: UIC %s saw unsupported HCS=0x%x\n", stage, hcs);
++		return EIO;
++	}
++	uint32_t status = ufs_rd(REG_IS);
++	if (status == UINT32_MAX) {
++		return ENXIO;
++	}
++	if (status & IS_UFS_ERROR_MASK) {
++		ufs_mtk_log_uic_error("stale", status);
++		return EIO;
++	}
++	if ((error = ufs_mtk_ack_uic(IS_UCCS, link_startup)) != 0) {
++		return error;
++	}
++	ufs_wr(REG_UICCMDARG1, attribute << 16);
++	ufs_wr(REG_UICCMDARG2, 0);
++	ufs_wr(REG_UICCMDARG3, value ? *value : 0);
++	ufs_wr(REG_UICCMD, opcode);
++	bool link_reset_pending = false;
++	for (uint32_t elapsed = 0; ; elapsed += 10) {
++		status = ufs_rd(REG_IS);
++		if (status == UINT32_MAX) {
++			return ENXIO;
++		}
++		if (link_startup) {
++			if (status & ~(IS_UIC_ERROR | IS_UCCS)) {
++				printf("SWEET UFS: UIC %s unexpected interrupt status=0x%x\n", stage, status);
++				return EIO;
++			}
++			/* Do not read/clear layer registers until UCCS is observed. */
++			link_reset_pending |= (status & IS_UIC_ERROR) != 0;
++		} else if (status & IS_UFS_ERROR_MASK) {
++			ufs_mtk_log_uic_error("completion", status);
++			return EIO;
++		}
++		if (status & IS_UCCS) {
++			break;
++		}
++		if (elapsed >= 500000) {
++			printf("SWEET UFS: UIC %s opcode=0x%x timed out IS=0x%x\n",
++			    stage, opcode, status);
++			return ETIMEDOUT;
++		}
++		delay(10);
++	}
++	if (link_startup && link_reset_pending &&
++	    (error = ufs_mtk_link_reset_event(status)) != 0) {
++		printf("SWEET UFS: UIC %s rejected PHY reset event (%d)\n", stage, error);
++		return error;
++	}
++	uint32_t result = ufs_rd(REG_UICCMDARG2);
++	if (result == UINT32_MAX) {
++		return ENXIO;
++	}
++	if ((result & 0xff) != 0) {
++		printf("SWEET UFS: UIC %s opcode=0x%x attribute=0x%x result=0x%x\n",
++		    stage, opcode, attribute, result);
++		return EIO;
++	}
++	uint32_t returned = ufs_rd(REG_UICCMDARG3);
++	if (returned == UINT32_MAX) {
++		return ENXIO;
++	}
++	uint32_t ack = IS_UCCS | ((link_startup && link_reset_pending) ? IS_UIC_ERROR : 0);
++	if ((error = ufs_mtk_ack_uic(ack, link_startup || (ack & IS_UIC_ERROR))) != 0) {
++		return error;
++	}
++	if (value) {
++		*value = returned;
++	}
++	return 0;
++}
++
++static int
++ufs_mtk_dme_rmw(const char *get_stage, const char *set_stage, uint32_t attribute,
++	uint32_t clear_mask, uint32_t set_bits)
++{
++	uint32_t value = 0;
++	int error = ufs_mtk_uic(get_stage, 1, attribute, &value); /* DME_GET */
++	if (error) {
++		return error;
++	}
++	value = (value & ~clear_mask) | set_bits;
++	return ufs_mtk_uic(set_stage, 2, attribute, &value); /* DME_SET */
++}
++
++static int
++ufs_mtk_stop_host(void)
++{
++	ufs_wr(REG_IE, 0);
++	ufs_wr(REG_UTRLRSR, 0);
++	ufs_wr(REG_UTMRLRSR, 0);
++	ufs_wr(REG_HCE, 0);
++	int error = ufs_wait_reg(REG_HCE, 1, 0, 100000);
++	return error ? error : ufs_mtk_check_stopped();
++}
++
++static int
++ufs_mtk_start_host(void)
++{
++	int error;
++	su.failure_stage = "controller-stopped-check";
++	error = ufs_mtk_check_stopped();
++	if (error) {
++		return error;
++	}
++	su.failure_stage = "controller-clear-old-queues";
++	error = ufs_mtk_clear_queue_bases();
++	if (error) {
++		return error;
++	}
++	uint32_t is = ufs_rd(REG_IS);
++	if (is == UINT32_MAX) {
++		return ENXIO;
++	}
++	if (is != 0) {
++		ufs_wr(REG_IS, is); /* W1C stale, idle status only. */
++	}
++	ufs_wr(REG_AHIT, 0);
++	su.failure_stage = "mt6991-power-restore";
++	if ((error = ufs_mtk_sip(MT6991_UFS_SIP_MTCMOS, 0, 0)) != 0 ||
++	    (error = ufs_mtk_sip(MT6991_UFS_SIP_MTCMOS, 1, 0)) != 0) {
++		goto failed;
++	}
++	su.failure_stage = "controller-stopped-after-power";
++	if ((error = ufs_mtk_check_stopped()) != 0) {
++		goto failed;
++	}
++	su.failure_stage = "reference-clock";
++	uint32_t ref_clock = ufs_rd(REG_MTK_REF_CLOCK);
++	if (ref_clock == UINT32_MAX) {
++		error = ENXIO;
++		goto failed;
++	}
++	if ((ref_clock & 3) != 3) {
++		if ((error = ufs_mtk_sip(MT6991_UFS_SIP_REFCLK, 1, 0)) != 0) {
++			goto failed;
++		}
++		ufs_wr(REG_MTK_REF_CLOCK, 1);
++		if ((error = ufs_wait_reg(REG_MTK_REF_CLOCK, 3, 3, 3000)) != 0) {
++			int cleanup_error = ufs_mtk_sip(MT6991_UFS_SIP_REFCLK, 0, 1);
++			if (cleanup_error) {
++				printf("SWEET UFS: reference-clock cleanup notification failed (%d)\n", cleanup_error);
++			}
++			goto failed;
++		}
++		delay(32);
++		if ((error = ufs_mtk_sip(MT6991_UFS_SIP_REFCLK, 1, 1)) != 0) {
++			goto failed;
++		}
++	}
++	if ((error = ufs_mtk_check_mt6991_resources()) != 0) {
++		goto failed;
++	}
++	if ((error = ufs_mtk_device_reset()) != 0) {
++		goto failed;
++	}
++	if ((error = ufs_mtk_host_reset()) != 0) {
++		goto failed;
++	}
++	su.failure_stage = "mt6991-hci-config";
++	ufs_wr(REG_IE, 0);
++	ufs_wr(REG_AHIT, 0);
++	if ((error = ufs_mtk_rmw(REG_MTK_XO_UFS, 0, 0x80)) != 0 ||
++	    (error = ufs_mtk_rmw(REG_MTK_OPTIONS, (0x7fffu << 8) | (1u << 28),
++	    0x453000u | (1u << 25))) != 0) {
++		goto failed;
++	}
++	su.failure_stage = "hce-enable";
++	ufs_wr(REG_HCE, 1);
++	delay(600);
++	if ((error = ufs_wait_reg(REG_HCE, 1, 1, 50000)) != 0) {
++		goto failed;
++	}
++	su.failure_stage = "hce-post-enable-state";
++	uint32_t post_hce = ufs_rd(REG_HCE), post_hcs = ufs_rd(REG_HCS);
++	if (post_hce == UINT32_MAX || post_hcs == UINT32_MAX) {
++		error = ENXIO;
++		goto failed;
++	}
++	if (post_hce != 1 || (post_hcs & ~0xfu) != 0) {
++		error = EIO;
++		goto failed;
++	}
++	const uint32_t post_enable_idle_regs[] = {
++		REG_UTRLBA, REG_UTRLBAU, REG_UTRLDBR, REG_UTRLRSR,
++		REG_UTMRLBA, REG_UTMRLBAU, REG_UTMRLDBR, REG_UTMRLRSR, REG_MEM_CFG, REG_IE
++	};
++	for (unsigned i = 0; i < sizeof(post_enable_idle_regs) / sizeof(post_enable_idle_regs[0]); i++) {
++		uint32_t value = ufs_rd(post_enable_idle_regs[i]);
++		if (value == UINT32_MAX || value != 0) {
++			error = value == UINT32_MAX ? ENXIO : EBUSY;
++			goto failed;
++		}
++	}
++	su.failure_stage = "uic-local-version";
++	uint32_t local_version = 0;
++	if ((error = ufs_mtk_uic("uic-local-version", 1, 0x15a9, &local_version)) != 0) { /* DME_GET */
++		goto failed;
++	}
++	printf("SWEET UFS: UFS local version=0x%x\n", local_version);
++	su.failure_stage = "uic-prelink-lcc";
++	uint32_t value = 0;
++	if ((error = ufs_mtk_uic("uic-prelink-lcc", 2, 0xd0a8, &value)) != 0) {
++		goto failed;
++	}
++	su.failure_stage = "uic-prelink-hibern8";
++	value = 0;
++	if ((error = ufs_mtk_uic("uic-prelink-hibern8", 2, 0x155e, &value)) != 0) {
++		goto failed;
++	}
++	su.failure_stage = "uic-prelink-deep-stall";
++	if ((error = ufs_mtk_dme_rmw("uic-prelink-deep-stall-get", "uic-prelink-deep-stall-set",
++	    0xd0a6, 1u << 6, 0)) != 0) {
++		goto failed;
++	}
++	su.failure_stage = "uic-link-startup";
++	value = 0;
++	if ((error = ufs_mtk_uic("uic-link-startup", 0x16, 0, &value)) != 0) { /* DME_LINK_STARTUP */
++		goto failed;
++	}
++	su.failure_stage = "uic-link-device-present";
++	if ((error = ufs_wait_reg(REG_HCS, HCS_DP, HCS_DP, 50000)) != 0) {
++		goto failed;
++	}
++	su.failure_stage = "uic-postlink-pa-init";
++	if ((error = ufs_mtk_dme_rmw("uic-postlink-pa-init-get", "uic-postlink-pa-init-set",
++	    0xd09e, 0, 0x100)) != 0 ||
++	    (error = ufs_mtk_dme_rmw("uic-postlink-deep-stall-get", "uic-postlink-deep-stall-set",
++	    0xd0a6, 0, 0xd)) != 0 ||
++	    (error = ufs_mtk_dme_rmw("uic-postlink-config-get", "uic-postlink-config-set",
++	    0xd0a1, 1u << 5, 0)) != 0) {
++		goto failed;
++	}
++	return 0;
++
++failed:
++	{
++		const char *failed_stage = su.failure_stage;
++		int stop_error = ufs_mtk_stop_host();
++		su.failure_stage = failed_stage;
++		printf("SWEET UFS: MT6991 host startup failed stage=%s error=%d stop=%d\n",
++		    failed_stage, error, stop_error);
++	}
++	return error;
++}
++
++static int
++ufs_mtk_install_transfer_list(uint64_t list)
++{
++	int error;
++	uint32_t hce, hcs, utrl_dbr, utmrl_dbr, value;
++	su.failure_stage = "utrl-idle-check";
++	hce = ufs_rd(REG_HCE);
++	hcs = ufs_rd(REG_HCS);
++	utrl_dbr = ufs_rd(REG_UTRLDBR);
++	utmrl_dbr = ufs_rd(REG_UTMRLDBR);
++	if (hce == UINT32_MAX || hcs == UINT32_MAX || utrl_dbr == UINT32_MAX ||
++	    utmrl_dbr == UINT32_MAX) {
++		return ENXIO;
++	}
++	if (hce != 1 || !(hcs & HCS_DP) || utrl_dbr != 0 || utmrl_dbr != 0) {
++		return EBUSY;
++	}
++	su.failure_stage = "utrl-list-stop";
++	ufs_wr(REG_IE, 0);
++	ufs_wr(REG_UTRLRSR, 0);
++	ufs_wr(REG_UTMRLRSR, 0);
++	uint32_t utrl_rsr = ufs_rd(REG_UTRLRSR), utmrl_rsr = ufs_rd(REG_UTMRLRSR);
++	uint32_t ie = ufs_rd(REG_IE);
++	if (utrl_rsr == UINT32_MAX || utmrl_rsr == UINT32_MAX || ie == UINT32_MAX) {
++		return ENXIO;
++	}
++	if (utrl_rsr != 0 || utmrl_rsr != 0 || ie != 0) {
++		return EIO;
++	}
++	ufs_wr(REG_UTMRLBA, 0);
++	ufs_wr(REG_UTMRLBAU, 0);
++	ufs_wr(REG_UTRLBA, (uint32_t)list);
++	ufs_wr(REG_UTRLBAU, (uint32_t)(list >> 32));
++	uint32_t utrlba = ufs_rd(REG_UTRLBA), utrlbau = ufs_rd(REG_UTRLBAU);
++	uint32_t utmrlba = ufs_rd(REG_UTMRLBA), utmrlbau = ufs_rd(REG_UTMRLBAU);
++	if (utrlba == UINT32_MAX || utrlbau == UINT32_MAX || utmrlba == UINT32_MAX ||
++	    utmrlbau == UINT32_MAX) {
++		return ENXIO;
++	}
++	if (utrlba != (uint32_t)list || utrlbau != (uint32_t)(list >> 32) ||
++	    utmrlba != 0 || utmrlbau != 0) {
++		return EIO;
++	}
++	__builtin_arm_dsb(0xf);
++	su.failure_stage = "utrl-list-start";
++	ufs_wr(REG_UTRLRSR, 1);
++	error = ufs_wait_reg(REG_HCS, HCS_UTRLRDY, HCS_UTRLRDY, 50000);
++	if (error) {
++		return error;
++	}
++	value = ufs_rd(REG_UTRLRSR);
++	hce = ufs_rd(REG_HCE);
++	hcs = ufs_rd(REG_HCS);
++	utrlba = ufs_rd(REG_UTRLBA);
++	utrlbau = ufs_rd(REG_UTRLBAU);
++	if (value == UINT32_MAX || hce == UINT32_MAX || hcs == UINT32_MAX ||
++	    utrlba == UINT32_MAX || utrlbau == UINT32_MAX) {
++		return ENXIO;
++	}
++	if (value != 1 || hce != 1 || !(hcs & HCS_DP) ||
++	    utrlba != (uint32_t)list || utrlbau != (uint32_t)(list >> 32)) {
++		printf("SWEET UFS: controller did not accept XNU transfer list rsr=0x%x\n", value);
++		return EIO;
++	}
++	return 0;
++}
++
+ /* Read the MT6991 AO clocks before touching HCI registers, like HackIOS. */
+ static int
+-ufs_check_mt6991_resources(void)
++ufs_mtk_check_mt6991_resources(void)
+ {
+ 	su.failure_stage = "ao-gate-read";
+ 	uint32_t gate0 = ufs_ao_rd(DALI_UFS_AO_GATE0);
+@@ -588,7 +1206,7 @@
+ 	}
+ 	printf("SWEET UFS: MT6991 AO gate0=0x%x gate1=0x%x\n", gate0, gate1);
+ 	su.failure_stage = "ao-gates-enabled";
+-	if ((gate0 & 1) || (gate1 & 0x18)) {
++	if ((gate0 & 0x3) || (gate1 & 0x11f)) {
+ 		printf("SWEET UFS: MT6991 HCI/UniPro clock gates are off\n");
+ 		return ENXIO;
+ 	}
+@@ -601,7 +1219,9 @@
+ 	printf("SWEET UFS: MT6991 ip=0x%x refclk=0x%x xo=0x%x options=0x%x outstanding=0x%x\n",
+ 	    ip_version, ref_clock, xo_ufs, options, outstanding);
+ 	su.failure_stage = "mtk-refclk-check";
+-	if (ip_version != 0x10470000u || ref_clock == UINT32_MAX || (ref_clock & 3) != 3) {
++		if (ip_version == UINT32_MAX || ref_clock == UINT32_MAX || xo_ufs == UINT32_MAX ||
++		    options == UINT32_MAX || outstanding == UINT32_MAX || ip_version != 0x10470000u ||
++		    (ref_clock & 3) != 3) {
+ 		printf("SWEET UFS: MT6991 resources are not in the expected active state\n");
+ 		return ENXIO;
+ 	}
+@@ -613,7 +1233,7 @@
+ {
+ 	if (su.dali) {
+ 		su.failure_stage = "mt6991-resource-check";
+-		int error = ufs_check_mt6991_resources();
++		int error = ufs_mtk_check_mt6991_resources();
+ 		if (error) {
+ 			return error;
+ 		}
+@@ -626,6 +1246,55 @@
+ 		printf("SWEET UFS: MT6991 HCI identity mismatch: ver=0x%x cap=0x%x expected=0x%x/0x%x\n",
+ 		    version, cap, MT6991_UFS_VERSION, MT6991_UFS_CAP);
+ 		return ENXIO;
++	}
++	/* Dali LK can hand off a fully stopped HCI; initialize only that exact idle state. */
++	if (su.dali) {
++		if (hce == UINT32_MAX || hcs == UINT32_MAX) {
++			return ENXIO;
++		}
++		if (((su.dma_pa + DMA_SIZE - 1) >> 32) && !(cap & CAP_64AS)) {
++			printf("SWEET UFS: DMA memory at 0x%llx but the host has no 64-bit addressing\n",
++			    su.dma_pa);
++			return ENXIO;
++		}
++		su.failure_stage = "hci-stopped-state";
++		if (hce != 0) {
++			printf("SWEET UFS: refusing MT6991 startup from active/invalid HCE=0x%x HCS=0x%x\n",
++			    hce, hcs);
++			return EBUSY;
++		}
++		int error = ufs_mtk_start_host();
++		if (error) {
++			return error;
++		}
++		su.failure_stage = "utrl-idle-check";
++		uint32_t utrl_dbr = ufs_rd(REG_UTRLDBR), utmrl_dbr = ufs_rd(REG_UTMRLDBR);
++		if (utrl_dbr == UINT32_MAX || utmrl_dbr == UINT32_MAX) {
++			error = ENXIO;
++		} else if (utrl_dbr != 0 || utmrl_dbr != 0) {
++			error = EBUSY;
++		}
++		if (error) {
++			const char *failed_stage = su.failure_stage;
++			int stop_error = ufs_mtk_stop_host();
++			su.failure_stage = failed_stage;
++			printf("SWEET UFS: request list was not idle before takeover dbr=0x%x/0x%x stop=%d\n",
++			    utrl_dbr, utmrl_dbr, stop_error);
++			return error;
++		}
++		uint64_t list = su.dma_pa + DMA_UTRL;
++		su.failure_stage = "utrl-list-install";
++		error = ufs_mtk_install_transfer_list(list);
++		if (error) {
++			const char *failed_stage = su.failure_stage;
++			int stop_error = ufs_mtk_stop_host();
++			su.failure_stage = failed_stage;
++			printf("SWEET UFS: transfer-list install failed stage=%s error=%d stop=%d\n",
++			    failed_stage, error, stop_error);
++			return error;
++		}
++		ufs_log_host_state("post-takeover");
++		return 0;
+ 	}
+ 	su.failure_stage = "hci-ready";
+ 	if (!(hce & 1) || !(hcs & HCS_DP) || !(hcs & HCS_UTRLRDY)) {
+@@ -937,6 +1606,10 @@
+ 
+ 	su.failure_stage = "hci-map";
+ 	su.regs = ml_io_map(reg[0], reg[1]);
++	if (su.regs == 0) {
++		printf("SWEET UFS: cannot map HCI registers\n");
++		return ENOMEM;
++	}
+ 	if (su.dali) {
+ 		su.failure_stage = "ao-reg-property";
+ 		if (SecureDTGetProperty(node, "ao-reg", (void const **)&ao_reg, &ao_size) != kSuccess ||

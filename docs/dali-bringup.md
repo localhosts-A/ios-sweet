@@ -299,11 +299,14 @@ it maps only the 2 MiB console area, replays the most recent 256 KiB from the
 early SWEET console ring, and mirrors later console output. A root-selection
 panic also includes the last UFS initialization stage. The workflow checks the
 linked marker and generated Dali/Sweet ADT distinction. These checks validate
-the source and build output; retention after this XNU panic path remains
-unqualified. Existing records are mixed: one recovery chain that reached
-Fastboot yielded empty pstore, while a separate HackIOS AEE-reset chain retained
-console-ramoops through delayed manual Fastboot. The loss stage in the empty
-case is undetermined.
+the source and build output. The approved patch0145 trial then panicked at
+`stage=hci-ready`; its XNU `console-ramoops-0` survived the user's Fastboot
+recovery and was read back from Android (6,114 bytes). That record shows HCE/HCS
+and UTRL/UTMRL idle, so no UIC or SCSI command had begun. This confirms retention
+for that exact panic/recovery chain, not all reset routes. Earlier records remain
+mixed: one recovery chain that reached Fastboot yielded empty pstore, while a
+separate HackIOS AEE-reset chain retained console-ramoops through delayed manual
+Fastboot; the loss stage in the empty case is undetermined.
 
 Six UARTs are registered at 0x16000000 through 0x16050000; ttyS3 is active.
 Board pin routing and external access remain unknown. These UARTs are not
