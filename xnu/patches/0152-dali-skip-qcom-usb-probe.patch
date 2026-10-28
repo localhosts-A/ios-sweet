@@ -1,0 +1,14 @@
+diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -2131,5 +2131,9 @@
+ 	sweet_keys_init();
+ 	sweet_touch_init();
+-	sweet_usb_probe();
++	if (su.dali) {
++		printf("SWEET USB: skipped Qualcomm DWC3 probe on Dali MT6991\n");
++	} else {
++		sweet_usb_probe();
++	}
+ 	return 0;
+ }

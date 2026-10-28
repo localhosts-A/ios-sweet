@@ -431,6 +431,8 @@ jobs:
           grep -Fq 'error = ufs_query_fdeviceinit_flag(0x05, &flag);' xnu/bsd/dev/sweet_ufs.c
           grep -Fq 'if (flag == 0)' xnu/bsd/dev/sweet_ufs.c
           grep -Fq 'int error = ufs_dali_initialize_device();' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'SWEET USB: skipped Qualcomm DWC3 probe on Dali MT6991' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'sweet_usb_probe();' xnu/bsd/dev/sweet_ufs.c
           python3 - <<'PY'
           import re
           from pathlib import Path
@@ -456,6 +458,15 @@ jobs:
           assert "UFS_DEVICE_INIT_MAX_POLLS" in init and "mach_absolute_time() >= deadline" in init
           prepare = function_body("ufs_dali_prepare_lun")
           assert prepare.index("ufs_dali_initialize_device()") < prepare.index("ufs_query_current_power_mode(&power_mode)")
+          ufs_init = function_body("sweet_ufs_init")
+          assert re.search(
+              r'if \(SecureDTGetProperty\(node, "compatible", \(void const \*\*\)&compatible,\s*&compatible_size\) == kSuccess &&\s*compatible != NULL &&\s*compatible_size >= sizeof\("mediatek,mt6991-ufshc"\) &&\s*memcmp\(compatible, "mediatek,mt6991-ufshc", sizeof\("mediatek,mt6991-ufshc"\)\) == 0\) \{\s*su\.dali = true;\s*\}',
+              ufs_init,
+          ), "Dali flag must be sourced from the MT6991 UFS compatible"
+          assert re.search(
+              r'if \(su\.dali\) \{\s*printf\("SWEET USB: skipped Qualcomm DWC3 probe on Dali MT6991\\n"\);\s*\} else \{\s*sweet_usb_probe\(\);\s*\}',
+              source,
+          ), "Dali must skip the Qualcomm-only USB probe before root selection returns"
           gpt_match = re.search(r"static int\s+ufs_find_partitions\([^;]*?\)\s*\{", source, re.S)
           assert gpt_match, "missing ufs_find_partitions"
           gpt_start = gpt_match.end() - 1
@@ -492,6 +503,7 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: fDeviceInit SET_FLAG issued after LINK_STARTUP'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: fDeviceInit cleared after %u READ_FLAG polls'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: fDeviceInit did not clear before timeout after %u READ_FLAG polls'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET USB: skipped Qualcomm DWC3 probe on Dali MT6991'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: QUERY fDeviceInit malformed response opcode=0x%x ocs=0x%x type=0x%x lun=0x%x tag=0x%x response=0x%x function=0x%x idn=0x%x length=0x%x'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: GPT header read needs LUN start; retrying once after SCSI START UNIT'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: GPT header READ(10) succeeded after START UNIT'

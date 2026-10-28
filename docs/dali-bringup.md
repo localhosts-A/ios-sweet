@@ -111,9 +111,32 @@ The 16 GiB HFSX root image is installed in `unixnu_data` and its readback hash
 matches the source. The prior exFAT contents in that 16 GiB were overwritten;
 the GPT and `unixnu_logs` were not changed. A read-only scan found the existing
 `DALIUFSLOG1` structure in the first 12 MiB of `unixnu_logs`, while the proposed
-16–20 MiB SWEET area was confirmed zero after the patch0146 trial. The current
-hardware evidence reaches reset setup only; UFS link, media access, root mount,
-and persistent logging remain unverified.
+16–20 MiB SWEET area was confirmed zero after the patch0146 trial. That early
+status predates the later UFS trials; see the current 0151 result below.
+
+## 0151 UFS discovery and SP1 exception (2026-10-29)
+
+The exact-hash-approved 0151 pair passed a fresh Dali / 25060RK16C, slot-b
+preflight. Its retained ramoops shows `fDeviceInit` cleared after one READ_FLAG
+poll, root LUN 2 ready, READ CAPACITY successful at 64,577,536 4 KiB blocks,
+and GPT discovery of both `unixnu_logs` and `unixnu_data`. It does not show a
+root filesystem mount. The SWEET log range remained zero after the trial.
+
+The screen photo `IMG_20261029_020026.jpg` shows an SP1 synchronous exception.
+Symbolication against the exact 0151 kernel maps the PC to
+`sweet_usb_probe+0x6c`, the LR to `sweet_usb_probe+0x6f0`, and the caller to
+`keys_thread+0x1c0`. The faulting access targets Qualcomm GCC offset `0xf004`.
+This identifies the Dali-incompatible Qualcomm USB probe as the panic path;
+the matching kernel lacks DWARF line information. The later `handshake
+structure not initialized` text is from the panic debugger's shared-memory
+output path, not a UFS handshake failure.
+
+Patch 0152 makes Dali skip `sweet_usb_probe()` after UFS setup while retaining
+the call for other SWEET targets. The CI gate checks both the MT6991 compatible
+classification and the conditional call site. Patch 0152 still needs full CI
+and offline candidate verification. It has not been flashed. The stock boot
+pair from the 0151 test was restored and physically hash-verified; a fresh
+host poll now sees neither ADB nor Fastboot enumerated.
 
 `build-dali-initboot.sh` makes a newc CPIO containing `sweet.payload`, wraps
 it in a 64 KiB independent-block LZ4 frame, and adds an AVB v1 hash footer
