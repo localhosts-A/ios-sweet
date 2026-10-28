@@ -1,12 +1,22 @@
-## CURRENT HANDOFF — Dali internal UFS root/log adaptation prepared (2026-10-28)
+## CURRENT HANDOFF — HFSX root written and readback verified (2026-10-28)
 
-Read-only ADB inspection confirms `/dev/block/sdc` is UFS host0 target0 LUN2 at `0x16810000`, with 4096-byte logical/physical blocks. `userdata` is sdc95 (start 27,633,920 / size 421,844,672 Linux 512-byte sectors); the new `unixnu_data` is sdc97 (start 449,478,592 / size 67,043,328 sectors = 31.96875 GiB); `unixnu_logs` is sdc98 (start 516,521,920 / size 65,536 sectors = 32 MiB). The entries are contiguous after userdata. `unixnu_data` currently probes as exFAT label `UNIXNU`; neither new partition is mounted. The unprivileged Android shell cannot read the logs partition contents. No device partition was written.
+The existing `research/dali-usb-root/ios16-usb-root.img` was validated as a 16 GiB, 4 KiB-block, case-sensitive non-journaled HFSX volume named `iOSRoot`; `fsck.hfsplus -f -n` passed. Its SHA-256 is `ea6fe9549adc6a2f4f466079e5fb4e2b7432e80977923dbc98a3c6944c5be3cd`.
+
+After the user confirmed the write, streamed the image through ADB to `/dev/block/by-name/unixnu_data` (`/dev/block/sdc97`) on Dali, slot `_b`. The target GPT partition is 34,326,183,936 bytes (31.96875 GiB); the image is 17,179,869,184 bytes (16 GiB). `dd` with `conv=fsync` returned 0. Device-side SHA-256 of the first 16 GiB read back exactly matches the source. `blkid` now reports `LABEL="iOSRoot" UUID="DFFB057492EE024A" TYPE="hfsplus"`. The remaining partition tail is outside this 16 GiB HFSX volume and was not overwritten by this write.
+
+The prior exFAT contents in the first 16 GiB of `unixnu_data` were overwritten. GPT, `userdata`, boot partitions, and `unixnu_logs` were not write targets. `unixnu_logs` remains 32 MiB and unmounted; its raw contents are still unknown. Android remains running (`sys.boot_completed=1`). No boot trial was started. Patch0143 is not yet built or hardware-verified, so internal UFS reads/root mounting and persistent log writes remain unverified. Next build and package the UFS-enabled pair, then get explicit approval before a hardware boot trial that can write logs.
+
+---
+
+## PREVIOUS HANDOFF — Dali internal UFS root/log adaptation prepared (2026-10-28)
+
+Read-only ADB inspection confirms `/dev/block/sdc` is UFS host0 target0 LUN2 at `0x16810000`, with 4096-byte logical/physical blocks. `userdata` is sdc95 (start 27,633,920 / size 421,844,672 Linux 512-byte sectors); the new `unixnu_data` is sdc97 (start 449,478,592 / size 67,043,328 sectors = 31.96875 GiB); `unixnu_logs` is sdc98 (start 516,521,920 / size 65,536 sectors = 32 MiB). The entries are contiguous after userdata. At preflight time, `unixnu_data` probed as exFAT label `UNIXNU`; neither new partition was mounted. The unprivileged Android shell could not read the logs partition contents.
 
 Added source patch `xnu/patches/0143-dali-mt6991-ufs-root-and-logs.patch`, Dali ADT root/log/AO-register properties in `tools/mkadt.py`, the `unixnu_logs` pull path in `tools/sweet-log-pull.sh`, and updated Dali UFS instructions. The XNU path checks MT6991 AO gate/ref-clock state, MTK IP version, UFSHCI version `0x400` / CAP `0x55c7051f`, records host and READ CAPACITY state, rejects outstanding transfer/task requests, and preserves the already-running Android LK host/link instead of replaying HackIOS's UEFI reset/PHY startup. It selects `unixnu_data`, leaves its BlockIo root read-only even if `ufsrw=1` is passed, and targets console writes only at a unique, non-overlapping `unixnu_logs` GPT range. It writes only if the first 4 MiB + header are blank or carry a valid SWEETLOG header; otherwise it refuses. The pull helper reads `unixnu_logs` by default, or legacy `userdata` tail with `-p userdata`.
 
-Committed locally as “Adapt Dali UFS root and persistent logs.” No build, test, flash, partition write, or XNU UFS hardware read has been performed. The source path remains unverified on the handset; the root partition still contains exFAT and logs partition contents are unknown.
+Committed locally as “Adapt Dali UFS root and persistent logs.” At that point no build, test, flash, partition write, or XNU UFS hardware read had been performed. The source path remains unverified on the handset; see the current handoff above for the later HFSX root write and readback.
 
-This is source-level work only: no build, flash, partition write, or Dali XNU UFS trial has occurred. `unixnu_data` must receive an HFSX root image before XNU can mount it; its current exFAT contents will be overwritten by that operation. The log partition's current raw contents remain unknown. Next: review the tracked patch and docs, then build only as needed. Get explicit confirmation before writing the HFSX image or starting a boot trial that can write logs.
+At the time of this handoff, the source set had not been built or hardware-tested. `unixnu_data` then needed an HFSX image, and the user had not yet confirmed its write. See the current handoff above: the image has since been written and readback-verified; `unixnu_logs` raw contents remain unknown. A boot trial that may write logs still requires explicit approval.
 
 ---
 
