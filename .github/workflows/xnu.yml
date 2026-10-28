@@ -402,9 +402,14 @@ jobs:
           grep -Fq 'ufs_mtk_ao_set(assert_stages[i], 0x148, assert_bits[i])' xnu/bsd/dev/sweet_ufs.c
           grep -Fq 'ufs_mtk_ao_set(release_stages[i], 0x14c, release_bits[i])' xnu/bsd/dev/sweet_ufs.c
           grep -Fq 'ufs_ao_wr(offset, write_value);' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'sense_len <= segment_len - 2' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'SWEET UFS: READ(10) failed lba=0x%llx count=%u bytes=%u error=%d' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'SWEET UFS: sense segment=%u length=%u residual=0x%x key=0x%x asc=0x%x ascq=0x%x raw_bytes=%u raw=%s' xnu/bsd/dev/sweet_ufs.c
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'uic-link-startup'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'MT6991 host startup failed stage='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: AO reset stage=%s offset=0x%x mask=0x%x old=0x%x write=0x%x readback=0x%x'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: READ(10) failed lba=0x%llx count=%u bytes=%u error=%d'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: sense segment=%u length=%u residual=0x%x key=0x%x asc=0x%x ascq=0x%x raw_bytes=%u raw=%s'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET DALI RAMOOPS: root diagnostics begin'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS root %s unavailable: %d stage=%s'
           python3 ../tools/verify-dali-ramoops-adt.py
