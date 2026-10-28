@@ -1,0 +1,88 @@
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -125,6 +125,7 @@
+ #define CMD_SLEEP_NS    (200ull * NSEC_PER_USEC)
+ #define UFS_QUERY_TIMEOUT_NS (200ull * NSEC_PER_USEC * 1000ull)
+ #define UFS_SSU_TIMEOUT_NS (500ull * NSEC_PER_USEC * 1000ull)
++#define UFS_LUN_START_TIMEOUT_NS (500ull * NSEC_PER_USEC * 1000ull)
+ #define UFS_READY_TUR_TIMEOUT_NS (200ull * NSEC_PER_USEC * 1000ull)
+ #define UFS_READY_POLL_INTERVAL_US 10000u
+ #define UFS_READY_MAX_POLLS 20u
+@@ -516,6 +517,54 @@
+ 	    (su.last_sense_ascq == 0x00 || su.last_sense_ascq == 0x02)));
+ }
+ 
++static bool
++ufs_sense_requires_lun_start(void)
++{
++	return su.last_sense_valid && su.last_sense_key == 0x02 &&
++	    su.last_sense_asc == 0x04 && su.last_sense_ascq == 0x02;
++}
++
++/* Linux-style SCSI EH: START UNIT on this LU, then wait for TUR readiness. */
++static int
++ufs_dali_start_lun_and_wait(void)
++{
++	static const uint8_t start_unit[6] = { 0x1b, 0, 0, 0, 0x01, 0 };
++	static const uint8_t tur[6] = { 0x00 };
++	int error;
++
++	su.failure_stage = "lun-start-unit";
++	printf("SWEET UFS: sending START UNIT to root LUN %u after NOT READY 04/02\n", su.lun);
++	error = ufs_scsi_on_lun_timeout(su.lun, start_unit, sizeof(start_unit), 0, false,
++	    UFS_LUN_START_TIMEOUT_NS);
++	if (error) {
++		printf("SWEET UFS: START UNIT failed for root LUN %u error=%d sense=%u/%u/%u\n",
++		    su.lun, error, (unsigned)su.last_sense_key,
++		    (unsigned)su.last_sense_asc, (unsigned)su.last_sense_ascq);
++		return error;
++	}
++	for (unsigned attempt = 0; attempt < UFS_READY_MAX_POLLS; attempt++) {
++		error = ufs_scsi_on_lun_timeout(su.lun, tur, sizeof(tur), 0, false,
++		    UFS_READY_TUR_TIMEOUT_NS);
++		if (!error) {
++			printf("SWEET UFS: root LUN %u ready after START UNIT and %u TUR polls\n",
++			    su.lun, attempt + 1);
++			return 0;
++		}
++		if (error == ETIMEDOUT || !ufs_sense_is_lun_ready_transition()) {
++			printf("SWEET UFS: root LUN %u did not become ready after START UNIT error=%d sense=%u/%u/%u\n",
++			    su.lun, error, (unsigned)su.last_sense_key,
++			    (unsigned)su.last_sense_asc, (unsigned)su.last_sense_ascq);
++			return error;
++		}
++		if (attempt + 1 < UFS_READY_MAX_POLLS) {
++			delay(UFS_READY_POLL_INTERVAL_US);
++		}
++	}
++	printf("SWEET UFS: root LUN %u remained not ready after START UNIT and %u TUR polls\n",
++	    su.lun, UFS_READY_MAX_POLLS);
++	return ETIMEDOUT;
++}
++
+ /* Read the power state, wake the UFS device WLUN if needed, then probe root LUN. */
+ static int
+ ufs_dali_prepare_lun(void)
+@@ -704,7 +753,21 @@
+ 	}
+ 	int error = ufs_read_blocks(1, 1);
+ 	if (error) {
+-		return error;
++		if (!su.dali || !ufs_sense_requires_lun_start()) {
++			return error;
++		}
++		printf("SWEET UFS: GPT header read needs LUN start; retrying once after SCSI START UNIT\n");
++		int start_error = ufs_dali_start_lun_and_wait();
++		if (start_error) {
++			return start_error;
++		}
++		su.failure_stage = "gpt-discovery";
++		error = ufs_read_blocks(1, 1);
++		if (error) {
++			printf("SWEET UFS: GPT header READ(10) retry after START UNIT failed (%d)\n", error);
++			return error;
++		}
++		printf("SWEET UFS: GPT header READ(10) succeeded after START UNIT\n");
+ 	}
+ 	if (memcmp(b, "EFI PART", 8) != 0) {
+ 		printf("SWEET UFS: LUN %u has no GPT\n", su.lun);

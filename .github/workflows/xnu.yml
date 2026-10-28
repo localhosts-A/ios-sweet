@@ -414,6 +414,14 @@ jobs:
           grep -Fq 'if (ocs == 0 && ucd->resp[6] == 0x01 && ucd->resp[7] == 0x02 &&' xnu/bsd/dev/sweet_ufs.c
           grep -Fq 'su.last_sense_ascq == 0x01 || su.last_sense_ascq == 0x02' xnu/bsd/dev/sweet_ufs.c
           grep -Fq 'su.last_sense_ascq == 0x00 || su.last_sense_ascq == 0x02' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'static const uint8_t start_unit[6] = { 0x1b, 0, 0, 0, 0x01, 0 };' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'return su.last_sense_valid && su.last_sense_key == 0x02 &&' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'su.last_sense_asc == 0x04 && su.last_sense_ascq == 0x02;' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'if (!su.dali || !ufs_sense_requires_lun_start())' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'int start_error = ufs_dali_start_lun_and_wait();' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'return start_error;' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'int error = ufs_read_blocks(1, 1);' xnu/bsd/dev/sweet_ufs.c
+          grep -Eq '^[[:space:]]+error = ufs_read_blocks\(1, 1\);$' xnu/bsd/dev/sweet_ufs.c
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'uic-link-startup'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'MT6991 host startup failed stage='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: AO reset stage=%s offset=0x%x mask=0x%x old=0x%x write=0x%x readback=0x%x'
@@ -424,6 +432,14 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: root LUN %u ready after %u TEST UNIT READY polls'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: root LUN %u remained not ready after %u polls'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: QUERY READ ATTRIBUTE malformed response ocs=0x%x type=0x%x lun=0x%x tag=0x%x response=0x%x opcode=0x%x idn=0x%x length=0x%x'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: sending START UNIT to root LUN %u after NOT READY 04/02'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: START UNIT failed for root LUN %u error=%d sense=%u/%u/%u'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: root LUN %u ready after START UNIT and %u TUR polls'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: root LUN %u did not become ready after START UNIT error=%d sense=%u/%u/%u'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: root LUN %u remained not ready after START UNIT and %u TUR polls'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: GPT header read needs LUN start; retrying once after SCSI START UNIT'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: GPT header READ(10) succeeded after START UNIT'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: GPT header READ(10) retry after START UNIT failed (%d)'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET DALI RAMOOPS: root diagnostics begin'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS root %s unavailable: %d stage=%s'
           python3 ../tools/verify-dali-ramoops-adt.py
