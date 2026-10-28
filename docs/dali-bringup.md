@@ -297,11 +297,13 @@ The Dali-only XNU patch 0145 describes the base, total range, console offset,
 and console size as four 64-bit `/chosen` properties. Before UFS root discovery,
 it maps only the 2 MiB console area, replays the most recent 256 KiB from the
 early SWEET console ring, and mirrors later console output. A root-selection
-panic also includes the last UFS initialization stage. The workflow is
-configured to check the linked marker and generated Dali/Sweet ADT distinction.
-These checks validate the source and build output; ramoops retention and
-Android pstore readback still need a hardware qualification path that avoids
-the known log-clearing fastboot recovery.
+panic also includes the last UFS initialization stage. The workflow checks the
+linked marker and generated Dali/Sweet ADT distinction. These checks validate
+the source and build output; retention after this XNU panic path remains
+unqualified. Existing records are mixed: one recovery chain that reached
+Fastboot yielded empty pstore, while a separate HackIOS AEE-reset chain retained
+console-ramoops through delayed manual Fastboot. The loss stage in the empty
+case is undetermined.
 
 Six UARTs are registered at 0x16000000 through 0x16050000; ttyS3 is active.
 Board pin routing and external access remain unknown. These UARTs are not
@@ -310,9 +312,12 @@ established as accessible through the attached USB cable.
 ### Reserved log retention and no-reset handoff
 
 A benign /dev/pmsg0 marker was recovered after a stock Android warm reboot.
-The same test through fastboot returned an empty pstore. Therefore a
-firmware-resetting ramlog probe is insufficient for the present restore path.
-Stock CONFIG_KEXEC/CONFIG_KEXEC_FILE are disabled and /dev/mem is absent.
+One Android -> Fastboot -> Android recovery chain returned an empty pstore, but
+that observation does not identify where the record was lost. A separate
+HackIOS AEE-reset chain retained `console-ramoops` through delayed manual
+Fastboot. Retention depends on the reset/recovery chain and has not been
+qualified for an XNU panic. Stock CONFIG_KEXEC/CONFIG_KEXEC_FILE are disabled
+and /dev/mem is absent.
 
 `bash shim/build-dali-chain-probe.sh` builds a diagnostic from the full stock
 backups. It embeds the exact stock raw kernel and generic ramdisk, preserves
@@ -323,11 +328,12 @@ LK's bootconfig trailer intact, updates chosen initrd-end, copies original
 Linux to 0x80000000 and jumps without invoking firmware. Linux should then
 expose the shim log as console-ramoops-0. Restore original boot/init_boot from
 root ADB immediately after collecting logs. If the chain fails, manual
-fastboot restoration remains the recovery path, but loses the RAM log.
+Fastboot restoration remains the recovery path; ramoops may or may not survive
+that route, so collect pstore as soon as Android returns.
 
 The opt-in shim logger checks the exact reserved-memory region in the live FDT
-before initializing the stock-format console header (including after fastboot
-cleared it). No storage access exists in the shim. It limits output to 16KiB
+before initializing the stock-format console header, including when the header
+is blank or invalid. No storage access exists in the shim. It limits output to 16KiB
 and commits header counters after data with a DSB. In this diagnostic,
 framebuffer writes are skipped so the unconfirmed panel path cannot hide or
 interfere with the RAM log. The shim's XNU destination writes and entry stay
