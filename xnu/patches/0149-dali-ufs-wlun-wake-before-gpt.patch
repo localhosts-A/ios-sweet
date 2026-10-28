@@ -1,0 +1,260 @@
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -123,6 +123,11 @@
+ #define CMD_TIMEOUT_NS  (5ull * NSEC_PER_SEC)
+ #define CMD_SPIN_NS     (50ull * NSEC_PER_USEC)
+ #define CMD_SLEEP_NS    (200ull * NSEC_PER_USEC)
++#define UFS_QUERY_TIMEOUT_NS (200ull * NSEC_PER_USEC * 1000ull)
++#define UFS_SSU_TIMEOUT_NS (500ull * NSEC_PER_USEC * 1000ull)
++#define UFS_READY_TUR_TIMEOUT_NS (200ull * NSEC_PER_USEC * 1000ull)
++#define UFS_READY_POLL_INTERVAL_US 10000u
++#define UFS_READY_MAX_POLLS 20u
+ 
+ struct utrd {
+ 	uint32_t dw0, dw1, dw2, dw3;
+@@ -163,6 +168,9 @@
+ 	bool wait;                              /* boot-arg ufswait=1 */
+ 	bool dali;                              /* MT6991 HCI profile from ADT compatible */
+ 	bool capacity_valid;
++	uint8_t last_sense_key, last_sense_asc, last_sense_ascq;
++	bool last_sense_valid;
++	bool command_poisoned;                  /* Dali timeout: never reuse an owned slot/buffer */
+ 	bool log_partition_configured;
+ 	bool log_partition_ready;
+ 	const char *failure_stage;
+@@ -250,19 +258,27 @@
+  * (to the device when write is set). Returns 0 or an errno.
+  */
+ static int
+-ufs_scsi(const uint8_t *cdb, unsigned cdb_len, uint32_t len, bool write)
++ufs_scsi_on_lun_timeout(uint8_t lun, const uint8_t *cdb, unsigned cdb_len,
++	uint32_t len, bool write, uint64_t timeout_ns)
+ {
+ 	struct utrd *utrd = (struct utrd *)(su.dma + DMA_UTRL);
+ 	struct ucd *ucd = (struct ucd *)(su.dma + DMA_UCD);
+ 	uint64_t ucd_pa = su.dma_pa + DMA_UCD, bounce_pa = su.dma_pa + DMA_BOUNCE;
+ 
+ 	assert(len <= BOUNCE_SIZE);
++	if (su.dali && su.command_poisoned) {
++		return ETIMEDOUT;
++	}
++	su.last_sense_key = UINT8_MAX;
++	su.last_sense_asc = UINT8_MAX;
++	su.last_sense_ascq = UINT8_MAX;
++	su.last_sense_valid = false;
+ 	bzero(utrd, sizeof(*utrd));
+ 	bzero(ucd, sizeof(*ucd));
+ 
+ 	ucd->cmd[0] = 0x01;                     /* COMMAND UPIU */
+ 	ucd->cmd[1] = len ? (write ? 0x20 : 0x40) : 0x00;      /* W: data out, R: data in */
+-	ucd->cmd[2] = su.lun;
++	ucd->cmd[2] = lun;
+ 	ucd->cmd[3] = ++su.tag;
+ 	ucd->cmd[12] = (uint8_t)(len >> 24);
+ 	ucd->cmd[13] = (uint8_t)(len >> 16);
+@@ -310,7 +326,7 @@
+ 
+ 	ufs_wr(REG_UTRLDBR, 1);
+ 	uint64_t deadline;
+-	nanoseconds_to_absolutetime(CMD_TIMEOUT_NS, &deadline);
++	nanoseconds_to_absolutetime(timeout_ns, &deadline);
+ 	deadline += mach_absolute_time();
+ 	bool sleepable = su.wait && su.ready && ml_get_interrupts_enabled() &&
+ 	    !ml_at_interrupt_context() && get_preemption_level() == 0;
+@@ -324,6 +340,9 @@
+ 		uint64_t now = mach_absolute_time();
+ 		if (now > deadline) {
+ 			ufs_wr(REG_UTRLCLR, ~1u);
++			if (su.dali) {
++				su.command_poisoned = true;
++			}
+ 			printf("SWEET UFS: command 0x%02x timed out\n", cdb[0]);
+ 			return ETIMEDOUT;
+ 		}
+@@ -379,6 +398,13 @@
+ 					asc = sense[2];
+ 					ascq = sense[3];
+ 				}
++				if (ocs == 0 && ucd->resp[6] == 0x01 && ucd->resp[7] == 0x02 &&
++				    sense_key != UINT32_MAX && asc != UINT32_MAX && ascq != UINT32_MAX) {
++					su.last_sense_key = (uint8_t)sense_key;
++					su.last_sense_asc = (uint8_t)asc;
++					su.last_sense_ascq = (uint8_t)ascq;
++					su.last_sense_valid = true;
++				}
+ 				raw_bytes = MIN(sense_len, UFS_SENSE_MAX);
+ 				static const char hex[] = "0123456789abcdef";
+ 				for (uint32_t i = 0; i < raw_bytes; i++) {
+@@ -394,6 +420,153 @@
+ 		return EIO;
+ 	}
+ 	return 0;
++}
++
++static int
++ufs_scsi(const uint8_t *cdb, unsigned cdb_len, uint32_t len, bool write)
++{
++	return ufs_scsi_on_lun_timeout(su.lun, cdb, cdb_len, len, write, CMD_TIMEOUT_NS);
++}
++
++/* Read bCurrentPowerMode using a Query Request UPIU addressed to query LUN 0. */
++static int
++ufs_query_current_power_mode(uint32_t *value)
++{
++	struct utrd *utrd = (struct utrd *)(su.dma + DMA_UTRL);
++	struct ucd *ucd = (struct ucd *)(su.dma + DMA_UCD);
++	uint64_t ucd_pa = su.dma_pa + DMA_UCD;
++	uint8_t tag;
++	if (!value) {
++		return EINVAL;
++	}
++	if (su.dali && su.command_poisoned) {
++		return ETIMEDOUT;
++	}
++	bzero(utrd, sizeof(*utrd));
++	bzero(ucd, sizeof(*ucd));
++	tag = ++su.tag;
++	ucd->cmd[0] = 0x16;                     /* QUERY REQUEST */
++	ucd->cmd[2] = 0;                        /* Device attributes use query LUN 0. */
++	ucd->cmd[3] = tag;
++	ucd->cmd[5] = 0x01;                     /* standard read request */
++	ucd->cmd[12] = 0x03;                    /* READ ATTRIBUTE */
++	ucd->cmd[13] = 0x02;                    /* bCurrentPowerMode */
++
++	utrd->dw0 = (1u << 28) | (1u << 24);     /* UPIU, no data direction */
++	utrd->dw2 = 0x0f;                       /* OCS invalid until updated */
++	utrd->ucdba = (uint32_t)ucd_pa;
++	utrd->ucdbau = (uint32_t)(ucd_pa >> 32);
++	utrd->resp = (512u / 4) << 16 | (512u / 4);
++	if (su.cache) {
++		dma_clean(DMA_UTRL, sizeof(*utrd));
++		dma_clean(DMA_UCD, 16);
++		dma_sync(DMA_UCD + offsetof(struct ucd, resp), sizeof(ucd->resp));
++	} else {
++		dma_sync(DMA_UTRL, sizeof(*utrd));
++		dma_sync(DMA_UCD, sizeof(*ucd));
++	}
++	__builtin_arm_dsb(0xf);
++	ufs_wr(REG_UTRLDBR, 1);
++	uint64_t deadline;
++	nanoseconds_to_absolutetime(UFS_QUERY_TIMEOUT_NS, &deadline);
++	deadline += mach_absolute_time();
++	while (ufs_rd(REG_UTRLDBR) & 1) {
++		if (mach_absolute_time() > deadline) {
++			ufs_wr(REG_UTRLCLR, ~1u);
++			su.command_poisoned = true;
++			printf("SWEET UFS: QUERY READ ATTRIBUTE bCurrentPowerMode timed out\n");
++			return ETIMEDOUT;
++		}
++		delay(1);
++	}
++	__builtin_arm_dsb(0xf);
++	ufs_wr(REG_IS, ufs_rd(REG_IS));         /* acknowledge completion status */
++	dma_sync(DMA_UTRL, sizeof(*utrd));
++	if (su.cache) {
++		dma_sync(DMA_UCD + offsetof(struct ucd, resp), sizeof(ucd->resp));
++	} else {
++		dma_sync(DMA_UCD, sizeof(*ucd));
++	}
++
++	const uint8_t *rsp = ucd->resp;
++	uint32_t ocs = utrd->dw2 & 0xff;
++	if (ocs || rsp[0] != 0x36 || rsp[2] != 0 || rsp[3] != tag || rsp[8] != 0 ||
++	    rsp[10] != 0 || rsp[11] != 0 || rsp[12] != 0x03 || rsp[13] != 0x02 ||
++	    rsp[14] != 0 || rsp[15] != 0) {
++		printf("SWEET UFS: QUERY READ ATTRIBUTE malformed response ocs=0x%x type=0x%x lun=0x%x tag=0x%x response=0x%x opcode=0x%x idn=0x%x length=0x%x\n",
++		    ocs, rsp[0], rsp[2], rsp[3], rsp[6], rsp[12], rsp[13],
++		    ((uint32_t)rsp[10] << 8) | rsp[11]);
++		return EIO;
++	}
++	if (rsp[6] != 0) {
++		printf("SWEET UFS: QUERY READ ATTRIBUTE failed idn=0x02 response=0x%x\n", rsp[6]);
++		return EIO;
++	}
++	*value = ufs_be32(rsp + 20);
++	return 0;
++}
++
++static bool
++ufs_sense_is_lun_ready_transition(void)
++{
++	return su.last_sense_valid &&
++	    ((su.last_sense_key == 0x02 && su.last_sense_asc == 0x04 &&
++	    (su.last_sense_ascq == 0x01 || su.last_sense_ascq == 0x02)) ||
++	    (su.last_sense_key == 0x06 && su.last_sense_asc == 0x29 &&
++	    (su.last_sense_ascq == 0x00 || su.last_sense_ascq == 0x02)));
++}
++
++/* Read the power state, wake the UFS device WLUN if needed, then probe root LUN. */
++static int
++ufs_dali_prepare_lun(void)
++{
++	static const uint8_t ssu[6] = { 0x1b, 0, 0, 0, 0x10, 0 };
++	static const uint8_t tur[6] = { 0x00 };
++	uint32_t power_mode = 0;
++	su.failure_stage = "device-power-query";
++	int error = ufs_query_current_power_mode(&power_mode);
++	if (error) {
++		return error;
++	}
++	printf("SWEET UFS: bCurrentPowerMode=0x%x\n", power_mode);
++	if ((power_mode & 0xff) != 0x11) {
++		su.failure_stage = "device-wake";
++		printf("SWEET UFS: sending START STOP UNIT ACTIVE to device WLUN 0xd0\n");
++		error = ufs_scsi_on_lun_timeout(0xd0, ssu, sizeof(ssu), 0, false,
++		    UFS_SSU_TIMEOUT_NS);
++		if (error) {
++			return error;
++		}
++		delay(50000);                       /* Match HackIOS' 50 ms post-wake settle. */
++	}
++
++	su.failure_stage = "root-lun-ready";
++	for (unsigned attempt = 0; attempt < UFS_READY_MAX_POLLS; attempt++) {
++		error = ufs_scsi_on_lun_timeout(su.lun, tur, sizeof(tur), 0, false,
++		    UFS_READY_TUR_TIMEOUT_NS);
++		if (!error) {
++			printf("SWEET UFS: root LUN %u ready after %u TEST UNIT READY polls\n",
++			    su.lun, attempt + 1);
++			return 0;
++		}
++		if (error == ETIMEDOUT) {
++			printf("SWEET UFS: root LUN %u TEST UNIT READY timed out on poll %u\n",
++			    su.lun, attempt + 1);
++			return error;
++		}
++		if (!ufs_sense_is_lun_ready_transition()) {
++			printf("SWEET UFS: root LUN %u TUR failed outside readiness transition error=%d sense=%u/%u/%u\n",
++			    su.lun, error, (unsigned)su.last_sense_key,
++			    (unsigned)su.last_sense_asc, (unsigned)su.last_sense_ascq);
++			return error;
++		}
++		if (attempt + 1 < UFS_READY_MAX_POLLS) {
++			delay(UFS_READY_POLL_INTERVAL_US);
++		}
++	}
++	printf("SWEET UFS: root LUN %u remained not ready after %u polls\n",
++	    su.lun, UFS_READY_MAX_POLLS);
++	return ETIMEDOUT;
+ }
+ 
+ /* READ(10) of count device blocks at lba into the bounce buffer. */
+@@ -1709,10 +1882,14 @@
+ 	su.failure_stage = "host-takeover";
+ 	error = ufs_take_over_host();
+ 	if (!error) {
+-		su.failure_stage = "scsi-tur";
+-		static const uint8_t tur[6] = { 0x00 };
+-		/* The first command after the bootloader may report a unit attention. */
+-		for (int i = 0; i < 3 && (error = ufs_scsi(tur, sizeof(tur), 0, false)); i++) {
++		if (su.dali) {
++			error = ufs_dali_prepare_lun();
++		} else {
++			su.failure_stage = "scsi-tur";
++			static const uint8_t tur[6] = { 0x00 };
++			/* The first command after the bootloader may report a unit attention. */
++			for (int i = 0; i < 3 && (error = ufs_scsi(tur, sizeof(tur), 0, false)); i++) {
++			}
+ 		}
+ 	}
+ 	if (!error) {

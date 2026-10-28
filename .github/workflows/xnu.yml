@@ -405,11 +405,25 @@ jobs:
           grep -Fq 'sense_len <= segment_len - 2' xnu/bsd/dev/sweet_ufs.c
           grep -Fq 'SWEET UFS: READ(10) failed lba=0x%llx count=%u bytes=%u error=%d' xnu/bsd/dev/sweet_ufs.c
           grep -Fq 'SWEET UFS: sense segment=%u length=%u residual=0x%x key=0x%x asc=0x%x ascq=0x%x raw_bytes=%u raw=%s' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'ucd->cmd[0] = 0x16;                     /* QUERY REQUEST */' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'if (su.dali && su.command_poisoned)' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'rsp[0] != 0x36 || rsp[2] != 0 || rsp[3] != tag' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'ufs_scsi_on_lun_timeout(0xd0, ssu, sizeof(ssu), 0, false,' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'if ((power_mode & 0xff) != 0x11)' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'error = ufs_dali_prepare_lun();' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'if (ocs == 0 && ucd->resp[6] == 0x01 && ucd->resp[7] == 0x02 &&' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'su.last_sense_ascq == 0x01 || su.last_sense_ascq == 0x02' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'su.last_sense_ascq == 0x00 || su.last_sense_ascq == 0x02' xnu/bsd/dev/sweet_ufs.c
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'uic-link-startup'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'MT6991 host startup failed stage='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: AO reset stage=%s offset=0x%x mask=0x%x old=0x%x write=0x%x readback=0x%x'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: READ(10) failed lba=0x%llx count=%u bytes=%u error=%d'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: sense segment=%u length=%u residual=0x%x key=0x%x asc=0x%x ascq=0x%x raw_bytes=%u raw=%s'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: bCurrentPowerMode=0x%x'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: sending START STOP UNIT ACTIVE to device WLUN 0xd0'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: root LUN %u ready after %u TEST UNIT READY polls'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: root LUN %u remained not ready after %u polls'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: QUERY READ ATTRIBUTE malformed response ocs=0x%x type=0x%x lun=0x%x tag=0x%x response=0x%x opcode=0x%x idn=0x%x length=0x%x'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET DALI RAMOOPS: root diagnostics begin'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS root %s unavailable: %d stage=%s'
           python3 ../tools/verify-dali-ramoops-adt.py
