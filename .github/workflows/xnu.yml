@@ -422,6 +422,58 @@ jobs:
           grep -Fq 'return start_error;' xnu/bsd/dev/sweet_ufs.c
           grep -Fq 'int error = ufs_read_blocks(1, 1);' xnu/bsd/dev/sweet_ufs.c
           grep -Eq '^[[:space:]]+error = ufs_read_blocks\(1, 1\);$' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq '#define UFS_DEVICE_INIT_TIMEOUT_NS (1500ull * 1000ull * NSEC_PER_USEC)' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'ucd->cmd[5] = opcode == 0x06 ? 0x81 : 0x01;' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'ucd->cmd[12] = opcode;' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'ucd->cmd[13] = 0x01;' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'rsp[18] != 0 || rsp[19] != 0' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'error = ufs_query_fdeviceinit_flag(0x06, NULL);' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'error = ufs_query_fdeviceinit_flag(0x05, &flag);' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'if (flag == 0)' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'int error = ufs_dali_initialize_device();' xnu/bsd/dev/sweet_ufs.c
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          source = Path("xnu/bsd/dev/sweet_ufs.c").read_text()
+
+          def function_body(name):
+              match = re.search(r"static int\s+" + re.escape(name) + r"\([^;]*?\)\s*\{", source, re.S)
+              assert match, f"missing function {name}"
+              start = match.end() - 1
+              depth = 0
+              for end in range(start, len(source)):
+                  if source[end] == "{":
+                      depth += 1
+                  elif source[end] == "}":
+                      depth -= 1
+                      if depth == 0:
+                          return source[start:end + 1]
+              raise AssertionError(f"unterminated function {name}")
+
+          init = function_body("ufs_dali_initialize_device")
+          assert init.index("ufs_query_fdeviceinit_flag(0x06, NULL)") < init.index("ufs_query_fdeviceinit_flag(0x05, &flag)")
+          assert "UFS_DEVICE_INIT_MAX_POLLS" in init and "mach_absolute_time() >= deadline" in init
+          prepare = function_body("ufs_dali_prepare_lun")
+          assert prepare.index("ufs_dali_initialize_device()") < prepare.index("ufs_query_current_power_mode(&power_mode)")
+          gpt_match = re.search(r"static int\s+ufs_find_partitions\([^;]*?\)\s*\{", source, re.S)
+          assert gpt_match, "missing ufs_find_partitions"
+          gpt_start = gpt_match.end() - 1
+          depth = 0
+          for gpt_end in range(gpt_start, len(source)):
+              if source[gpt_end] == "{":
+                  depth += 1
+              elif source[gpt_end] == "}":
+                  depth -= 1
+                  if depth == 0:
+                      break
+          else:
+              raise AssertionError("unterminated ufs_find_partitions")
+          gpt = source[gpt_start:gpt_end + 1]
+          reads = [m.start() for m in re.finditer(r"ufs_read_blocks\(1, 1\)", gpt)]
+          assert len(reads) == 2, f"expected initial GPT header read and one retry, found {len(reads)}"
+          assert reads[0] < gpt.index("ufs_dali_start_lun_and_wait()") < reads[1]
+          PY
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'uic-link-startup'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'MT6991 host startup failed stage='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: AO reset stage=%s offset=0x%x mask=0x%x old=0x%x write=0x%x readback=0x%x'
@@ -437,6 +489,10 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: root LUN %u ready after START UNIT and %u TUR polls'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: root LUN %u did not become ready after START UNIT error=%d sense=%u/%u/%u'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: root LUN %u remained not ready after START UNIT and %u TUR polls'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: fDeviceInit SET_FLAG issued after LINK_STARTUP'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: fDeviceInit cleared after %u READ_FLAG polls'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: fDeviceInit did not clear before timeout after %u READ_FLAG polls'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: QUERY fDeviceInit malformed response opcode=0x%x ocs=0x%x type=0x%x lun=0x%x tag=0x%x response=0x%x function=0x%x idn=0x%x length=0x%x'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: GPT header read needs LUN start; retrying once after SCSI START UNIT'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: GPT header READ(10) succeeded after START UNIT'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: GPT header READ(10) retry after START UNIT failed (%d)'

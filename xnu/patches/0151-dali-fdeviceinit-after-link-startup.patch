@@ -1,0 +1,161 @@
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -124,6 +124,9 @@
+ #define CMD_SPIN_NS     (50ull * NSEC_PER_USEC)
+ #define CMD_SLEEP_NS    (200ull * NSEC_PER_USEC)
+ #define UFS_QUERY_TIMEOUT_NS (200ull * NSEC_PER_USEC * 1000ull)
++#define UFS_DEVICE_INIT_TIMEOUT_NS (1500ull * 1000ull * NSEC_PER_USEC)
++#define UFS_DEVICE_INIT_POLL_INTERVAL_US 1000u
++#define UFS_DEVICE_INIT_MAX_POLLS 1500u
+ #define UFS_SSU_TIMEOUT_NS (500ull * NSEC_PER_USEC * 1000ull)
+ #define UFS_LUN_START_TIMEOUT_NS (500ull * NSEC_PER_USEC * 1000ull)
+ #define UFS_READY_TUR_TIMEOUT_NS (200ull * NSEC_PER_USEC * 1000ull)
+@@ -507,6 +510,133 @@
+ 	return 0;
+ }
+ 
++/* Query SET_FLAG/READ_FLAG for fDeviceInit after LINK_STARTUP, matching Linux and HackIOS. */
++static int
++ufs_query_fdeviceinit_flag(uint8_t opcode, uint32_t *value)
++{
++	struct utrd *utrd = (struct utrd *)(su.dma + DMA_UTRL);
++	struct ucd *ucd = (struct ucd *)(su.dma + DMA_UCD);
++	uint64_t ucd_pa = su.dma_pa + DMA_UCD;
++	uint8_t tag;
++	if ((opcode != 0x05 && opcode != 0x06) ||
++	    (opcode == 0x05 && value == NULL) || (opcode == 0x06 && value != NULL)) {
++		return EINVAL;
++	}
++	if (su.dali && su.command_poisoned) {
++		return ETIMEDOUT;
++	}
++	bzero(utrd, sizeof(*utrd));
++	bzero(ucd, sizeof(*ucd));
++	tag = ++su.tag;
++	ucd->cmd[0] = 0x16;                     /* QUERY REQUEST */
++	ucd->cmd[2] = 0;                        /* Device flags use query LUN 0. */
++	ucd->cmd[3] = tag;
++	ucd->cmd[5] = opcode == 0x06 ? 0x81 : 0x01; /* SET uses standard write; READ uses standard read. */
++	ucd->cmd[12] = opcode;                  /* SET FLAG (6) or READ FLAG (5). */
++	ucd->cmd[13] = 0x01;                    /* fDeviceInit. */
++
++	utrd->dw0 = (1u << 28) | (1u << 24);     /* UPIU, no data direction */
++	utrd->dw2 = 0x0f;                       /* OCS invalid until updated */
++	utrd->ucdba = (uint32_t)ucd_pa;
++	utrd->ucdbau = (uint32_t)(ucd_pa >> 32);
++	utrd->resp = (512u / 4) << 16 | (512u / 4);
++	if (su.cache) {
++		dma_clean(DMA_UTRL, sizeof(*utrd));
++		dma_clean(DMA_UCD, 16);
++		dma_sync(DMA_UCD + offsetof(struct ucd, resp), sizeof(ucd->resp));
++	} else {
++		dma_sync(DMA_UTRL, sizeof(*utrd));
++		dma_sync(DMA_UCD, sizeof(*ucd));
++	}
++	__builtin_arm_dsb(0xf);
++	ufs_wr(REG_UTRLDBR, 1);
++	uint64_t deadline;
++	nanoseconds_to_absolutetime(UFS_QUERY_TIMEOUT_NS, &deadline);
++	deadline += mach_absolute_time();
++	while (ufs_rd(REG_UTRLDBR) & 1) {
++		if (mach_absolute_time() > deadline) {
++			ufs_wr(REG_UTRLCLR, ~1u);
++			su.command_poisoned = true;
++			printf("SWEET UFS: QUERY %s fDeviceInit timed out\n", opcode == 0x06 ? "SET_FLAG" : "READ_FLAG");
++			return ETIMEDOUT;
++		}
++		delay(1);
++	}
++	__builtin_arm_dsb(0xf);
++	ufs_wr(REG_IS, ufs_rd(REG_IS));         /* acknowledge completion status */
++	dma_sync(DMA_UTRL, sizeof(*utrd));
++	if (su.cache) {
++		dma_sync(DMA_UCD + offsetof(struct ucd, resp), sizeof(ucd->resp));
++	} else {
++		dma_sync(DMA_UCD, sizeof(*ucd));
++	}
++
++	const uint8_t *rsp = ucd->resp;
++	uint32_t ocs = utrd->dw2 & 0xff;
++	if (ocs || rsp[0] != 0x36 || rsp[2] != 0 || rsp[3] != tag ||
++	    rsp[5] != ucd->cmd[5] || rsp[8] != 0 || rsp[10] != 0 || rsp[11] != 0 ||
++	    rsp[12] != opcode || rsp[13] != 0x01 || rsp[14] != 0 || rsp[15] != 0 ||
++	    rsp[18] != 0 || rsp[19] != 0) {
++		printf("SWEET UFS: QUERY fDeviceInit malformed response opcode=0x%x ocs=0x%x type=0x%x lun=0x%x tag=0x%x response=0x%x function=0x%x idn=0x%x length=0x%x\n",
++		    opcode, ocs, rsp[0], rsp[2], rsp[3], rsp[6], rsp[5], rsp[13],
++		    (unsigned)(((uint32_t)rsp[18] << 8) | rsp[19]));
++		return EIO;
++	}
++	if (rsp[6] != 0) {
++		printf("SWEET UFS: QUERY fDeviceInit opcode=0x%x failed response=0x%x\n", opcode, rsp[6]);
++		return EIO;
++	}
++	if (opcode == 0x05) {
++		uint32_t flag = ufs_be32(rsp + 20);
++		if (flag > 1) {
++			printf("SWEET UFS: QUERY READ_FLAG fDeviceInit returned invalid value=0x%x\n", flag);
++			return EIO;
++		}
++		*value = flag;
++	}
++	return 0;
++}
++
++/* Linux ufshcd_complete_dev_init: one fDeviceInit SET, then bounded READ_FLAG polling. */
++static int
++ufs_dali_initialize_device(void)
++{
++	uint32_t flag = 0;
++	unsigned int polls = 0;
++	int error;
++
++	su.failure_stage = "fdeviceinit-set";
++	error = ufs_query_fdeviceinit_flag(0x06, NULL);
++	if (error) {
++		printf("SWEET UFS: fDeviceInit SET_FLAG failed error=%d\n", error);
++		return error;
++	}
++	printf("SWEET UFS: fDeviceInit SET_FLAG issued after LINK_STARTUP\n");
++
++	uint64_t deadline;
++	nanoseconds_to_absolutetime(UFS_DEVICE_INIT_TIMEOUT_NS, &deadline);
++	deadline += mach_absolute_time();
++	for (unsigned attempt = 0; attempt < UFS_DEVICE_INIT_MAX_POLLS; attempt++) {
++		su.failure_stage = "fdeviceinit-read";
++		error = ufs_query_fdeviceinit_flag(0x05, &flag);
++		polls = attempt + 1;
++		if (error) {
++			printf("SWEET UFS: fDeviceInit READ_FLAG failed error=%d after %u polls\n", error, polls);
++			return error;
++		}
++		if (flag == 0) {
++			printf("SWEET UFS: fDeviceInit cleared after %u READ_FLAG polls\n", polls);
++			return 0;
++		}
++		if (mach_absolute_time() >= deadline) {
++			break;
++		}
++		delay(UFS_DEVICE_INIT_POLL_INTERVAL_US);
++	}
++	printf("SWEET UFS: fDeviceInit did not clear before timeout after %u READ_FLAG polls\n", polls);
++	return ETIMEDOUT;
++}
++
+ static bool
+ ufs_sense_is_lun_ready_transition(void)
+ {
+@@ -572,8 +702,13 @@
+ 	static const uint8_t ssu[6] = { 0x1b, 0, 0, 0, 0x10, 0 };
+ 	static const uint8_t tur[6] = { 0x00 };
+ 	uint32_t power_mode = 0;
++	su.failure_stage = "fdeviceinit";
++	int error = ufs_dali_initialize_device();
++	if (error) {
++		return error;
++	}
+ 	su.failure_stage = "device-power-query";
+-	int error = ufs_query_current_power_mode(&power_mode);
++	error = ufs_query_current_power_mode(&power_mode);
+ 	if (error) {
+ 		return error;
+ 	}

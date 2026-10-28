@@ -1,4 +1,16 @@
-## CURRENT HANDOFF — 0149 restored; 0150 candidate packaged, awaiting exact-hash approval (2026-10-29)
+## CURRENT HANDOFF — patch0151 source reviewed; local compile passed, CI pending (2026-10-29)
+
+Patch0150 was flashed once after exact-hash approval and still failed at `stage=gpt-discovery`, errno 5. The screen `IMG_20261029_004506.jpg` and ramoops `shim/out-dali/ufs-40723410438/candidate/trial/console-ramoops-0.txt` show LUN 2 TUR and READ CAPACITY succeeded, GPT LBA 1 READ(10) returned sense `02/04/02`, START UNIT completed, TUR reported ready, and the one retry returned the same sense. The 4,198,400-byte SWEET log range stayed zero; root discovery and mount did not complete.
+
+The original `init_boot_b` and `boot_b` were restored and physically verified. The latest read-only host check sees Android `boot_completed=1` on slot `_b` and the stock hashes: `boot_b` `6dc40de74fa7de4f435c513047c51fe10634c1891666031039c52a08b27a3cd5`, `init_boot_b` `08794a432befcf0504ee4933a51260cb6ccc4785b69f345c4b5968e8e6053d2d`. No new image has been flashed.
+
+Patch `xnu/patches/0151-dali-fdeviceinit-after-link-startup.patch` adds a bounded `fDeviceInit` SET_FLAG / READ_FLAG sequence after LINK_STARTUP and before power-mode/LUN probing, retaining the 0150 GPT START UNIT recovery. UPIU fields were checked against Linux/HackIOS; Query Response length validation and diagnostics were added after review. The clean 0150 source accepts the patch, and the updated `sweet_ufs.c` compiles locally with zero failures; source-order gates pass. The handset has not tested 0151, and `fDeviceInit` remains a hypothesis, not a confirmed cause. Known differences from reference initialization are recorded in `.planning/2026-10-20-port-ios-to-connected-phone/findings.md`.
+
+Next: commit/push the source and workflow gates, run the full XNU CI, package and offline-verify the paired images, then request approval for those exact hashes before any device preflight or flash. This remains a kernel/UFS diagnostic pair, not a complete iOS userspace image.
+
+---
+
+## PREVIOUS HANDOFF — 0149 restored; 0150 candidate packaged, awaiting exact-hash approval (2026-10-29)
 
 The approved CI 40715674681 pair (boot SHA-256 `ddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39`, init_boot SHA-256 `f91db61de44b61ff4363b8875174ca7db248b85388399b6a1d2defad81bd5040`) was tried once. `IMG_20261028_234608.jpg` shows `stage=gpt-discovery`, errno 5, followed by `handshake structure not initialized`; ramoops (`shim/out-dali/ufs-40715674681/candidate/trial/console-ramoops-0.txt`, 7,641 bytes, SHA-256 `112f2ed263baf2d50f1d0aa9be675c0dc2409c790332c03199be7a6d52b1c58f`) records power mode `0x11`, TUR success after `06/29/02`, READ CAPACITY success, then root LUN 2 GPT-header READ(10) LBA 1/count 1 returning `02/04/02`. The root was not mounted and SWEET persistent logging did not start.
 
