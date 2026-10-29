@@ -1,6 +1,8 @@
 --- a/bsd/dev/sweet_ufs.c
 +++ b/bsd/dev/sweet_ufs.c
-@@ -2119,5 +2119,5 @@
+@@ -2117,8 +2117,8 @@
+ 	devfs_make_node(su.bdev, DEVFS_BLOCK, UID_ROOT, GID_OPERATOR, 0640, "ufsroot0");
+ 	devfs_make_node(makedev(su.cmajor, 0), DEVFS_CHAR, UID_ROOT, GID_OPERATOR, 0640, "rufsroot0");
 -	/* Dali root stays read-only; only its separate configured log range can write. */
 -	su.writable = (rw != 0) && !su.dali;
 -	if (su.dali && rw != 0) {
@@ -11,3 +13,4 @@
 +	if (su.dali && su.writable) {
 +		printf("SWEET UFS: Dali root writes explicitly enabled for partition \"%s\"\n", want);
 +	}
+ 	su.ready = true;
