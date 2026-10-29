@@ -391,6 +391,11 @@ jobs:
           grep -Fq 'initproc return wait cleared' xnu/bsd/kern/bsd_init.c
           grep -Fq 'execve returned path=%s errno=%d' xnu/bsd/kern/kern_exec.c
           grep -Fq 'sweet_init_trace = sweet_init_call < 16;' xnu/bsd/dev/arm/systemcalls.c
+          grep -Fq 'if (code == 494)' xnu/bsd/dev/arm/systemcalls.c
+          grep -Fq 'SWEET PERSONA SYSCALL: enter' xnu/bsd/dev/arm/systemcalls.c
+          grep -Fq 'SWEET PERSONA SYSCALL: return' xnu/bsd/dev/arm/systemcalls.c
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET PERSONA SYSCALL: enter'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET PERSONA SYSCALL: return'
           grep -Fq 'ml_io_map_wcomb((vm_offset_t)(base + offset)' xnu/bsd/dev/sweet_ufs.c
           grep -Fq 'start >= sweet_ramoops_capacity || used > sweet_ramoops_capacity || start > used' xnu/bsd/dev/sweet_ufs.c
           grep -Fq '#define IS_UFS_ERROR_MASK 0x00070884u' xnu/bsd/dev/sweet_ufs.c
