@@ -1,8 +1,7 @@
 diff --git a/bsd/dev/arm/systemcalls.c b/bsd/dev/arm/systemcalls.c
 --- a/bsd/dev/arm/systemcalls.c
 +++ b/bsd/dev/arm/systemcalls.c
-@@ -18,7 +18,8 @@
- #if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
+@@ -19,6 +19,7 @@
  #include <os/atomic_private.h>
  extern uint64_t sweet_boot_counter_ms(void);
  static unsigned int sweet_pid1_syscalls;
@@ -10,7 +9,7 @@ diff --git a/bsd/dev/arm/systemcalls.c b/bsd/dev/arm/systemcalls.c
  #endif
  
  #include <sys/kernel.h>
-@@ -105,6 +106,8 @@ unix_syscall(
+@@ -105,6 +106,8 @@
  #if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
  	unsigned int sweet_init_call = 0;
  	boolean_t sweet_init_trace = FALSE;
@@ -19,30 +18,27 @@ diff --git a/bsd/dev/arm/systemcalls.c b/bsd/dev/arm/systemcalls.c
  #endif
  
  	uthread_reset_proc_refcount(uthread);
-@@ -168,6 +171,15 @@ unix_syscall(
- 			}
+@@ -167,6 +170,15 @@
+ 			    sweet_boot_counter_ms(), sweet_init_call, code);
  		}
-+		if (code == 494) { /* bsd/kern/syscalls.master: SYS_persona */
-+			sweet_persona_call = os_atomic_inc_orig(&sweet_persona_syscalls, relaxed);
-+			sweet_persona_trace = sweet_persona_call < 32;
-+			if (sweet_persona_trace) {
-+				kprintf("T%llums SWEET PERSONA SYSCALL: enter call=%llu pid=%d comm=%s op=%u\n",
-+				    sweet_boot_counter_ms(), (unsigned long long)sweet_persona_call, pid, proc->p_comm,
-+				    (uint32_t)uthread->uu_arg[0]);
-+			}
+ 	}
++	if (code == 494) { /* bsd/kern/syscalls.master: SYS_persona */
++		sweet_persona_call = os_atomic_inc_orig(&sweet_persona_syscalls, relaxed);
++		sweet_persona_trace = sweet_persona_call < 32;
++		if (sweet_persona_trace) {
++			kprintf("T%llums SWEET PERSONA SYSCALL: enter call=%llu pid=%d comm=%s op=%u\n",
++			    sweet_boot_counter_ms(), (unsigned long long)sweet_persona_call, pid, proc->p_comm,
++			    (uint32_t)uthread->uu_arg[0]);
 +		}
++	}
  #endif
  
  #ifdef CONFIG_IOCOUNT_TRACE
- 		uthread->uu_iocount = 0;
-@@ -200,6 +212,14 @@ unix_syscall(
- 	error = (*(callp->sy_call))(proc, &uthread->uu_arg[0], &(uthread->uu_rval[0]));
- 	AUDIT_SYSCALL_EXIT(code, proc, uthread, error);
- 
+@@ -203,6 +215,14 @@
  #if CONFIG_MACF
  skip_syscall:
  #endif /* CONFIG_MACF */
-+
+ 
 +#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
 +	if (sweet_persona_trace) {
 +		kprintf("T%llums SWEET PERSONA SYSCALL: return call=%llu pid=%d errno=%d rval0=%lld\n",
@@ -50,3 +46,6 @@ diff --git a/bsd/dev/arm/systemcalls.c b/bsd/dev/arm/systemcalls.c
 +		    (long long)uthread->uu_rval[0]);
 +	}
 +#endif
++
+ #if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
+ 	if (sweet_init_trace) {
