@@ -1,0 +1,40 @@
+--- a/bsd/sweet_hfs/core/FileExtentMapping.c
++++ b/bsd/sweet_hfs/core/FileExtentMapping.c
+@@ -1379,7 +1379,14 @@ OSErr TruncateFileC (
+ 		numBlocks = extentNextBlock - nextBlock;	//	How many blocks in this extent to free up
+ 		if (numBlocks != 0) {
+ 			//	Compute first volume allocation block to free
+ 			startBlock = extentRecord[extentIndex].startBlock + extentRecord[extentIndex].blockCount - numBlocks;
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++			if (startBlock <= SWEET_HFS_DIAG_FREE_BLOCK &&
++			    SWEET_HFS_DIAG_FREE_BLOCK - startBlock < numBlocks) {
++				printf("SWEET HFS: truncate-tail-release fileid=%u fork=%u first=%u count=%u target=1966891\n",
++				    (unsigned int)fileid, (unsigned int)forkType, startBlock, numBlocks);
++			}
++#endif
+ 			//	Free the blocks in bitmap
+ 			err = BlockDeallocate(vcb, startBlock, numBlocks, 0);
+ 			if (err != noErr) goto ErrorExit;
+@@ -1405,5 +1412,12 @@ OSErr TruncateFileC (
+ 	while (extentIndex < numExtentsPerRecord && extentRecord[extentIndex].blockCount != 0) {
+ 		numBlocks = extentRecord[extentIndex].blockCount;
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++		if (extentRecord[extentIndex].startBlock <= SWEET_HFS_DIAG_FREE_BLOCK &&
++		    SWEET_HFS_DIAG_FREE_BLOCK - extentRecord[extentIndex].startBlock < numBlocks) {
++			printf("SWEET HFS: truncate-following-release fileid=%u fork=%u first=%u count=%u target=1966891\n",
++			    (unsigned int)fileid, (unsigned int)forkType, extentRecord[extentIndex].startBlock, numBlocks);
++			}
++#endif
+ 		//	Deallocate this extent
+ 		err = BlockDeallocate(vcb, extentRecord[extentIndex].startBlock, numBlocks, 0);
+ 		if (err != noErr) goto ErrorExit;
+--- a/iokit/Kernel/IOPMrootDomain.cpp
++++ b/iokit/Kernel/IOPMrootDomain.cpp
+@@ -4011,4 +4011,7 @@ IOPMrootDomain::initializeBootSessionUUID(void)
+ 	memcpy(bootsessionuuid_string, new_uuid_string, sizeof(uuid_string_t));
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	printf("SWEET BOOT SESSION UUID: %s\n", new_uuid_string);
++#endif
+ 
+ 	setProperty(kIOPMBootSessionUUIDKey, new_uuid_string);
+ }

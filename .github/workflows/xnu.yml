@@ -435,17 +435,23 @@ jobs:
           grep -Fq 'sweet_usb_probe();' xnu/bsd/dev/sweet_ufs.c
           grep -Fq 'su.writable = (rw != 0);' xnu/bsd/dev/sweet_ufs.c
           grep -Fq 'SWEET HFS: extent-release fileid=%u fork=%u start=%u count=%u target=1966891' xnu/bsd/sweet_hfs/core/FileExtentMapping.c
+          grep -Fq 'SWEET HFS: truncate-tail-release fileid=%u fork=%u first=%u count=%u target=1966891' xnu/bsd/sweet_hfs/core/FileExtentMapping.c
+          grep -Fq 'SWEET HFS: truncate-following-release fileid=%u fork=%u first=%u count=%u target=1966891' xnu/bsd/sweet_hfs/core/FileExtentMapping.c
           grep -Fq 'SWEET HFS: bitmap-free mismatch first=%u count=%u word=0x%x validate=%u' xnu/bsd/sweet_hfs/core/VolumeAllocation.c
           grep -Fq 'SWEET HFS: BlockDeallocate failed first=%u count=%u flags=0x%x error=%d' xnu/bsd/sweet_hfs/core/VolumeAllocation.c
           grep -Fq 'SWEET HFS: BlockMarkFree failed first=%u count=%u error=%d' xnu/bsd/sweet_hfs/core/VolumeAllocation.c
+          grep -Fq 'SWEET BOOT SESSION UUID: %s' xnu/iokit/Kernel/IOPMrootDomain.cpp
           grep -Fq 'SWEET UFS: Dali root writes explicitly enabled for partition' xnu/bsd/dev/sweet_ufs.c
           grep -Fq 'PE_parse_boot_argn("rootrw", &rootrw' xnu/bsd/vfs/vfs_subr.c
           grep -Fq 'if (!su.writable || !su.nblocks' xnu/bsd/dev/sweet_ufs.c
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: Dali root writes explicitly enabled for partition "%s"'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET HFS: extent-release fileid=%u fork=%u start=%u count=%u target=1966891'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET HFS: truncate-tail-release fileid=%u fork=%u first=%u count=%u target=1966891'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET HFS: truncate-following-release fileid=%u fork=%u first=%u count=%u target=1966891'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET HFS: bitmap-free mismatch first=%u count=%u word=0x%x validate=%u'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET HFS: BlockDeallocate failed first=%u count=%u flags=0x%x error=%d'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET HFS: BlockMarkFree failed first=%u count=%u error=%d'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET BOOT SESSION UUID: %s'
           python3 - <<'PY'
           import re
           from pathlib import Path
