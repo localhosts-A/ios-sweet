@@ -1,4 +1,14 @@
-## CURRENT HANDOFF — launchd mount-phase failure; stock restored (2026-10-29)
+## CURRENT HANDOFF — root-write candidate prepared; trial approval pending (2026-10-29)
+
+The user photo `IMG_20261029_082446.jpg` shows the mount process (PID 3) exiting with status 1 and the resulting panic. The matching retained logs report `GetMasterBlock: error 16` opening `/dev/ufsroot0`, a read-only mount failure, and `mount / failed with 1`. XNU starts the root mount read-only, and the Dali UFS driver in the previous image ignored `ufsrw=1`; this makes a read-only root update the leading explanation, but the helper's exact mount flags are absent from the trace. The separate Preboot/firmware layout gap remains.
+
+Prepared candidate `shim/out-dali/ufs-40797719050/candidate-rootrw-20261029/` from CI run `40797719050`, commit `c52c06dd5a762ebf25350d0876cb5bba14f381b3`. The pair hashes are boot `ddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39` and init_boot `89a467eb73465f7e34cbe019bc2f63bb3a9508096a7f9efc04242490235346be`. Its XNU payload includes `unentitled_ios_sim_launch=1 ufsrw=1 rootrw=1`; `ufsrw=1` explicitly enables root block writes for Dali and `rootrw=1` makes the HFS root mount writable. Both controls are opt-in; the defaults remain read-only.
+
+Offline candidate validation passes: 17 structural/source-bound checks, boot/init_boot v4 layout, exact CPIO/payload/ADT, AVB `NONE` footer/hash verification, CI kernel hash, and all 23 candidate `SHA256SUMS` entries. Candidate README, full verification result, and final summary are in the candidate directory.
+
+Current read-only Android check sees completed Android on slot `_b`; physical stock boot/init_boot hashes match the saved originals. `unixnu_data` is 34,326,183,936 bytes and is not mounted. A full raw copy was not retained because the 34.3 GB ADB stream was too slow; no partial file remains. The original 16 GiB HFSX image is still available at `research/dali-usb-root/ios16-usb-root.img` (SHA-256 `ea6fe9549adc6a2f4f466079e5fb4e2b7432e80977923dbc98a3c6944c5be3cd`) and its initial on-device readback match is recorded above. It can restore the HFS volume but is not a backup of the partition tail. The current Android preflight is `shim/out-dali/ufs-40797719050/preflight/android-preflight.json`; Fastboot preflight has not been run. This candidate has not been flashed. A new approval is required for both the exact image hashes and the possible persistent writes to `unixnu_data` before transitioning to Fastboot.
+
+## PREVIOUS HANDOFF — launchd mount-phase failure; stock restored (2026-10-29)
 
 The approved launch-policy pair was flashed once to slot b: boot SHA-256 ddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39; init_boot SHA-256 ef010d814ef24ddd17efc24b4579b332831b2f95c484e913432a9f50e2b93e54. Its boot-args included unentitled_ios_sim_launch=1. Retained SWEET logs prove launchd passed the prior wrong-platform gate, started its bootstrap sequence, and entered mount-phase-1. The kernel had already selected unixnu_data, set BSD root ufsroot0, and mounted HFS iOSRoot.
 
@@ -8,7 +18,7 @@ Captured console-ramoops-0 is 18,378 bytes, SHA-256 c2615ed6a341fc40d2a6073b0f3a
 
 Restored original init_boot_b then boot_b; both Fastboot writes and reboot returned OKAY. Android is booted on slot _b with boot_completed=1. Physical readback matches stock: init_boot_b 08794a432befcf0504ee4933a51260cb6ccc4785b69f345c4b5968e8e6053d2d; boot_b 6dc40de74fa7de4f435c513047c51fe10634c1891666031039c52a08b27a3cd5. Fastboot flashed only those boot partitions; the kernel wrote its bounded diagnostic ring to unixnu_logs, with no userdata/GPT/unixnu_data writes.
 
-Next: prepare patch0153 so Dali root writes require explicit ufsrw=1, with rootrw=1 for the HFS root mount. Writes remain bounded to the selected unixnu_data GPT partition; the SWEET log ring remains isolated to unixnu_logs. This changes persistent root filesystem data if trialed. No new device write is authorized by the prior boot-pair approval; obtain approval for the new exact hashes and this root-write scope after CI/package verification.
+Follow-up patch0153 and the root-write candidate are documented in the current handoff above. The old launch-policy approval covered one trial of its exact pair only; it does not authorize the different root-write pair.
 
 ---
 
