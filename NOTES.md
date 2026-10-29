@@ -1,4 +1,14 @@
-## CURRENT HANDOFF — patch0155 trial recovered; offline HFS analysis next (2026-10-29)
+## CURRENT HANDOFF — patch0156 Dali root view and durable log boundary (2026-10-29)
+
+Reviewed `tosasitill/ios_plj110` X9 patches 0196/0201/0202 at upstream snapshot `e22e083365b8bcc327a1736d4710fc27229e4801`. Portable ideas are a separate root-write contract, a root view bounded to the image, and a disjoint persistent log sidecar that syncs payload before its cursor/header. X9's MT6993 HCI/SMMU addresses, LUN, extent manifest and direct-LK handoff do not apply to Dali's MT6991/GKI setup. The current X9 patch tail is outside that repository workflow's copied `xnu/patches/` series, so its CI cannot be treated as validation of those X9 patches.
+
+Drafted `xnu/patches/0156-dali-ufs-prefix-write-and-durable-log-boundary.patch` from the exact CI 40842265515 source. For Dali, it rejects any root name other than `unixnu_data` even in read-only mode, exposes at most the first 16 GiB (4,194,304 4-KiB blocks), and keeps root writes explicitly opted in and bounded by that view. Log writes remain in the separately bounded `unixnu_logs` area; Dali root-tail fallback is disabled. The SWEET logger now syncs payload before publishing its header and syncs again afterward. The existing single ring/header is still not crash-atomic across in-place ring overwrite.
+
+Patch replay check against the candidate's clean `verified-source/bsd/dev/sweet_ufs.c` passes with whitespace errors rejected. `tools/xnu-cc.py` against CI 40842265515 compiled `sweet_ufs.c` with 0/1 failures. CI source/linked-marker checks now assert the root-name guard, 16-GiB cap, dedicated-log restrictions and sync/header ordering. A first draft had invalid hunk counts and a stale root-tail context; the patch was regenerated from the CI baseline. Full CI, packaging and a new candidate are pending. No device command, flash, partition write or root/log write occurred in this phase. Any new trial requires a fresh exact-hash/write-scope approval; the 16-GiB `unixnu_data` tail still has no full backup. The HFS block-1966891 allocator issue and Preboot error 25 remain unresolved.
+
+---
+
+## PREVIOUS HANDOFF — patch0155 trial recovered; offline HFS analysis next (2026-10-29)
 
 The user approved one bounded diagnostic trial of the exact CI 40842265515 pair (boot `ddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39`, init_boot `d8367b1f299d29c015985ae2ffca89e8ec16aefdbf7801e7c1e989597459e874`) and the possible write scope within `unixnu_data`. Both slot-b flashes and `fastboot reboot` returned `OKAY`; neither ADB nor Fastboot appeared during the first 30 seconds. No screen photo was received. Retained ramoops and SWEET logs share boot-session UUID `BD507770-1885-4284-BB0D-C96E59A61CC2` and reach `UMD_INIT: LOADING PERSONA..`. They show `diskLoadUserSessions failed`, two successful `diskSaveUserSessions` calls, and Preboot lookup error 25. No block-1966891 or patch0155 HFS diagnostic marker appears in the captured windows; the HFS allocator issue is not proven fixed.
 

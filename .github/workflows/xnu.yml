@@ -442,6 +442,11 @@ jobs:
           grep -Fq 'SWEET HFS: BlockMarkFree failed first=%u count=%u error=%d' xnu/bsd/sweet_hfs/core/VolumeAllocation.c
           grep -Fq 'SWEET BOOT SESSION UUID: %s' xnu/iokit/Kernel/IOPMrootDomain.cpp
           grep -Fq 'SWEET UFS: Dali root writes explicitly enabled for partition' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'SWEET UFS: refusing Dali root partition' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'SWEET UFS: Dali unixnu_data view blocks=' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'SWEET UFS: Dali root write prefix cap=' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'SWEET LOG: payload sync failed' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'SWEET LOG: Dali root-tail fallback disabled' xnu/bsd/dev/sweet_ufs.c
           grep -Fq 'PE_parse_boot_argn("rootrw", &rootrw' xnu/bsd/vfs/vfs_subr.c
           grep -Fq 'if (!su.writable || !su.nblocks' xnu/bsd/dev/sweet_ufs.c
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: Dali root writes explicitly enabled for partition "%s"'
@@ -452,6 +457,11 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET HFS: BlockDeallocate failed first=%u count=%u flags=0x%x error=%d'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET HFS: BlockMarkFree failed first=%u count=%u error=%d'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET BOOT SESSION UUID: %s'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: refusing Dali root partition "%s"; only unixnu_data is allowed'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: Dali unixnu_data view blocks=%llu GPT blocks=%llu hidden tail=%llu'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: Dali root write prefix cap=%llu blocks'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET LOG: payload sync failed (%d), stopping'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET LOG: Dali root-tail fallback disabled; use unixnu_logs'
           python3 - <<'PY'
           import re
           from pathlib import Path
@@ -459,7 +469,7 @@ jobs:
           source = Path("xnu/bsd/dev/sweet_ufs.c").read_text()
 
           def function_body(name):
-              match = re.search(r"static int\s+" + re.escape(name) + r"\([^;]*?\)\s*\{", source, re.S)
+              match = re.search(r"static (?:int|void)\s+" + re.escape(name) + r"\([^;]*?\)\s*\{", source, re.S)
               assert match, f"missing function {name}"
               start = match.end() - 1
               depth = 0
@@ -481,12 +491,27 @@ jobs:
           assert "su.writable = (rw != 0);" in source
           assert "Dali root writes explicitly enabled for partition" in source
           assert "ignoring ufsrw on Dali" not in source
+          root_guard = 'if (su.dali && strcmp(want, "unixnu_data") != 0)'
+          assert root_guard in ufs_init
+          assert ufs_init.index(root_guard) < ufs_init.index('su.failure_stage = "hci-range"')
+          assert 'if (su.dali && su.writable && strcmp(want, "unixnu_data") != 0)' in ufs_init
+          assert 'strcmp(log_want, "unixnu_logs") != 0' in ufs_init
           writes = function_body("ufs_write_blocks")
           assert "!su.writable" in writes
           assert "lba < su.first_block" in writes
           assert "count > su.nblocks - (lba - su.first_block)" in writes
           log_writes = function_body("ufs_write_log_blocks")
           assert "su.log_first_block" in log_writes and "su.log_nblocks" in log_writes
+          assert "su.dali || !su.writable" in function_body("sweet_log_start")
+          log_thread = function_body("sweet_log_thread")
+          payload_sync = log_thread.index("error = ufs_sync_cache();")
+          header_write = log_thread.index("ufs_write_log_blocks(base, 1)")
+          header_sync = log_thread.rindex("error = ufs_sync_cache();")
+          assert payload_sync < header_write < header_sync
+          payload_sync_error_path = log_thread[payload_sync:header_write]
+          assert "if (error)" in payload_sync_error_path
+          assert "lck_mtx_unlock(&sweet_ufs_lock);" in payload_sync_error_path
+          assert "return;" in payload_sync_error_path, "payload sync failure must not publish a log header"
           assert re.search(
               r'if \(SecureDTGetProperty\(node, "compatible", \(void const \*\*\)&compatible,\s*&compatible_size\) == kSuccess &&\s*compatible != NULL &&\s*compatible_size >= sizeof\("mediatek,mt6991-ufshc"\) &&\s*memcmp\(compatible, "mediatek,mt6991-ufshc", sizeof\("mediatek,mt6991-ufshc"\)\) == 0\) \{\s*su\.dali = true;\s*\}',
               ufs_init,
@@ -509,6 +534,10 @@ jobs:
           else:
               raise AssertionError("unterminated ufs_find_partitions")
           gpt = source[gpt_start:gpt_end + 1]
+          assert "DALI_ROOT_MAX_BYTES (16ull * 1024ull * 1024ull * 1024ull)" in source
+          assert "DALI_ROOT_MAX_BLOCKS (DALI_ROOT_MAX_BYTES / UFS_BLOCK)" in source
+          assert 'strcmp(root_want, "unixnu_data") == 0' in gpt
+          assert "MIN(su.nblocks, DALI_ROOT_MAX_BLOCKS)" in gpt
           reads = [m.start() for m in re.finditer(r"ufs_read_blocks\(1, 1\)", gpt)]
           assert len(reads) == 2, f"expected initial GPT header read and one retry, found {len(reads)}"
           assert reads[0] < gpt.index("ufs_dali_start_lun_and_wait()") < reads[1]

@@ -1,0 +1,117 @@
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -14,9 +14,9 @@
+  * a 1 MiB bounce buffer); the host is not cache coherent, so caches are
+  * cleaned/invalidated around each command.
+  *
+- * Writes are refused unless boot-arg ufsrw=1 is set. Every write is checked
+- * against the partition bounds again right before it is issued, so nothing
+- * outside the named partition can be written.
++ * Writes are refused unless boot-arg ufsrw=1 is set. Dali exposes only the
++ * first 16 GiB of unixnu_data as the root device; its unknown partition tail
++ * is outside the device view. Dedicated Dali logs use only unixnu_logs.
+  */
+ #if defined(ARM64_BOARD_CONFIG_SWEET)
+ #include <sys/param.h>
+@@ -118,6 +118,8 @@
+ 
+ #define UFS_BLOCK       4096u
+ #define BOUNCE_SIZE     (1u << 20)
++#define DALI_ROOT_MAX_BYTES (16ull * 1024ull * 1024ull * 1024ull)
++#define DALI_ROOT_MAX_BLOCKS (DALI_ROOT_MAX_BYTES / UFS_BLOCK)
+ #define PRDT_CHUNK      (256u << 10)            /* PRDT byte count field: 18 bits */
+ #define PRDT_MAX        (BOUNCE_SIZE / PRDT_CHUNK)
+ #define CMD_TIMEOUT_NS  (5ull * NSEC_PER_SEC)
+@@ -161,7 +163,7 @@
+ 	uint64_t dma_pa;
+ 	uint8_t lun;
+ 	uint8_t tag;
+-	uint64_t first_block, nblocks;          /* partition, in 4 KiB device blocks */
++	uint64_t first_block, nblocks;          /* exposed root view, in 4 KiB device blocks */
+ 	uint64_t last_lba, capacity_blocks;
+ 	uint64_t log_first_block, log_nblocks;
+ 	uint64_t log_offset_bytes;
+@@ -834,7 +836,7 @@
+ 
+ /*
+  * WRITE(10) of count device blocks from the bounce buffer to lba. The range
+- * must lie inside the partition: this is the only place data goes out.
++ * must lie inside the exposed root view, which caps Dali unixnu_data at 16 GiB.
+  */
+ static int
+ ufs_write_blocks(uint64_t lba, uint32_t count)
+@@ -987,6 +989,12 @@
+ 	}
+ 	su.first_block = root_first;
+ 	su.nblocks = root_last - root_first + 1;
++	if (su.dali && strcmp(root_want, "unixnu_data") == 0) {
++		uint64_t gpt_nblocks = su.nblocks;
++		su.nblocks = MIN(su.nblocks, DALI_ROOT_MAX_BLOCKS);
++		printf("SWEET UFS: Dali unixnu_data view blocks=%llu GPT blocks=%llu hidden tail=%llu\n",
++		    su.nblocks, gpt_nblocks, gpt_nblocks - su.nblocks);
++	}
+ 	if (log_want[0]) {
+ 		if (log_duplicate) {
+ 			printf("SWEET UFS: duplicate log partition name \"%s\"; logging disabled\n", log_want);
+@@ -2003,6 +2011,18 @@
+ 	    memcmp(compatible, "mediatek,mt6991-ufshc", sizeof("mediatek,mt6991-ufshc")) == 0) {
+ 		su.dali = true;
+ 	}
++	if (su.dali && strcmp(want, "unixnu_data") != 0) {
++		su.failure_stage = "dali-root-partition";
++		printf("SWEET UFS: refusing Dali root partition \"%s\"; only unixnu_data is allowed\n", want);
++		return EINVAL;
++	}
++	if (su.dali && su.log_partition_configured && strcmp(log_want, "unixnu_logs") != 0) {
++		printf("SWEET UFS: refusing Dali log partition \"%s\"; only unixnu_logs is allowed\n",
++		    log_want);
++		su.log_partition_configured = false;
++		su.log_partition_name[0] = '\0';
++		log_want[0] = '\0';
++	}
+ 	if (su.dali) {
+ 		su.failure_stage = "dali-log-offset";
+ 		if (SecureDTGetProperty(node, "log-offset", (void const **)&log_offset_prop,
+@@ -2116,10 +2136,15 @@
+ 	su.bdev = makedev(su.bmajor, 0);
+ 	devfs_make_node(su.bdev, DEVFS_BLOCK, UID_ROOT, GID_OPERATOR, 0640, "ufsroot0");
+ 	devfs_make_node(makedev(su.cmajor, 0), DEVFS_CHAR, UID_ROOT, GID_OPERATOR, 0640, "rufsroot0");
+-	/* Root writes require explicit ufsrw=1; every write stays within this GPT partition. */
++	/* Root writes require explicit ufsrw=1 and the selected Dali root must be our HFSX volume. */
+ 	su.writable = (rw != 0);
++	if (su.dali && su.writable && strcmp(want, "unixnu_data") != 0) {
++		printf("SWEET UFS: refusing Dali root writes to unexpected partition \"%s\"\n", want);
++		su.writable = false;
++	}
+ 	if (su.dali && su.writable) {
+ 		printf("SWEET UFS: Dali root writes explicitly enabled for partition \"%s\"\n", want);
++		printf("SWEET UFS: Dali root write prefix cap=%llu blocks\n", su.nblocks);
+ 	}
+ 	su.ready = true;
+ 	su.failure_stage = "root-ready";
+@@ -2382,6 +2407,13 @@
+ 			pos += (uint64_t)(blk + n) * UFS_BLOCK - off;
+ 		}
+ 		if (!error) {
++				/* Persist payload before publishing a header that references it. */
++				error = ufs_sync_cache();
++				if (error) {
++					lck_mtx_unlock(&sweet_ufs_lock);
++					printf("SWEET LOG: payload sync failed (%d), stopping\n", error);
++					return;
++				}
+ 			struct sweet_log_header h = {
+ 				.magic = { 'S', 'W', 'E', 'E', 'T', 'L', 'O', 'G' },
+ 				.version = 1, .size = SWEET_LOG_SIZE, .total = total, .seq = ++seq,
+@@ -2417,7 +2449,10 @@
+ 			printf("SWEET LOG: dedicated log partition unavailable; persistent logging disabled\n");
+ 			return;
+ 		}
+-	} else if (!su.writable || su.nblocks < 2 * SWEET_LOG_BLOCKS) {
++	} else if (su.dali || !su.writable || su.nblocks < 2 * SWEET_LOG_BLOCKS) {
++		if (su.dali) {
++			printf("SWEET LOG: Dali root-tail fallback disabled; use unixnu_logs\n");
++		}
+ 		return;
+ 	}
+ 	PE_parse_boot_argn("ufslogsecs", &sweet_log_secs, sizeof(sweet_log_secs));
