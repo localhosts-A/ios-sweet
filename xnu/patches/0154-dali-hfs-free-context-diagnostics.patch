@@ -1,0 +1,129 @@
+--- a/bsd/sweet_hfs/core/FileExtentMapping.c
++++ b/bsd/sweet_hfs/core/FileExtentMapping.c
+@@ -35,6 +35,10 @@
+ #include "BTreesInternal.h"
+ 
+ #include <sys/malloc.h>
++
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++#define SWEET_HFS_DIAG_FREE_BLOCK 1966891U
++#endif
+  
+ /*
+ ============================================================
+@@ -142,6 +146,8 @@
+ 
+ static OSErr ReleaseExtents(
+ 	ExtendedVCB				*vcb,
++	u_int32_t				fileID,
++	u_int8_t				forkType,
+ 	const HFSPlusExtentRecord	extentRecord,
+ 	u_int32_t				*numReleasedAllocationBlocks,
+ 	Boolean 				*releasedLastExtent);
+@@ -465,6 +471,8 @@
+ 
+ static OSErr ReleaseExtents(
+ 	ExtendedVCB 			*vcb,
++	u_int32_t				fileID,
++	u_int8_t				forkType,
+ 	const HFSPlusExtentRecord	extentRecord,
+ 	u_int32_t				*numReleasedAllocationBlocks,
+ 	Boolean 				*releasedLastExtent)
+@@ -494,7 +502,15 @@
+ 			break;
+ 		}
+ 
+-		err = BlockDeallocate( vcb, extentRecord[extentIndex].startBlock, numAllocationBlocks , 0);
++		#if defined(ARM64_BOARD_CONFIG_SWEET)
++			if (extentRecord[extentIndex].startBlock <= SWEET_HFS_DIAG_FREE_BLOCK &&
++			    SWEET_HFS_DIAG_FREE_BLOCK - extentRecord[extentIndex].startBlock < numAllocationBlocks) {
++				printf("SWEET HFS: extent-release fileid=%u fork=%u start=%u count=%u target=1966891\n",
++				    (unsigned int)fileID, (unsigned int)forkType,
++				    (unsigned int)extentRecord[extentIndex].startBlock, (unsigned int)numAllocationBlocks);
++			}
++#endif
++			err = BlockDeallocate( vcb, extentRecord[extentIndex].startBlock, numAllocationBlocks , 0);
+ 		if ( err != noErr )
+ 			break;
+ 					
+@@ -552,7 +568,7 @@
+ 			break;
+ 		}
+ 		
+-		err = ReleaseExtents( vcb, extents, &numberExtentsReleased, &releasedLastExtent );
++		err = ReleaseExtents( vcb, fileID, forkType, extents, &numberExtentsReleased, &releasedLastExtent );
+ 		if (err != noErr) break;
+ 		
+ 		err = DeleteExtentRecord(vcb, forkType, fileID, startBlock);
+@@ -586,7 +602,7 @@
+ 	Boolean				releasedLastExtent;
+ 	
+ 	//	Release the catalog extents
+-	err = ReleaseExtents( vcb, catalogExtents, &numReleasedAllocationBlocks, &releasedLastExtent );
++	err = ReleaseExtents( vcb, fileID, forkType, catalogExtents, &numReleasedAllocationBlocks, &releasedLastExtent );
+ 	// Release the extra extents, if present
+ 	if (err == noErr && !releasedLastExtent)
+ 		err = TruncateExtents(vcb, forkType, fileID, numReleasedAllocationBlocks, recordDeleted);
+--- a/bsd/sweet_hfs/core/VolumeAllocation.c
++++ b/bsd/sweet_hfs/core/VolumeAllocation.c
+@@ -177,6 +177,10 @@
+ #endif // !HFS_ALLOC_TEST
+ 
+ #include <sys/sysctl.h>
++
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++#define SWEET_HFS_DIAG_FREE_BLOCK 1966891U
++#endif
+ #include <sys/disk.h>
+ #include <sys/uio.h>
+ #include <sys/malloc.h>
+@@ -1619,6 +1623,14 @@
+ 
+ 	err = BlockMarkFreeInternal(vcb, firstBlock, numBlocks, true);
+ 
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	if (err != noErr && firstBlock <= SWEET_HFS_DIAG_FREE_BLOCK &&
++	    SWEET_HFS_DIAG_FREE_BLOCK - firstBlock < numBlocks) {
++		printf("SWEET HFS: BlockDeallocate failed first=%u count=%u flags=0x%x error=%d\n",
++		    firstBlock, numBlocks, (unsigned int)flags, err);
++	}
++#endif
++
+ 	if (err) {
+ 		goto Exit;
+ 	}
+@@ -3001,7 +3013,15 @@
+ 		u_int32_t		startingBlock,
+ 		register u_int32_t	numBlocks)
+ {
+-	return BlockMarkFreeInternal(vcb, startingBlock, numBlocks, true);
++	OSErr err = BlockMarkFreeInternal(vcb, startingBlock, numBlocks, true);
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	if (err != noErr && startingBlock <= SWEET_HFS_DIAG_FREE_BLOCK &&
++	    SWEET_HFS_DIAG_FREE_BLOCK - startingBlock < numBlocks) {
++		printf("SWEET HFS: BlockMarkFree failed first=%u count=%u error=%d\n",
++		    startingBlock, numBlocks, err);
++	}
++#endif
++	return err;
+ }
+ 
+ 
+@@ -3357,7 +3377,15 @@
+ 	panic("hfs: BlockMarkFreeInternal: blocks not allocated!");
+ 	__builtin_unreachable();
+ #else
+-	printf ("hfs: BlockMarkFreeInternal() trying to free unallocated blocks on volume %s <%u, %u>\n",
++	#if defined(ARM64_BOARD_CONFIG_SWEET)
++	if (startingBlock_in <= SWEET_HFS_DIAG_FREE_BLOCK &&
++	    SWEET_HFS_DIAG_FREE_BLOCK - startingBlock_in < numBlocks_in) {
++		printf("SWEET HFS: bitmap-free mismatch first=%u count=%u word=0x%x validate=%u\n",
++		    startingBlock_in, numBlocks_in, SWAP_BE32(*currentWord),
++		    (unsigned int)do_validate);
++	}
++#endif
++		printf ("hfs: BlockMarkFreeInternal() trying to free unallocated blocks on volume %s <%u, %u>\n",
+ 			vcb->vcbVN, startingBlock_in, numBlocks_in);
+ 	hfs_mark_inconsistent(vcb, HFS_INCONSISTENCY_DETECTED);
+ 	err = EIO;
+
