@@ -1,0 +1,44 @@
+diff --git a/bsd/dev/sweet_sample.c b/bsd/dev/sweet_sample.c
+--- a/bsd/dev/sweet_sample.c
++++ b/bsd/dev/sweet_sample.c
+@@ -10,7 +10,8 @@
+  * with tools/sweet-crash.py). A thread blocked in a syscall shows the
+  * syscall stub in pc and its caller in lr/bt.
+  *
+- * First sample 90 s after start, then every 120 s, 40 samples at most.
++ * Sampling delay and period are configurable in seconds (1..3600) for a bounded
++ * user stack trace when a selected service stops making progress.
+  */
+ #include <sys/param.h>
+ #include <sys/systm.h>
+@@ -63,16 +63,28 @@
+ sweet_sample_thread(__unused void *arg, __unused wait_result_t wr)
+ {
+ 	static int chan;
++	unsigned int delay_seconds = 90;
++	unsigned int interval_seconds = 120;
+ 	if (!PE_parse_boot_argn("sweetsample", sweet_sample_names, sizeof(sweet_sample_names))) {
+ 		strlcpy(sweet_sample_names, "SpringBoard,backboardd", sizeof(sweet_sample_names));
+ 	}
+ 	if (sweet_sample_names[0] == '-') {
+ 		return;
+ 	}
+-	(void)tsleep(&chan, PZERO, "sweetsmp", 90 * hz);
++	if (!PE_parse_boot_argn("sweetsampledelay", &delay_seconds, sizeof(delay_seconds)) ||
++	    delay_seconds < 1 || delay_seconds > 3600) {
++		delay_seconds = 90;
++	}
++	if (!PE_parse_boot_argn("sweetsampleinterval", &interval_seconds, sizeof(interval_seconds)) ||
++	    interval_seconds < 1 || interval_seconds > 3600) {
++		interval_seconds = 120;
++	}
++	printf("SMP config: delay=%u interval=%u samples=40 names=%s\n",
++	    delay_seconds, interval_seconds, sweet_sample_names);
++	(void)tsleep(&chan, PZERO, "sweetsmp", delay_seconds * hz);
+ 	for (int i = 0; i < 40; i++) {
+ 		printf("SMP --- sample %d\n", i);
+ 		proc_iterate(PROC_ALLPROCLIST, sweet_sample_proc, NULL, NULL, NULL);
+-		(void)tsleep(&chan, PZERO, "sweetsmp", 120 * hz);
++		(void)tsleep(&chan, PZERO, "sweetsmp", interval_seconds * hz);
+ 	}
+ }

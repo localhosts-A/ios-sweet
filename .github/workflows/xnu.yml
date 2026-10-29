@@ -396,6 +396,10 @@ jobs:
           grep -Fq 'SWEET PERSONA SYSCALL: return' xnu/bsd/dev/arm/systemcalls.c
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET PERSONA SYSCALL: enter'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET PERSONA SYSCALL: return'
+          grep -Fq 'PE_parse_boot_argn("sweetsampledelay"' xnu/bsd/dev/sweet_sample.c
+          grep -Fq 'PE_parse_boot_argn("sweetsampleinterval"' xnu/bsd/dev/sweet_sample.c
+          grep -Fq 'interval_seconds * hz' xnu/bsd/dev/sweet_sample.c
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SMP config: delay=%u interval=%u samples=40 names=%s'
           grep -Fq 'ml_io_map_wcomb((vm_offset_t)(base + offset)' xnu/bsd/dev/sweet_ufs.c
           grep -Fq 'start >= sweet_ramoops_capacity || used > sweet_ramoops_capacity || start > used' xnu/bsd/dev/sweet_ufs.c
           grep -Fq '#define IS_UFS_ERROR_MASK 0x00070884u' xnu/bsd/dev/sweet_ufs.c
