@@ -1,0 +1,13 @@
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -2119,5 +2119,5 @@
+-	/* Dali root stays read-only; only its separate configured log range can write. */
+-	su.writable = (rw != 0) && !su.dali;
+-	if (su.dali && rw != 0) {
+-		printf("SWEET UFS: ignoring ufsrw on Dali; root writes remain disabled\n");
+-	}
++	/* Root writes require explicit ufsrw=1; every write stays within this GPT partition. */
++	su.writable = (rw != 0);
++	if (su.dali && su.writable) {
++		printf("SWEET UFS: Dali root writes explicitly enabled for partition \"%s\"\n", want);
++	}

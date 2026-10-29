@@ -433,6 +433,11 @@ jobs:
           grep -Fq 'int error = ufs_dali_initialize_device();' xnu/bsd/dev/sweet_ufs.c
           grep -Fq 'SWEET USB: skipped Qualcomm DWC3 probe on Dali MT6991' xnu/bsd/dev/sweet_ufs.c
           grep -Fq 'sweet_usb_probe();' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'su.writable = (rw != 0);' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'SWEET UFS: Dali root writes explicitly enabled for partition' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'PE_parse_boot_argn("rootrw", &rootrw' xnu/bsd/vfs/vfs_subr.c
+          grep -Fq 'if (!su.writable || !su.nblocks' xnu/bsd/dev/sweet_ufs.c
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: Dali root writes explicitly enabled for partition "%s"'
           python3 - <<'PY'
           import re
           from pathlib import Path
@@ -459,6 +464,15 @@ jobs:
           prepare = function_body("ufs_dali_prepare_lun")
           assert prepare.index("ufs_dali_initialize_device()") < prepare.index("ufs_query_current_power_mode(&power_mode)")
           ufs_init = function_body("sweet_ufs_init")
+          assert "su.writable = (rw != 0);" in source
+          assert "Dali root writes explicitly enabled for partition" in source
+          assert "ignoring ufsrw on Dali" not in source
+          writes = function_body("ufs_write_blocks")
+          assert "!su.writable" in writes
+          assert "lba < su.first_block" in writes
+          assert "count > su.nblocks - (lba - su.first_block)" in writes
+          log_writes = function_body("ufs_write_log_blocks")
+          assert "su.log_first_block" in log_writes and "su.log_nblocks" in log_writes
           assert re.search(
               r'if \(SecureDTGetProperty\(node, "compatible", \(void const \*\*\)&compatible,\s*&compatible_size\) == kSuccess &&\s*compatible != NULL &&\s*compatible_size >= sizeof\("mediatek,mt6991-ufshc"\) &&\s*memcmp\(compatible, "mediatek,mt6991-ufshc", sizeof\("mediatek,mt6991-ufshc"\)\) == 0\) \{\s*su\.dali = true;\s*\}',
               ufs_init,

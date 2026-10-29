@@ -1,26 +1,28 @@
-## CURRENT HANDOFF — 0152 candidate ready; awaiting exact-hash trial approval (2026-10-29)
+## CURRENT HANDOFF — launchd mount-phase failure; stock restored (2026-10-29)
 
-The approved 0151 pair was tested once. Its UFS trace shows `fDeviceInit` cleared after one READ_FLAG poll, root LUN 2 became ready, READ CAPACITY succeeded, and GPT discovery found `unixnu_logs` and `unixnu_data`. The trace does not confirm a root mount. The SWEET log range remained 4,198,400 zero bytes.
+The approved launch-policy pair was flashed once to slot b: boot SHA-256 ddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39; init_boot SHA-256 ef010d814ef24ddd17efc24b4579b332831b2f95c484e913432a9f50e2b93e54. Its boot-args included unentitled_ios_sim_launch=1. Retained SWEET logs prove launchd passed the prior wrong-platform gate, started its bootstrap sequence, and entered mount-phase-1. The kernel had already selected unixnu_data, set BSD root ufsroot0, and mounted HFS iOSRoot.
 
-The user's photo `IMG_20261029_020026.jpg` shows an SP1 synchronous exception. Symbolication against the exact 0151 kernel maps PC `0xfffffe00074fa6e4` to `sweet_usb_probe+0x6c`, LR to `sweet_usb_probe+0x6f0`, and caller `0xfffffe00074f6ed8` to `keys_thread+0x1c0`. The faulting access targets Qualcomm GCC offset `0xf004`; this pinpoints the Qualcomm DWC3 probe on Dali. The matching kernel has no DWARF line data. The later `handshake structure not initialized` text comes from the panic debugger's shared-memory output path, not UFS.
+In the mount phase, the logs report GetMasterBlock error 16 opening /dev/ufsroot0, mount_hfs failing on the read-only filesystem, mount / failing with 1, and pid 3 exiting 1. The user photo IMG_20261029_082446.jpg shows the resulting mount[3] panic. XNU source makes a read-only root update the leading explanation: root mounts start MNT_RDONLY, / mount requests become MNT_UPDATE, and specfs rejects opening a device that is already mounted with EBUSY. The Dali UFS driver also currently ignores ufsrw=1. Exact mount_hfs options are absent from the logs, so this remains an inference. The earlier Preboot role lookup and missing firmware path are separate layout gaps.
 
-Recovery is complete: original `init_boot_b` and `boot_b` were restored and physically hash-verified. Android returned with `boot_completed=1` on slot `_b`. Stock hashes are `boot_b` `6dc40de74fa7de4f435c513047c51fe10634c1891666031039c52a08b27a3cd5` and `init_boot_b` `08794a432befcf0504ee4933a51260cb6ccc4785b69f345c4b5968e8e6053d2d`. Latest ADB and Fastboot host polls are empty; these stored restoration records are the latest successful device-state evidence.
+Captured console-ramoops-0 is 18,378 bytes, SHA-256 c2615ed6a341fc40d2a6073b0f3aa9a1490cb28722e7b8d213a45163064aaf09. The unixnu_logs SWEET range is 4,198,400 bytes, SHA-256 bc9e942d03fafdb3da194fbe4e4e5ca7dce12398567cfc734af22e9413439ce6; SWEETLOG v1 reports 17,861 bytes and flush 11. Screenshot SHA-256: 6b7b1fa696f3d32c18aad255693e107a80b7ec52f6a9c4db5b85f122971386c6. See shim/out-dali/ufs-40746241772/candidate-launchd-policy-20261029/trial/.
 
-Patch `xnu/patches/0152-dali-skip-qcom-usb-probe.patch` skips
-`sweet_usb_probe()` only when the Dali MT6991 UFS compatible sets `su.dali`;
-other SWEET targets retain the call. Local replay, source gates, and the
-single-file compile passed. Full XNU CI run 40746241772 passed.
+Restored original init_boot_b then boot_b; both Fastboot writes and reboot returned OKAY. Android is booted on slot _b with boot_completed=1. Physical readback matches stock: init_boot_b 08794a432befcf0504ee4933a51260cb6ccc4785b69f345c4b5968e8e6053d2d; boot_b 6dc40de74fa7de4f435c513047c51fe10634c1891666031039c52a08b27a3cd5. Fastboot flashed only those boot partitions; the kernel wrote its bounded diagnostic ring to unixnu_logs, with no userdata/GPT/unixnu_data writes.
 
-Offline candidate `shim/out-dali/ufs-40746241772/candidate/` passes all checks.
-Exact pair: boot SHA-256
-`ddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39`;
-init_boot SHA-256
-`74a4b1bcfd551455f3ddf8c65476231820cdc971a8dc82b726e29da0540a9f74`.
+Next: prepare patch0153 so Dali root writes require explicit ufsrw=1, with rootrw=1 for the HFS root mount. Writes remain bounded to the selected unixnu_data GPT partition; the SWEET log ring remains isolated to unixnu_logs. This changes persistent root filesystem data if trialed. No new device write is authorized by the prior boot-pair approval; obtain approval for the new exact hashes and this root-write scope after CI/package verification.
 
-No 0152 preflight or trial occurred; the latest host poll sees neither ADB nor
-Fastboot. Obtain approval for these exact hashes, then perform a fresh
-read-only preflight before a bounded trial. This remains a kernel/UFS
-diagnostic pair, not a complete iOS userspace image.
+---
+
+## PREVIOUS HANDOFF — 0152 mounted UFS root; launchd policy blocker; stock restored (2026-10-29)
+
+The exact-hash-approved 0152 pair was flashed once. Its retained console log confirms MT6991 UFS LINK_STARTUP, fDeviceInit cleared after one READ_FLAG poll, root LUN2 readiness/capacity, GPT selection of unixnu_data, BSD root ufsroot0, and HFS mounting iOSRoot. The log then records load_init_program attempts for /usr/appleinternal/sbin/launchd.development and /sbin/launchd. The user's IMG_20261029_080007.jpg shows unexpected SIGKILL of launchd (CS_KILLED), namespace 9/code 0xe.
+
+Exact CI 40746241772 XNU source identifies namespace 9/code 14 as OS_REASON_EXEC/EXEC_EXIT_REASON_WRONG_PLATFORM. kern_exec.c:7405-7428 rejects an iOS-platform launch on the XNU_TARGET_OS_OSX DEVELOPMENT kernel without a matching spawn platform, unless unentitled_ios_sim_launch=1 or the no-sandbox entitlement is present. kern_sig.c:2061-2073 panics before SIGKILL is delivered to initproc. CS_KILLED is set on this policy failure and does not prove launchd's signature is corrupt. The handshake structure line is the panic debugger shared-memory diagnostic.
+
+The log area now contains data. unixnu_logs SWEET range: 4,198,400 bytes, SHA-256 2c7e3a1bcad4d6cd9ee451e9e8a81ec12e8a03d6ce3c7684467fc1fc22105bde. pstore console-ramoops-0: 8,195 bytes, SHA-256 fafdd530548eeafbc18857d99075350eee1ce773a2384bc9c051d98ae6cbf134. The photo SHA-256 is 9899962edf427e96147f6ae78c5124388595124bfde826c4a7e3bdd2a3a12922. See shim/out-dali/ufs-40746241772/candidate/trial/.
+
+Recovery completed: original init_boot_b then boot_b were restored, both Fastboot writes returned OKAY, Android returned on slot _b with boot_completed=1, and physical hashes match stock: boot_b 6dc40de74fa7de4f435c513047c51fe10634c1891666031039c52a08b27a3cd5; init_boot_b 08794a432befcf0504ee4933a51260cb6ccc4785b69f345c4b5968e8e6053d2d.
+
+Prepared but not flashed: shim/out-dali/ufs-40746241772/candidate-launchd-policy-20261029/. It reuses the 0152 boot/kernel/ADT and appends unentitled_ios_sim_launch=1 to the SWEET payload command line. Boot SHA-256 remains ddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39; new init_boot SHA-256 is ef010d814ef24ddd17efc24b4579b332831b2f95c484e913432a9f50e2b93e54. Offline payload, ADT, Android v4 layout, CPIO, AVB NONE, and checksum checks pass. This DEVELOPMENT-only argument tests the wrong-platform gate; it does not provide the Preboot volume or dyld shared cache. Historical 0029i got launchd past this gate but stopped in libignition at Preboot/dyld-cache lookup. Obtain exact-hash approval and rerun fresh read-only preflight before another trial.
 
 ---
 
