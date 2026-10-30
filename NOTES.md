@@ -1,3 +1,47 @@
+## CURRENT macOS15 ARM64 MIGRATION LOCAL PASS — publication/CI pending (2026-10-31)
+
+UserselectedmacOS15Arm64; localworkflowselects officialstandardmacos-15, explicitXcode16.4, actualARM64/unamearm64/macOS15guards beforedeps. Usesrealpreinstalledxcodes, removesold/usr/localno-op shim; upstreamhandles/opt/homebrew. XNUtarget13.5/DEVELOPMENT/SWEET/runtimeABI/patches unchanged, all25kernelsourcehashes retained.5newactualshellguardtests/all67unittest/repo+ADTgatesPASS. Actualnativebuild/iigcompatibility NOTverified; no speculativeIORPC.kernelContentfield/code-stripping. FirstfullCI mustprovideactualerrors ifany.
+
+Exactfourpublicationfiles: .github/workflows/xnu.yml, tools/test_xnu_macos15_runner.py, docs/ci-macos15-arm64.md, NOTES.md. Awaitfreshpublication/fullCIapproval; originaluser mkadt.py/mkiosroot.sh edits/assets excluded. No oldmacos14deferred/autorerun/taskactive. DeviceoriginalAndroid/physicalpair/fullcleanverified/allflagsfalse; latestfullfe1scene/COWcopy preserved, originalunreplaced/noCOWapproval. No newdeviceauthorization; desktopNOTachieved.
+
+---
+
+## CURRENT CI BLOCKED — requested rerun also cancelled; no active task (2026-10-31)
+
+CI41120231736 exact6bd6096 attempt2/job124301361780 CANCELLED againbeforecompilation, same explicitmacOS14brownoutannotation. Watchbllldw3di exit1, no artifacts/newlinkedkernel; verifier NOTexecuted. No moreautomaticretry; old00:02deferredbepw59ym7 remainsSTOPPED. Need supportedwindowbuild or reviewedABI-preservingmigration; do not blindlyswapXcode16iig orclaimsourcefailure/success.
+
+DeviceoriginalAndroid/physicalpair/fullclean098...verified/allflagsclosed. Latestfullfe1scene retainedunrepaired/unreplaced, independentCOWcopyverified but no replacementapproval. No activebackgroundtask/newdeviceauthorization; desktopNOTachieved. NextCIblockeddecision, nothardwaretrial.
+
+---
+
+## CURRENT IMMEDIATE CI RERUN — explicitly requested once; delayed task STOPPED (2026-10-31)
+
+HUMAN"再重跑一次": stoppeddeferredbepw59ym7/no00:02automatictrigger, requestedONEimmediatererun sameCI41120231736/exactcommit6bd6096; newjob124301361780 queued. No runner/source/devicechanges. Watchthisattempt; ifsuccess independentlyverifykernel25sources/newmarkers; ifcancel/fail readactualannotation, no auto-repeat. Latestdevicefullyrestored/allflagsclosed; fullfe1COWcopyverified/originaluntouched/no replacementapproval; no desktop.
+
+---
+
+## CURRENT WAIT — latest full COW copy verified, original untouched (2026-10-31)
+
+b9rdxm0d3 COMPLETE0: independentfullfe1d101a...16GiBCOWcopy verified; originalinode/path/mtime/sidecar/rawlogs unchanged. Actualchanged4KiBblocks 7119; no scene replacement authorized/executed, no approvalfile. Do NOTreplace originalorassumespacefreed. DeferredCI bepw59ym7 isalive/normalplatformwait to2026-10-31T00:02UTC, oneattemptunconsumed; nextnotification afterfullCI+independentkernel/25sources/markers. Noearlyrerun/duplicateCI/blindrunnerchange. Device originalAndroid/physicalpair/fullclean verified/allflagsclosed; desktopNOTachieved.
+
+---
+
+## CURRENT HOST PREPARATION — CI platform wait unchanged (2026-10-31)
+
+Genuineuser"继续": prepared/compilechecked next exactCI41120231736/6bd6096candidate helpers and512byteproposal (ONLYsweetfftrace0->3,sweetsampleinterval15->30 vsreducedtrial; fault0/serial0/log30/GUI/HID/WDT1200 unchanged). Pre-CI stager correctlyrefuses missingCI-successmanifest BEFOREcandidatecreation/transport; defaultfullcapturewrapperdryrun zerotransport. Futurecapturewrapper createsexactnewprivate0700directory onlyafteractiveauthorization/static13/physicalstock/capacity checks; no oldmissingdir recurrence/no overwrites. NOcandidatecreated/newtrialapproval/deviceaccess.
+
+Latestfe1 independentfullCOWprepare b9rdxm0d3 RUNNING, originalunreplaced, NOreplacementapprovalfile. Allolderfullscenes retained/devicefullyrestored/all4writeflagsfalse. DeferredsameapprovedCI bepw59ym7 waits2026-10-31T00:02UTC forpublishedmacos14brownoutend, preservingXcode15iigABI. Do NOTearlyrerun/duplicateCI/migraterunnerblindly. OnCIcompletion independentlyverifykernel25sources/newmarkers beforestaging; anylatestscene replacement or exactnewtrial needsfreshseparateapproval. DesktopNOTachieved.
+
+---
+
+## CURRENT 0171 CI PLATFORM WAIT — source pushed; no new linked kernel (2026-10-31)
+
+Exactfivefilecommit `6bd60969f70d9f14e60e76eaf559087170c17a51` pushedforkbranch afterhumanapproval. CI41120231736 cancelledBEFOREanystep/runnerassigned by scheduledmacOS14brownout, notcompilefailure. Officialrunner-images#13518 windowOct30 14:00UTC->Oct31 00:00UTC; retirementNov2. Existingworkflowmacos14/Xcode15pin is intentional: Xcode16iig changesIORPCABI, so NOTblindlymigrate. SameexactapprovedfullCI deferredONCE until2026-10-31T00:02UTC, then watch/fullkernel+25sources+newmarker independentverification. No source/runnerchange, no newdevicewrite/approval, no linkedkernelclaimyet. See finish-backboard-user-entry-ci-after-brownout.py and source-batch JSON; do NOTstartduplicateCI orrunverifierbeforeCI success.
+
+Local0171SVC-onlyBBmode3/fault3OFF tests60policy+2fbcon/zero-fuzz/realARM64objectPASS. Usermkadt/mkiosroot edits preserved/uncommitted, excludesassets. Latestdevice originalAndroid/physicalpair/fullclean098...restored/allflagsclosed; fullfe1scene retainedUNREPAIRED/unreplaced/noCOWpermission. DesktopNOTachieved.
+
+---
+
 ## CURRENT 0171 LOCAL PASS — SVC-only backboardd selector; publication pending (2026-10-31)
 
 Localpatch0171 on exactCI41092719703/HEAD69f6b2ab616655c641135761f171c5a064843a57 adds separate SVCselector3=exactbackboardd; faultselector3 staysOFF. Only SweetFeatureTrace.h + sweet_sample.c changed; no newhook/tasklock/procwalk/userstack/signature/service/resume/input/display/WDT/UFSbehavior. Existing64ring/65536events/40dumps/defaultOFF andfault4096caps unchanged. Normalconfigmarker svc3=backboardd fault3=off. Futureexplicitinterval30 cancoverlatewindow without increasing40dumps or1200s externalcap; currentdeployed0170mode3OFF.
