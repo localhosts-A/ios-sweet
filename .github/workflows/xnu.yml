@@ -38,6 +38,7 @@ on:
       - "tools/test_dali_gui_exec.py"
       - "tools/test_dali_gui_user_entry.py"
       - "tools/test_dali_late_gui_budget.py"
+      - "tools/test_dali_backboard_user_entry.py"
 
 concurrency:
   group: xnu-${{ github.ref }}
@@ -131,6 +132,7 @@ jobs:
           python3 tools/test_dali_gui_exec.py
           python3 tools/test_dali_gui_user_entry.py
           python3 tools/test_dali_late_gui_budget.py
+          python3 tools/test_dali_backboard_user_entry.py
 
       - name: Build
         working-directory: dxb
@@ -432,7 +434,10 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET GUIEXEC: name=%s pid=%d phase=%s result=%d csflags=0x%llx'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -Fx 'signature-failure-before-kill'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -Fx 'release-after'
-          grep -Fq 'sweet_ff_enabled = sweet_ff_mode(enabled)' xnu/bsd/dev/sweet_sample.c
+          grep -Fq 'sweet_ff_enabled = sweet_ff_svc_mode(enabled)' xnu/bsd/dev/sweet_sample.c
+          grep -Fq 'sweet_ff_fault_enabled = sweet_ff_mode(enabled)' xnu/bsd/dev/sweet_sample.c
+          grep -Fq 'return requested == 3 ? requested : sweet_ff_mode(requested);' xnu/bsd/dev/SweetFeatureTrace.h
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'svc3=backboardd fault3=off'
           grep -Fq 'return requested == 1 || requested == 2 ? requested : 0;' xnu/bsd/dev/SweetFeatureTrace.h
           grep -Fq '(unsigned int)(uint16_t)psa->psa_flags' xnu/bsd/kern/kern_exec.c
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UENTRY CONFIG: svc=%u fault=%u'

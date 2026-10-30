@@ -1,3 +1,153 @@
+## CURRENT 0171 LOCAL PASS — SVC-only backboardd selector; publication pending (2026-10-31)
+
+Localpatch0171 on exactCI41092719703/HEAD69f6b2ab616655c641135761f171c5a064843a57 adds separate SVCselector3=exactbackboardd; faultselector3 staysOFF. Only SweetFeatureTrace.h + sweet_sample.c changed; no newhook/tasklock/procwalk/userstack/signature/service/resume/input/display/WDT/UFSbehavior. Existing64ring/65536events/40dumps/defaultOFF andfault4096caps unchanged. Normalconfigmarker svc3=backboardd fault3=off. Futureexplicitinterval30 cancoverlatewindow without increasing40dumps or1200s externalcap; currentdeployed0170mode3OFF.
+
+ValidationPASS:6newactualCtests; complete60policy+2existingfbcon=62actualunittestcases, repo/ADTgates; two-sourcefuzz0/offset0 replay; realARM64samplerobject/newmarker; other23keysources unchanged. Fullnewlink/remoteCI/runtime NOTverified. Exactfivepublicationfiles: 0171patch, tools/test_dali_backboard_user_entry.py, docs/dali-backboard-user-entry.md, .github/workflows/xnu.yml, NOTES.md. Originalmkadt.py/mkiosroot.sh edits preserved/excluded, .tmp/out/device/Applefiles nevercommit. Need fresh exactcommit/push/fullCIauthorization; no newdevice/COWapproval.
+
+Latest reduced-diagnostic trial CLOSED: originalAndroid/physicalpair/fullclean098...verified; all4flagsfalse/oneattemptconsumed; fullfe1d101a...16GiB/3hashes/rawlogs/sidecar preserved unrepaired/unreplaced, no latestsceneCOWpermission. Lowdiagnostics didnot suffice, humannoGUI. No activebackgroundtask. Next seeksourcepublication/fullCIapproval only; desktopNOTachieved.
+
+---
+
+## CURRENT RECOVERY CLOSED — reduced-diagnostic trial noGUI; host-only BB diagnosis next (2026-10-31)
+
+bl9j02nzo COMPLETE0: actual7ranges[0,11,13,107,119,186,187] readback/fullclean16GiB0984638.../originalphysicalbootpair+Android PASS; all4writeflagsfalse; attempt1consumed/remaining0. No activebackgroundtask/newdevicepermission. Fulllatestscene `fe1d101a33b0f05f00fd84a09bba306e9c14adefd5ec7d8b2795961d6081ccfc` retained16GiB/3equalhashes/rawlogs/sidecar, unrepaired/unreplaced; NO newscene COWapproval. Do not repeat oldrecovery.
+
+Lowdiagnostics runtime0/0/serial0/log30confirmed but noGUIclient/frame/refresh; humannoGUI. BothstreamsUUID0A4B3D91...; BBkernelexecsuccessful, xpcproxy->INIT~505s, no usertrap evidence because recorderOFF. NextHOSTONLY minimum SVC-onlymode3=backboardd, keepfault3OFF/no newhooks/locks/userstack and existingbounds, testagainstexactCI0170. Currentkernel3OFF; no0171implementation/publication/CI/trialapprovalyet. Notdesktopfixclaim; no furtherbudgetextension.
+
+---
+
+## CURRENT ACTUAL-DIFF RECOVERY — full scene saved; clean rollback running (2026-10-31)
+
+Fullfe1d101a...16GiB/3equalhashes preserved. Localall256scan/readonlyfsck COMPLETE: actual7chunks[0,11,13,107,119,186,187],469762048bytes; fsck8 hardlinkcount + bitmapORPHANEDblocks (NOT priorunderallocation/freecountdetails). No repair. Authorizedshell-v2actualdiffcleanrollback bl9j02nzo RUNNING; waitfinalperrange/fullroot+physicalstockchecks and flagsclose before declaringrecoverycomplete. OriginalAndroid/physicalstockpair alreadyverified; actualroot recoveryinprogress. No retry.
+
+Next narrowBBuserlandpreclient evidence, notmorewaiting/displayguess: currentkernelmode3OFF; possibleminimumnewSVC-onlymode3=backboardd withindependentfault3OFF, existingring/hooks/quota, interval30coverslatewindow. NO0171implementation/newsourcepublication/newtrialapprovalyet. HumannoGUI and lowdiagnostics didnot suffice. Allolderfullscenes retained.
+
+---
+
+## CURRENT FULL SCENE SAVED — reduced-diagnostic root scan/fsck running (2026-10-31)
+
+Correctedcaptureb8o8isr7q COMPLETE0: full16GiB/remote-before+local+remote-after all `fe1d101a33b0f05f00fd84a09bba306e9c14adefd5ec7d8b2795961d6081ccfc`; newcandidate trial/attempt1/posttrial-root/root.raw+sidecar preserved unrepaired. OriginalAndroid/physicalstockpair verified. Local-only all256diff/readonlyfsck bmz56tecn RUNNING; originaldeviceiOSroot NOTrestored. Do not run rollback until actual complete plan verified; no fixedranges.
+
+Frozenactualdiagnosticfiles5, launchd.log127419bytes/1168lines: BBxpcproxy->INIT505.076s (prior0170~552.672s), notify528.633/RBS560.947s; same-logtimings only, no per-component causalclaim. Latestflush11:57:14 BBpid-domaincreation notGUI/livenessproof. No selectedpersistedcrash is not absenceofmemoryfailure. Bothrawstreams UUID0A4B3D91... fourdiagnosticargsconfirmed/noSVCfaulttrace, but noGUIclient/frame/refresh, humannoGUI. Lowdiagnostics didnot suffice, no repeat/longerbudget.
+
+Next all256plan/fsckcompletion -> authorizedshell-v2 actualdiffrollback/perrangereadback/fullclean+physicalstockchecks/closeflags. Then narrowBBuserlandpre-clientwait diagnosis, notblinddisplay/signature/resume/servicechanges. Alloldera1COWfullscene retained. No newtrial/sourcepublicationapproval.
+
+---
+
+## CURRENT REDUCED-DIAGNOSTIC RESULT — noGUI; full actual capture running (2026-10-31)
+
+OriginalAndroid/fullphysicalstockpairVERIFIED. PostSWEET63790bytes/seq32+pstore63834 saved, SAMEUUID0A4B3D91-4D03-4BE3-AAA8-014B37DF146B. Runtime fourargs0/0/serial0/log30confirmed, no high-frequency records. SB26/BB56/notify90/RBS25all8kernelexecstages0, validspawnflags notSTART_SUSPENDED; onlyproviders, noobservedGUIclient/frame/refresh; HID1200expired. HUMANnoGUI. This diagnostic-overhead reduction didnot suffice; no blind repeat/longerwindow or signing/resume/servicechanges.
+
+Correctedfullactualcapture b8o8isr7q RUNNING beforecleanup; initialb0ny8v9xk failedbeforetransport becausecalleromittedprivatehostdirectory, now exclusive0700directorycreated. ActualiOSrootNOTrestored. Wait3hashes -> readonlyall256scan/fsck/frozenfiles -> authorizedshell-v2 actualdiff rollback/readback/fullclean+physicalpair -> closeflags. No newtrial/sourcepublicationauthorization. Latestoldera1 fullCOWpreserved, no repair. Reports reduced-diagnostic-runtime-evidence.json; do not wait oldcapture or retrydevice.
+
+---
+
+## ACTIVE REDUCED-DIAGNOSTIC TRIAL — single attempt started, recovery pending (2026-10-31)
+
+Authorized start b2epp1eiv COMPLETE0: freshidentity/slot_b/root/physicaloriginalpair/fullclean/static13/capacity/prelogs PASS;9RAW11blocks/fullseededroot readback verified. Exact init_boot31e3e0d4.../bootddfbc184... flashedonceOKAY/rebootUTC 2026-10-30T18:40:23.979809+00:00. Attempt1 consumed/rootdeltaauthorizedfalse; boundedwatch<=1200s from recorded rebootUTC, firstunexpectedtransportreturn/deadline stop, no retry/no extension. No runtime/GUI result yet; samekernel fourdiagnosticargs only.
+
+Originalbootpair/cleanroot NOTrestored now. AfterrealFastboot, NEWpair device_pair recover -> Android/physicalverify -> postlogs -> NEWcandidate fullactual16GiB/3hashes -> readonlyfsck/all256actualdiff -> authorizedshell-v2 cleanrollback/readback/fullclean+physicalstock -> closeflags. Latestoldera1COWfullypreserved. Realgrid/Dock/UIupdate/120s evidence still required; syntheticinput notphysicaltouch.
+
+---
+
+## CURRENT AUTHORIZED STARTUP — reduced-diagnostic preflight/deployment running (2026-10-31)
+
+HUMAN approved exact NEWbootddfbc184.../init_boot31e3e0d4... ONCE/max1200s+completecapture/stock+root recovery. Start sequence b2epp1eiv running, not yet confirmed trial_rebooted. Fresh identity/physicalpair/unmounted/fullclean/prelogs/delta readback/fullseeded/boot guards execute in order; do not run a second copy. Actual delta/boot state can change during task: consult new candidate state, do not assume clean/stock still active. On completion success launch bounded watcher against recorded rebootUTC; on failure inspect state/preserve actual before recovery, no retry. Same0170kernel,4diagnosticargs only; no desktop evidence yet. Latest a1 COW preservation COMPLETE; new capture space verified.
+
+---
+
+## CURRENT REDUCED-DIAGNOSTIC CANDIDATE READY — fresh trial approval required (2026-10-31)
+
+`shim/out-dali/ufs-41092719703/candidate-desktop-reduced-diagnostic-20261031/`: bootddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39; init_boot31e3e0d4bd0dc97cdb602d4b5154afb00eea7109f25157acd69b8a1f7921a1c1; sameCI0170/kernel55e16fbd.../HEAD69f6b2a. Fullstage/independentv4LZ4CPIOargsADTpayloadAVB/wholeclean+seededroot/static13/mockmissingauth+wrongrootgates PASS; bytes match verifiedpreview. Only sweetfftrace0 sweetfffault0 serial0 ufslogsecs30; GUI/HID1200/rootdelta unchanged, no newprobe/kernel/source/CI. Diagnostic overhead remains unproven; no GUI evidence yet.
+
+Latest a1 full16GiB COW replacement COMPLETE/hash/path/permissions/sidecar/rawlogs preserved;4713 changed4KiBblocks/no repair. Fresh availablecapture26078199808bytes passes unchanged16GiB+2GiB gate. Allcandidatewriteflagsfalse/approved0/attempt0; no device command performed. Need separate exact once/max1200s+fullcapture/recovery permission, then fresh real preflight; COWapproval does NOT include trial. Previous0170 originalAndroid/physicalpair/fullclean098... recovery remains closed. No active background task. DesktopNOTachieved.
+
+---
+
+## CURRENT COW REPLACEMENT — verified latest full copy, authorized replacement running (2026-10-31)
+
+Preparation bnza139m7 COMPLETE exit0: fulla1c19095803a743760a5198241cc2bff66f0088529bcbd697162e1463a3d886e copy verified, original/sidecar/rawlogs preserved. Exact human a1-only approval matches path/hash/16GiB; approved replacement bj4j60xmt RUNNING, post-replacement fullhash/capacity not yet confirmed. Do not rerun/assume outcome. On success inspect complete preservation record and fresh capacity, then stage/independently verify NEW reduced-diagnostic candidate. No device/newtrial permission; previous0170 originalAndroid/fullclean recovery closed. Samekernel hostpreview verified, no desktop claim.
+
+---
+
+## CURRENT COW PREPARATION — exact latest scene replacement approved, no trial approval (2026-10-31)
+
+HUMAN approved ONLY a1c19095... complete16GiB equivalent COW replacement, after full-copy/hash/sidecar/rawlog checks; separate approval JSON saved, replacement_executed=false. Preparation bnza139m7 pending completion notification; do not assume success or run replacement early. Then verify replacement/fullhash/capacity before staging new same0170kernel reduced-diagnostic candidate. Full new stager capacity refusal test PASS before output/transport; original guard unchanged. No candidate/newtrial/device permission yet; original Android/fullclean recovery closed, no desktop.
+
+---
+
+## CURRENT HOST PREVIEW VERIFIED — same0170kernel, no new trial; capacity BLOCKED (2026-10-31)
+
+Nondeployable preview `.tmp/desktop-diagnostics-20261030/reduced-diagnostic-preview-20261031/`: init_boot `31e3e0d4bd0dc97cdb602d4b5154afb00eea7109f25157acd69b8a1f7921a1c1`; same kernel55e16fbd... / CI41092719703 / HEAD69f6b2a, boot/ADT/rootdelta unchanged. ONLY sweetfftrace2->0 sweetfffault2->0 serial1->0 ufslogsecs1->30;512-byte args; every payload byte outside608-byte cmdline identical. Native/HID1200 and GUI/client/delay/one-shot guards preserved. This tests UNPROVEN diagnostic-overhead hypothesis, not a claimed GUI fix. serial0 removes explicit normal serial console enable, may remove visible kernel progress; retainedlog precedes suppression, actualGUIrefresh initialization/calls independent. UFSflush30sec may lose latestinterval in persisted ring; separateRAMconsole retained.
+
+Independent v4/LZ4/CPIO/fullargs/payload/ADT/AVB/wholeclean+virtualseeded16GiB/rootdelta/originalbackup verification PASS; build+verification zeroADB/Fastboot mock calls. Safety tests PASS for overwrite refusal/oldstateunchanged/evidenceinode-size-mtimeunchanged/originalcapacityguard. This preview has NO device_pair.py/trial-state.json, deployable=false/zeroauthorization. Current ~8.97GB free FAILS unchanged16GiB+2GiBreserve requirement; do NOT lower guard. No latesta1COW/repair/replacement approved or performed. No source0171/commit/push/newCI/devicewrite/newtrial.
+
+0170 recovery COMPLETE: original physical boot/init_boot + Android and wholeclean0984638... verified; actual7chunks [0,11,13,107,119,186,187] restored, all4flagsfalse, attempt1consumed. Latest original fulla1c19095...17179869184byte scene retained unrepaired/unreplaced. No active background task. Actual1200s produced no GUI client/frame and human noGUI; no desktop. Any future capacity-changing evidence replacement and exact new singletrial require fresh separate approval. Next: resolve that capacity/authorization boundary BEFORE creating a deployable candidate; no retries under oldapproval. Details in selected planning ledger and preview/verification.json.
+
+---
+
+## CURRENT 0170 CLOSED — stock + full clean root restored; no desktop (2026-10-31)
+
+Recovery COMPLETE, not pending: actual seven chunks [0,11,13,107,119,186,187] restored/readback-verified; full16GiB clean SHA256 `0984638dc5b16a2284681bba408977c521c7532366f2886ad6e48802ad427751`; original Android/full physical boot/init_boot hashes verified. All four write permissions CLOSED; attempt1 consumed; no active background tasks, new source/publication or device authorization. Do NOT repeat capture/recovery based on older heads below.
+
+Latest full actual scene `a1c19095803a743760a5198241cc2bff66f0088529bcbd697162e1463a3d886e` remains at 0170candidate `trial/attempt1/posttrial-root/root.raw` (17179869184 bytes, three equal hashes), unrepaired/unreplaced, no COW approval. Read-only fsck8 includes bitmap under-allocation and free-count mismatch; 552 free-count delta is not a proven under-allocated-block count. Launchd persisted121965 bytes/1102lines; late backboardd exec/service INIT observed, cause of ~9-minute xpcproxy transition unknown. Effective1200s WDT/HID still produced no GUI client/surface/frame/refresh; human saw no real GUI.
+
+Next HOST-ONLY: audit serial/display/log-retention and prepare same kernel55e16fbd... / CI41092719703 / HEAD69f6b2a reduced-diagnostic comparison, only sweetfftrace=0 sweetfffault=0 serial=0 ufslogsecs=30. Preserve GUI/HID/1200 budgets/root delta and lightweight markers; no new probe, no longer wait, no signing/service/resume changes. This tests an UNPROVEN overhead hypothesis, not a claimed desktop fix. Current ~9GB free cannot hold another complete16GiB capture; future trial and any latest-scene COW require separate fresh authorization.
+
+---
+
+## CURRENT 0170 ACTUAL RESULT — budgets effective, no GUI client/frame; full capture running (2026-10-31)
+
+OriginalAndroid/fullphysicalstockpairVERIFIED restored(b6qgfwxvg). PostSWEET89516bytes/seq150+pstore622965 saved. Completeactual16GiBNEW0170candidate trial/attempt1/posttrial-root/root.raw capturebdk2o3422 RUNNING; actualrootNOTrestored. Wait3fullhashesBEFOREreadonlyfsck/all256diff/authorizedshell-v2rollback/fullclean+stockchecks/closeflags. Humanreportsactualscreenonlylogs/colorblocks/black(noGUI). No retry/newtrial.
+
+BothstreamsSAMEUUIDA4BA55FD-4ADA-400C-A166-DD84DF790A78: runtimeWDT1200(mode17d/f000)/HIDwait1200actuallyconfirmed. SB27/BB57/notify91/RBS26eachonefullkernelexecsuccess/no signingerror; NOobserveduserGUIclient/surface/swap/refresh, onlyregisteredproviders. DoNOTcallthisdesktop orblindlyextendwindowagain. ActualpackagedADTcountONEdisp0/NULdtype+compatible/canvas1125x2436matchesoneCLCD. ExactcleanGUIprogramsplainARM64/platform2/requiredFIRSTLEVELdepspresent; no missingdisplaycount/dylibproof.
+
+NeedBBuserland/pre-client/crashdependencyboundary. Currentmode2recordsSBonly/40x15s endsnearhalf20minwindow, so doesnotshowlateBBtrapstate; lackBBtraceisnotproofnotrunning. Firstreadfrozenactualcrash/servicefilesafterfullcapture; ifneededreuseboundedrecorderforBB/laterinterval, no newtracingframework/unsafeprocstack/tasklocks, no source0171yet. Allolderfullscenes/f3COWcomplete retained, currentpermissionONLYremainingrecovery, no nextsource/deviceapproval. SourceHEAD69f6b2a/fullCI41092719703.
+
+---
+
+## CURRENT 0170 RECOVERY — 1200s ended, user reports no GUI (2026-10-31)
+
+Observerbi6gri66z hit1200s/exit2; freshtransportnone. HUMAN confirmedFastboot ANDscreenonlylogs/colorblocks/black, no realiOSGUI. Existingauthorizedrecover verifiedrealidentity/slot/sizes and restoredoriginalinit_boot_b/boot_bOKAY, Androidrebootrequested. Backgroundb6qgfwxvg verifiesAndroid/physicaloriginalhashes. ActualiOSrootNOTrestored; no newtrial/retry.
+
+Nextverifycomplete: capture-late-gui-budget-logs.py posttrial, NEW0170candidate fullactual16GiB trial/attempt1/posttrial-root/root.raw/3hashes BEFORE readonlyfsck/all256actualdiff/authorizedshell-v2rollback/fullclean+stockchecks/closeflags. Inspectactualruntimelease/HIDwait1200andGUIclient/surface/refresh/BBcrash-dependency evidence perUUID; do notblindlylengthenwindowagain. Allolderfullscenes/f3approvedCOW intact. Currentpermissiononlyremainingrecovery, notanotherboot. Desktopnotachieved.
+
+---
+
+## ACTIVE 0170 FINITE-1200s TRIAL — recovery pending (2026-10-31)
+
+HumanapprovedexactCI41092719703bootddfbc184.../init_boot57b3875c0bf7f21e619b5821be9a6546210cdcdf6361ffef58aa122aa3ebf6b2 ONCE,explicitmax1200s+fullcapture/recovery. Freshidentity/slot_b/root/unmounted/physicalstock/fullclean/prelogs/all13hashes/capacityPASS;9RAW11blocks+entireseededeb3192...readbackverified. Exactpairflashedinit_boot_b/boot_bOKAY/rebootrequestedUTC2026-10-30T17:03:51.485133+00:00. Attempt1consumed/rootdeltaauthorizedfalse. Watchbi6gri66z <=1200s; firstunexpectedreset/deadlineFastboot,no retry/no extensionforlate120sdesktopobservation. NO currentruntimelease/HIDwait/GUIproofyet.
+
+Originalstockpair and cleanroot NOTrestorednow. UponrealFastboot: newpairdevice_pair recover, wait-late-gui-budget-stock-android.py physicalverify, capture-late-gui-budget-logs.py posttrial, NEW0170candidate trial/attempt1/posttrial-root/root.raw complete16GiB/3hashes BEFORE readonlyfsck/all256actualdiff/authorizedshell-v2rollback/fullclean+physicalstockchecks/closeflags. Allolderfullscenes/f3separatelyapprovedCOW COMPLETE/hash/path/permissions/sidecar/rawlogs retained; pretrialnewcapturefree~26GB. RuntimechangesONLYdaliwdtlease1200+sweethidwait1200withinfinitecaps; no hardwaremode/timeout/signing/service/resumepolicychange. Needactualphysicalgrid/Dock/UIupdate/120s evidence, notcounters.
+
+---
+
+## CURRENT 0170 CANDIDATE READY — finite matched budgets, no runtime approval (2026-10-31)
+
+FullCI41092719703/69f6b2ab616655c641135761f171c5a064843a57 build/link/25sourcebytes/newmarkers independentlyverified. Candidate `shim/out-dali/ufs-41092719703/candidate-desktop-late-gui-budget-20261031/`: bootddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39; init_boot57b3875c0bf7f21e619b5821be9a6546210cdcdf6361ffef58aa122aa3ebf6b2; kernel55e16fbda376b15a1f8ccc2de01a445d869416b9d82e7d92f75c2a5a479daca9. Fullv4/LZ4/CPIO/511args/embeddedADT/rebuiltpayload/AVB/wholeclean+seededroot/static13/mockgatesPASS.0approved/0attempts/allwriteflagsfalse;observationconfig1200ISNOTauthorization.
+
+Onlybudgetargsdaliwdtlease600->1200+sweethidwait1200; native/HIDdefaults120/600 unchanged, realGUI/client/delay/freefinger/onegesturegates preserved; nohardwaretimeout/mode/signing/service/resumechange/no newtracing. AddressesobservedHIDexpirybeforelateBB, notguaranteedesktop/resetcause. Prior0169originalAndroid/physicalpair/wholeclean0984638...verifiedrestored/allflagsclosed. Exactf3COWCOMPLETE/full16GiB/hash/path/permissions/sidecar/rawlogs preserved;free~26.2GB forNEWcompletecapture. Allolderfullscenes intact.
+
+Nextfreshspecificsingletrialmax1200s/firstresetFastboot+fullactual16GiB3hashesBEFOREall256diff/cleanrollback+originalpair/fullcleanverificationapproval. No currentruntimeapproval; do NOTreuseended600strial/hostCOW/sourceapproval asdevicepermission. Sourceusereditsmkadt/mkiosrootexcluded/unchanged. Actualmain-screen/physicaltouchstillunverified.
+
+---
+
+## CURRENT f3 PRESERVATION COMPLETE — 0170 full CI still pending (2026-10-31)
+
+Separatelyapprovedexactf3COWchainbl4dgxak1 COMPLETE/fullbefore-copy-posthashf3a90ce0.../all16GiB/originalpath/permissions/sidecar/rawlogs preserved, actual46changed4096-byteblocks, free26436136960bytes. Allolderfullscenes intact. DeviceoriginalAndroid/physicalpair/fullclean0984638...verifiedrestored/all4flagsclosed; no newdevice/1200sruntimeauthorization.
+
+0170commit69f6b2a/fullCI41092719703 exactHEADconfirmed, watchbgsftuu4e stillpending; no fullnewlink/runtime/desktopclaim. NextCIterminal->independentexactartifact/25source/newmarkerproof->freshcapacity/host-onlycandidatechecks->separateprecisemax1200ssingletrialapproval. Do notrun verifier prematurely orreusecurrentended600strialpermissions.
+
+---
+
+## CURRENT 0170 SOURCE BUILD — exact CI and separate f3 COW running (2026-10-31)
+
+HumanapprovedONLY0170fivefile commit/push/fullCI and separately ONLYlatestf3fullsceneequivalentCOW. Commit69f6b2ab616655c641135761f171c5a064843a57 pushedforkport/dali-mt6991; CI41092719703exactHEADverified, resultpending: https://github.com/localhosts-A/ios-sweet/actions/runs/41092719703 . f3COWchainbl4dgxak1 prepare->replace running undernewgui-user-entry-scene-cow-approval.json; do notclaimcompletion/freecapacitybeforeposthashrecord. No newdevice or1200sruntimeauthorization.
+
+Prior0169originalAndroid/fullphysicalpair/wholeclean0984638...verifiedrestored,all4writeflagsclosed. Allfullscenes/rawlogspreserved. Nextwait CI/COW completion, independentexactartifact/25source/newHIDmarker verification, freshcapacity andhost-onlyprecisecandidatechecks, thennewmax1200ssingletrialrequest. Native/HIDdefaults120/600unchanged, optinfinitecap1200 only; no hardwaretimeout/modechange, no newtracing/policybypass. Existingusermkadt/mkiosroot excluded/untouched.
+
+---
+
 ## CURRENT SAFE STATE / FUNCTIONAL FOLLOW-UP — 0169 recovered, 0170 locally verified (2026-10-31)
 
 0169recoverybgif40gyo COMPLETE: originalAndroid/physicalstockpair/entireclean16GiB0984638...verified,all4writeflagsclosed/attemptconsumed. Fullactualf3a90ce02913feed08cc82bcb5d54a336f0685d1a1ed837c4c29c74220dc1a33/17179869184/3equalhashes/sidecar/rawlogs retainedunrepaired,readonlyfsck8. Latestf3equivalentCOW separatelyauthorized/pending; allolderfullscenes/877approvedCOW intact. No newdevice/trialauthorization.
