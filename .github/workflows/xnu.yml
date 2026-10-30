@@ -23,6 +23,9 @@ on:
       - "tools/enable_xnu_ccache.py"
       - "tools/mkadt.py"
       - "tools/verify-dali-ramoops-adt.py"
+      - "tools/mkpayload.py"
+      - "tools/test_mkpayload_cmdline.py"
+      - "tools/test_dali_hfs_diagnostics.py"
 
 concurrency:
   group: xnu-${{ github.ref }}
@@ -100,6 +103,11 @@ jobs:
         run: |
           ccache --show-config
           ccache --zero-stats
+
+      - name: Test payload limits and HFS diagnostic policy
+        run: |
+          python3 tools/test_mkpayload_cmdline.py
+          python3 tools/test_dali_hfs_diagnostics.py
 
       - name: Build
         working-directory: dxb
@@ -400,6 +408,15 @@ jobs:
           grep -Fq 'PE_parse_boot_argn("sweetsampleinterval"' xnu/bsd/dev/sweet_sample.c
           grep -Fq 'interval_seconds * hz' xnu/bsd/dev/sweet_sample.c
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SMP config: delay=%u interval=%u samples=40 names=%s'
+          grep -Fq 'PE_parse_boot_argn("sweethfsdiag"' xnu/bsd/sweet_hfs/core/sweet_hfs_diag.h
+          grep -Fq '#define SWEET_HFS_DIAG_EVENTS 64u' xnu/bsd/sweet_hfs/core/sweet_hfs_diag.h
+          grep -Fq '#define SWEET_HFS_DIAG_ERRORS 16u' xnu/bsd/sweet_hfs/core/sweet_hfs_diag.h
+          grep -Fq 'SWEET HFSDIAG: bitmap-mismatch' xnu/bsd/sweet_hfs/core/VolumeAllocation.c
+          grep -Fq 'exchange-before-from' xnu/bsd/sweet_hfs/core/hfs_vnops.c
+          grep -Fq 'exchange-after-to' xnu/bsd/sweet_hfs/core/hfs_vnops.c
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET HFSDIAG: bitmap-mismatch'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET HFSDIAG: fork-extent'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'truncate-tail-after'
           grep -Fq 'ml_io_map_wcomb((vm_offset_t)(base + offset)' xnu/bsd/dev/sweet_ufs.c
           grep -Fq 'start >= sweet_ramoops_capacity || used > sweet_ramoops_capacity || start > used' xnu/bsd/dev/sweet_ufs.c
           grep -Fq '#define IS_UFS_ERROR_MASK 0x00070884u' xnu/bsd/dev/sweet_ufs.c

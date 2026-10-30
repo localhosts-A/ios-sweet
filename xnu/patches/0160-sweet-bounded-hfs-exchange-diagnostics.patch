@@ -1,0 +1,285 @@
+--- a/bsd/sweet_hfs/core/VolumeAllocation.c
++++ b/bsd/sweet_hfs/core/VolumeAllocation.c
+@@ -190,6 +190,7 @@
+ #include "hfs_kdebug.h"
+ #include "rangelist.h"
+ #include "hfs_extents.h"
++#include "sweet_hfs_diag.h"
+ 
+ /* Headers for unmap-on-mount support */
+ #include <sys/disk.h>
+@@ -1002,6 +1003,14 @@
+ 
+ 	*actualStartBlock = extent.startBlock;
+ 	*actualNumBlocks  = extent.blockCount;
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	if (sweet_hfs_diag_range(extent.startBlock, extent.blockCount)) {
++		uint32_t event = sweet_hfs_diag_take(err != noErr);
++		if (event)
++			printf("SWEET HFSDIAG: allocate n=%u first=%u count=%u flags=0x%x error=%d\n",
++			    event, extent.startBlock, extent.blockCount, (unsigned int)flags, err);
++	}
++#endif
+ 
+ 	return err;
+ }
+@@ -1011,7 +1020,16 @@
+ 						hfs_block_alloc_flags_t flags,
+ 						hfs_alloc_extra_args_t *ap)
+ {
+-	return MacToVFSError(hfs_block_alloc_int(hfsmp, extent, flags, ap));
++	errno_t error = MacToVFSError(hfs_block_alloc_int(hfsmp, extent, flags, ap));
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	if (sweet_hfs_diag_range(extent->startBlock, extent->blockCount)) {
++		uint32_t event = sweet_hfs_diag_take(error != 0);
++		if (event)
++			printf("SWEET HFSDIAG: block-alloc n=%u first=%u count=%u flags=0x%x error=%d\n",
++			    event, extent->startBlock, extent->blockCount, (unsigned int)flags, error);
++	}
++#endif
++	return error;
+ }
+ 
+ /*
+@@ -3373,6 +3391,17 @@
+ 	return err;
+ 
+ Corruption:
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	{
++		/* Error budget remains available after normal tracing is exhausted. */
++		uint32_t event = sweet_hfs_diag_take(true);
++		if (event)
++			printf("SWEET HFSDIAG: bitmap-mismatch n=%u first=%u count=%u bitmap-base=%u word-index=%u word=0x%x validate=%u blocksize=%u journal=%u\n",
++			    event, startingBlock_in, numBlocks_in, startingBlock,
++			    (unsigned int)(currentWord - buffer), SWAP_BE32(*currentWord),
++			    (unsigned int)do_validate, hfsmp->blockSize, hfsmp->jnl != NULL);
++	}
++#endif
+ #if DEBUG
+ 	panic("hfs: BlockMarkFreeInternal: blocks not allocated!");
+ 	__builtin_unreachable();
+--- a/bsd/sweet_hfs/core/FileExtentMapping.c
++++ b/bsd/sweet_hfs/core/FileExtentMapping.c
+@@ -36,6 +36,22 @@
+ 
+ #include <sys/malloc.h>
+ 
++#include "sweet_hfs_diag.h"
++
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++static void
++sweet_hfs_diag_extent(const char *phase, uint32_t fileid, uint8_t fork,
++    uint32_t first, uint32_t count, OSErr error)
++{
++	if (error == noErr && !sweet_hfs_diag_range(first, count))
++		return;
++	uint32_t event = sweet_hfs_diag_take(error != noErr);
++	if (event)
++		printf("SWEET HFSDIAG: %s n=%u fileid=%u fork=%u first=%u count=%u error=%d\n",
++		    phase, event, fileid, (unsigned int)fork, first, count, error);
++}
++#endif
++
+ #if defined(ARM64_BOARD_CONFIG_SWEET)
+ #define SWEET_HFS_DIAG_FREE_BLOCK 1966891U
+ #endif
+@@ -510,7 +526,13 @@
+ 				    (unsigned int)extentRecord[extentIndex].startBlock, (unsigned int)numAllocationBlocks);
+ 			}
+ #endif
++			#if defined(ARM64_BOARD_CONFIG_SWEET)
++			sweet_hfs_diag_extent("extent-release-before", fileID, forkType, extentRecord[extentIndex].startBlock, numAllocationBlocks, noErr);
++#endif
+ 			err = BlockDeallocate( vcb, extentRecord[extentIndex].startBlock, numAllocationBlocks , 0);
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++			sweet_hfs_diag_extent("extent-release-after", fileID, forkType, extentRecord[extentIndex].startBlock, numAllocationBlocks, err);
++#endif
+ 		if ( err != noErr )
+ 			break;
+ 					
+@@ -1388,7 +1410,13 @@
+ 			}
+ #endif
+ 			//	Free the blocks in bitmap
++			#if defined(ARM64_BOARD_CONFIG_SWEET)
++			sweet_hfs_diag_extent("truncate-tail-before", fileid, forkType, startBlock, numBlocks, noErr);
++#endif
+ 			err = BlockDeallocate(vcb, startBlock, numBlocks, 0);
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++			sweet_hfs_diag_extent("truncate-tail-after", fileid, forkType, startBlock, numBlocks, err);
++#endif
+ 			if (err != noErr) goto ErrorExit;
+ 			//	Adjust length of this extent
+ 			extentRecord[extentIndex].blockCount -= numBlocks;
+@@ -1419,7 +1447,13 @@
+ 			}
+ #endif
+ 		//	Deallocate this extent
+-		err = BlockDeallocate(vcb, extentRecord[extentIndex].startBlock, numBlocks, 0);
++		#if defined(ARM64_BOARD_CONFIG_SWEET)
++			sweet_hfs_diag_extent("truncate-following-before", fileid, forkType, extentRecord[extentIndex].startBlock, numBlocks, noErr);
++#endif
++			err = BlockDeallocate(vcb, extentRecord[extentIndex].startBlock, numBlocks, 0);
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++			sweet_hfs_diag_extent("truncate-following-after", fileid, forkType, extentRecord[extentIndex].startBlock, numBlocks, err);
++#endif
+ 		if (err != noErr) goto ErrorExit;
+ 		//	Update next file allocation block number
+ 		nextBlock += numBlocks;
+--- a/bsd/sweet_hfs/core/hfs_vnops.c
++++ b/bsd/sweet_hfs/core/hfs_vnops.c
+@@ -76,6 +76,57 @@
+ 
+ #include "BTreesInternal.h"
+ #include "FileMgrInternal.h"
++
++#include "sweet_hfs_diag.h"
++
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++static bool
++sweet_hfs_diag_cnode(struct cnode *cp)
++{
++	if (!sweet_hfs_diag_enabled())
++		return false;
++	const char *name = (const char *)cp->c_desc.cd_nameptr;
++	static const char *const names[] = {"persona.kb", "usersession.kb", "usersessions.kb"};
++	for (unsigned int i = 0; name && i < sizeof(names) / sizeof(names[0]); ++i) {
++		size_t length = strlen(names[i]);
++		if (cp->c_desc.cd_namelen >= length && memcmp(name, names[i], length) == 0)
++			return true;
++	}
++	struct filefork *forks[] = {cp->c_datafork, cp->c_rsrcfork};
++	for (unsigned int i = 0; i < 2; ++i) {
++		if (forks[i] == NULL)
++			continue;
++		for (unsigned int j = 0; j < kHFSPlusExtentDensity; ++j)
++			if (sweet_hfs_diag_range(forks[i]->ff_extents[j].startBlock, forks[i]->ff_extents[j].blockCount))
++				return true;
++	}
++	return false;
++}
++
++static void
++sweet_hfs_diag_forks(const char *phase, struct cnode *cp, int error)
++{
++	struct filefork *forks[] = {cp->c_datafork, cp->c_rsrcfork};
++	for (unsigned int i = 0; i < 2; ++i) {
++		struct filefork *ff = forks[i];
++		if (ff == NULL)
++			continue;
++		uint32_t event = sweet_hfs_diag_take(error != 0);
++		if (!event)
++			return;
++		printf("SWEET HFSDIAG: %s n=%u fileid=%u cnid=%u fork=%u size=%llu blocks=%u unalloc=%u flags=0x%x error=%d\n",
++		    phase, event, (unsigned int)cp->c_fileid, (unsigned int)cp->c_desc.cd_cnid,
++		    i ? 255u : 0u, (unsigned long long)ff->ff_size, ff->ff_blocks,
++		    ff->ff_unallocblocks, (unsigned int)cp->c_flag, error);
++		for (unsigned int j = 0; j < kHFSPlusExtentDensity; ++j) {
++			if (ff->ff_extents[j].blockCount)
++				printf("SWEET HFSDIAG: fork-extent n=%u fileid=%u fork=%u index=%u first=%u count=%u\n",
++				    event, (unsigned int)cp->c_fileid, i ? 255u : 0u, j,
++				    ff->ff_extents[j].startBlock, ff->ff_extents[j].blockCount);
++		}
++	}
++}
++#endif
+ 
+ /* Global vfs data structures for hfs */
+ 
+@@ -2102,6 +2153,9 @@
+ 	cat_cookie_t cookie;
+ 	time_t orig_from_ctime, orig_to_ctime;
+ 	bool have_cnode_locks = false, have_from_trunc_lock = false, have_to_trunc_lock = false;
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	bool sweet_diag_exchange = false;
++#endif
+ 	
+ 	/* For the quarantine EA */
+ 	void *from_xattr = NULL;
+@@ -2234,6 +2288,13 @@
+ 	if ((error = hfs_lockpair(from_cp, to_cp, HFS_EXCLUSIVE_LOCK)))
+ 		goto exit;
+ 	have_cnode_locks = true;
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	sweet_diag_exchange = sweet_hfs_diag_cnode(from_cp) || sweet_hfs_diag_cnode(to_cp);
++	if (sweet_diag_exchange) {
++		sweet_hfs_diag_forks("exchange-before-from", from_cp, 0);
++		sweet_hfs_diag_forks("exchange-before-to", to_cp, 0);
++	}
++#endif
+ 
+ 	// Don't allow modification of the journal or journal_info_block
+ 	if (hfs_is_journal_file(hfsmp, from_cp) ||
+@@ -2637,6 +2698,12 @@
+ 	    hfs_end_transaction(hfsmp);
+ 	}
+ 
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	if (have_cnode_locks && sweet_diag_exchange) {
++		sweet_hfs_diag_forks("exchange-after-from", from_cp, error);
++		sweet_hfs_diag_forks("exchange-after-to", to_cp, error);
++	}
++#endif
+ 	if (have_cnode_locks)
+ 		hfs_unlockpair(from_cp, to_cp);
+ 
+--- /dev/null
++++ b/bsd/sweet_hfs/core/sweet_hfs_diag.h
+@@ -0,0 +1,56 @@
++/* Opt-in HFS diagnostics; budgets are independent in each translation unit. */
++#ifndef SWEET_HFS_DIAG_H
++#define SWEET_HFS_DIAG_H
++
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++#include <stdbool.h>
++#include <sys/types.h>
++#include <libkern/OSAtomic.h>
++#include <pexpert/pexpert.h>
++
++#define SWEET_HFS_DIAG_EVENTS 64u
++#define SWEET_HFS_DIAG_ERRORS 16u
++
++static volatile UInt32 sweet_hfs_diag_events;
++static volatile UInt32 sweet_hfs_diag_errors;
++
++static inline bool
++sweet_hfs_diag_enabled(void)
++{
++	unsigned int enabled = 0;
++	return PE_parse_boot_argn("sweethfsdiag", &enabled, sizeof(enabled)) && enabled == 1;
++}
++
++static inline bool
++sweet_hfs_diag_contains(uint32_t first, uint32_t count, uint32_t target)
++{
++	return count != 0 && first <= target && target - first < count;
++}
++
++static inline bool
++sweet_hfs_diag_range(uint32_t first, uint32_t count)
++{
++	uint32_t target = 3059250u;
++	if (!sweet_hfs_diag_enabled())
++		return false;
++	(void)PE_parse_boot_argn("sweethfsblock", &target, sizeof(target));
++	return sweet_hfs_diag_contains(first, count, target);
++}
++
++static inline uint32_t
++sweet_hfs_diag_take(bool error)
++{
++	if (!sweet_hfs_diag_enabled())
++		return 0;
++	volatile UInt32 *counter = error ? &sweet_hfs_diag_errors : &sweet_hfs_diag_events;
++	uint32_t limit = error ? SWEET_HFS_DIAG_ERRORS : SWEET_HFS_DIAG_EVENTS;
++	uint32_t value = (uint32_t)OSAddAtomic(0, counter);
++	while (value < limit) {
++		if (OSCompareAndSwap(value, value + 1, counter))
++			return value + 1;
++		value = (uint32_t)OSAddAtomic(0, counter);
++	}
++	return 0;
++}
++#endif
++#endif

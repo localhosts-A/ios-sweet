@@ -140,8 +140,19 @@ def adt_dram(adt_blob):
             struct.unpack('<Q', chosen.prop('dram-size'))[0])
 
 
+def encode_cmdline(cmdline):
+    data = cmdline.encode('utf-8')
+    if b'\0' in data:
+        raise ValueError('boot arguments must not contain NUL bytes')
+    if len(data) >= BOOT_LINE_LENGTH:
+        raise ValueError(f'boot arguments are {len(data)} UTF-8 bytes; maximum is {BOOT_LINE_LENGTH - 1}')
+    return data
+
+
 def build(kernel_path, adt_path, cmdline, ramdisk_path=None):
-    buf = bytearray(open(kernel_path, 'rb').read())
+    cl = encode_cmdline(cmdline)
+    with open(kernel_path, 'rb') as stream:
+        buf = bytearray(stream.read())
     m = parse_macho(buf)
     nfix = apply_chained_fixups(buf, m)
     segs = [s for s in m['segs'] if s['vmsize']]
@@ -153,13 +164,15 @@ def build(kernel_path, adt_path, cmdline, ramdisk_path=None):
     kernel_end = max(s['vmaddr'] + s['vmsize'] for s in segs)
     kernel_end = (kernel_end + PAGE - 1) & ~(PAGE - 1)
 
-    adt_blob = open(adt_path, 'rb').read()
+    with open(adt_path, 'rb') as stream:
+        adt_blob = stream.read()
     # The ADT decides where the kernel's RAM is (mkadt.py --highmem).
     PHYS_BASE, MEM_SIZE = adt_dram(adt_blob)
     pieces = [(s['vmaddr'], s['vmsize'], buf[s['fileoff']:s['fileoff'] + s['filesize']]) for s in segs]
     ramdisk = None
     if ramdisk_path:
-        image = open(ramdisk_path, 'rb').read()
+        with open(ramdisk_path, 'rb') as stream:
+            image = stream.read()
         rd_size = (len(image) + PAGE - 1) & ~(PAGE - 1)
         rd_va = kernel_end
         kernel_end = rd_va + rd_size
@@ -183,7 +196,6 @@ def build(kernel_path, adt_path, cmdline, ramdisk_path=None):
     struct.pack_into('<8sII', out, 0, b'SWEETXNU', 1, len(pieces))
     struct.pack_into('<7Q', out, 0x10, virt_base, m['entry'], adt_off, len(adt_blob), kernel_end,
                      PHYS_BASE, MEM_SIZE)
-    cl = cmdline.encode()[:BOOT_LINE_LENGTH - 1]
     out[CMDLINE:CMDLINE + len(cl)] = cl
     for i, t in enumerate(seg_table):
         struct.pack_into('<4Q', out, SEG_TABLE + 32 * i, *t)
@@ -199,8 +211,12 @@ if __name__ == '__main__':
     ap.add_argument('--cmdline', default='debug=0xc serial=3 cpus=1 keepsyms=1')
     ap.add_argument('--ramdisk', help='root image for md0 (boot with rd=md0)')
     a = ap.parse_args()
-    blob, info = build(a.kernel, a.adt, a.cmdline, a.ramdisk)
-    open(a.out, 'wb').write(blob)
+    try:
+        blob, info = build(a.kernel, a.adt, a.cmdline, a.ramdisk)
+    except ValueError as error:
+        ap.error(str(error))
+    with open(a.out, 'wb') as stream:
+        stream.write(blob)
     for k, v in info.items():
         if k != 'segs':
             print(f'{k}: {v}')
