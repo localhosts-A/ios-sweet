@@ -26,6 +26,11 @@ on:
       - "tools/mkpayload.py"
       - "tools/test_mkpayload_cmdline.py"
       - "tools/test_dali_hfs_diagnostics.py"
+      - "tools/dali-root-capture.py"
+      - "tools/test_dali_root_capture.py"
+      - "tools/test_dali_boottrace.py"
+      - "tools/test_dali_gui.py"
+      - "tools/test_dali_hid_geometry.py"
 
 concurrency:
   group: xnu-${{ github.ref }}
@@ -104,10 +109,14 @@ jobs:
           ccache --show-config
           ccache --zero-stats
 
-      - name: Test payload limits and HFS diagnostic policy
+      - name: Test payload and Dali bring-up policies
         run: |
           python3 tools/test_mkpayload_cmdline.py
           python3 tools/test_dali_hfs_diagnostics.py
+          python3 tools/test_dali_root_capture.py
+          python3 tools/test_dali_boottrace.py
+          python3 tools/test_dali_gui.py
+          python3 tools/test_dali_hid_geometry.py
 
       - name: Build
         working-directory: dxb
@@ -417,6 +426,23 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET HFSDIAG: bitmap-mismatch'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET HFSDIAG: fork-extent'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'truncate-tail-after'
+          grep -Fq 'PE_parse_boot_argn("sweettasktrace"' xnu/bsd/kern/kern_exit.c
+          grep -Fq 'sweet_boot_task_exit(p, "exit-final", exitval)' xnu/bsd/kern/kern_exit.c
+          grep -Fq 'PE_parse_boot_argn("sweetheartbeat"' xnu/bsd/dev/sweet_sample.c
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET BOOTTASK: %s name=%s pid=%d'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET BOOTHEART: sample=%d'
+          grep -Fq 'PE_parse_boot_argn("daligui"' xnu/iokit/Kernel/arm/SweetFramebuffer.cpp
+          grep -Fq 'sweet_surface_create_buffer(fLogicalW, fLogicalH' xnu/iokit/Kernel/arm/SweetFramebuffer.cpp
+          grep -Fq 'OSCompareAndSwap(0, 1, &early_flushing)' xnu/osfmk/arm64/sweet_early.c
+          nm fakeroot/System/Library/Kernels/kernel.development.sweet | grep ' _sweet_early_gui_refresh$'
+          nm fakeroot/System/Library/Kernels/kernel.development.sweet | grep ' _sweet_early_gui_format$'
+          nm fakeroot/System/Library/Kernels/kernel.development.sweet | grep ' _sweet_dali_gui_presented$'
+          grep -Fq 'ready = ready && sweet_dali_gui_presented()' xnu/iokit/Kernel/arm/hid/SweetHID.cpp
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI GUI: logical %ux%u physical %ux%u'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI GUI: refresh complete n=%u'
+          grep -Fq '"sweethidswipe"' xnu/iokit/Kernel/arm/hid/SweetHID.cpp
+          grep -Fq 'self->fSwipeStep = 24' xnu/iokit/Kernel/arm/hid/SweetHID.cpp
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI HID: one diagnostic swipe complete'
           grep -Fq 'ml_io_map_wcomb((vm_offset_t)(base + offset)' xnu/bsd/dev/sweet_ufs.c
           grep -Fq 'start >= sweet_ramoops_capacity || used > sweet_ramoops_capacity || start > used' xnu/bsd/dev/sweet_ufs.c
           grep -Fq '#define IS_UFS_ERROR_MASK 0x00070884u' xnu/bsd/dev/sweet_ufs.c

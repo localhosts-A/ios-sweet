@@ -1,0 +1,94 @@
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -1448,6 +1448,40 @@
+  * to zombie, and unlink proc from allproc and parent's lists.  Save exit
+  * status and rusage for wait().  Check for child processes and orphan them.
+  */
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++#include <libkern/OSAtomic.h>
++#include <pexpert/pexpert.h>
++
++static void
++sweet_boot_task_exit(proc_t p, const char *phase, int status)
++{
++	unsigned int enabled = 0;
++	if (!PE_parse_boot_argn("sweettasktrace", &enabled, sizeof(enabled)) || enabled != 1)
++		return;
++	static const char *const names[] = {
++		"launchd", "usermanagerd", "dirs_cleaner", "xpcroleaccountd",
++		"init_featureflag", "notifyd", "backboardd", "SpringBoard"
++	};
++	bool wanted = false;
++	for (unsigned int i = 0; i < sizeof(names) / sizeof(names[0]); ++i)
++		if (strcmp(p->p_comm, names[i]) == 0)
++			wanted = true;
++	if (!wanted)
++		return;
++	static volatile UInt32 lines;
++	UInt32 value = (UInt32)OSAddAtomic(0, &lines);
++	for (;;) {
++		if (value >= 64)
++			return;
++		if (OSCompareAndSwap(value, value + 1, &lines))
++			break;
++		value = (UInt32)OSAddAtomic(0, &lines);
++	}
++	printf("SWEET BOOTTASK: %s name=%s pid=%d waitstatus=0x%x event=%u\n",
++	    phase, p->p_comm, proc_getpid(p), (unsigned int)status, value + 1);
++}
++#endif
++
+ int
+ exit1(proc_t p, int rv, int *retval)
+ {
+@@ -1473,6 +1507,9 @@
+ 	struct uthread *ut;
+ 	int error = 0;
+ 	bool proc_exiting = false;
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	sweet_boot_task_exit(p, "exit-request", rv);
++#endif
+ 
+ #if DEVELOPMENT || DEBUG
+ 	/*
+@@ -2152,6 +2189,9 @@
+ 	proc_unlock(p);
+ 	pid = proc_getpid(p);
+ 	exitval = p->p_xstat;
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	sweet_boot_task_exit(p, "exit-final", exitval);
++#endif
+ 	KERNEL_DEBUG_CONSTANT_IST(KDEBUG_COMMON,
+ 	    BSDDBG_CODE(DBG_BSD_PROC, BSD_PROC_EXIT) | DBG_FUNC_START,
+ 	    pid, exitval, 0, 0, 0);
+--- a/bsd/dev/sweet_sample.c
++++ b/bsd/dev/sweet_sample.c
+@@ -67,10 +67,12 @@
+ 	static int chan;
+ 	unsigned int delay_seconds = 90;
+ 	unsigned int interval_seconds = 120;
++	unsigned int heartbeat = 0;
++	(void)PE_parse_boot_argn("sweetheartbeat", &heartbeat, sizeof(heartbeat));
+ 	if (!PE_parse_boot_argn("sweetsample", sweet_sample_names, sizeof(sweet_sample_names))) {
+ 		strlcpy(sweet_sample_names, "SpringBoard,backboardd", sizeof(sweet_sample_names));
+ 	}
+-	if (sweet_sample_names[0] == '-') {
++	if (sweet_sample_names[0] == '-' && heartbeat != 1) {
+ 		return;
+ 	}
+ 	if (!PE_parse_boot_argn("sweetsampledelay", &delay_seconds, sizeof(delay_seconds)) ||
+@@ -85,8 +87,12 @@
+ 	    delay_seconds, interval_seconds, sweet_sample_names);
+ 	(void)tsleep(&chan, PZERO, "sweetsmp", delay_seconds * hz);
+ 	for (int i = 0; i < 40; i++) {
+-		printf("SMP --- sample %d\n", i);
+-		proc_iterate(PROC_ALLPROCLIST, sweet_sample_proc, NULL, NULL, NULL);
++		if (heartbeat == 1)
++			printf("SWEET BOOTHEART: sample=%d\n", i);
++		if (sweet_sample_names[0] != '-') {
++			printf("SMP --- sample %d\n", i);
++			proc_iterate(PROC_ALLPROCLIST, sweet_sample_proc, NULL, NULL, NULL);
++		}
+ 		(void)tsleep(&chan, PZERO, "sweetsmp", interval_seconds * hz);
+ 	}
+ }

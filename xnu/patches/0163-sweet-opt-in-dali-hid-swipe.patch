@@ -1,0 +1,186 @@
+--- a/iokit/Kernel/arm/hid/SweetHID.cpp
++++ b/iokit/Kernel/arm/hid/SweetHID.cpp
+@@ -28,6 +28,8 @@
+ #include "IOHIDKeys.h"
+ #include "IOHIDPrivateKeys.h"
+ #include "IOHIDUsageTables.h"
++#include "SweetHIDGeometry.h"
++extern "C" int sweet_dali_gui_presented(void);
+ 
+ extern "C" uint64_t mach_absolute_time(void);
+ 
+@@ -367,7 +369,11 @@
+ 	virtual UInt32 getProductID() APPLE_KEXT_OVERRIDE { return 2; }
+ private:
+ 	IOLock *fLock;
+-	int fLogicalW, fLogicalH, fOffX, fOffY;
++	int fPhysicalW, fPhysicalH, fLogicalW, fLogicalH;
++	bool fDaliCoordinates, fSwipeArmed, fSwipeActive;
++	IOTimerEventSource *fSwipe;
++	UInt32 fSwipeDelay, fSwipeTicks, fSwipeReady, fSwipeStep, fSwipeArms;
++	static void swipeFired(OSObject *owner, IOTimerEventSource *sender);
+ 	bool fDown[SWEET_TOUCH_FINGERS];
+ 	bool fEdge[SWEET_TOUCH_FINGERS];
+ 	IOFixed fX[SWEET_TOUCH_FINGERS];
+@@ -434,10 +440,18 @@
+ 	}
+ 	int native = 0;
+ 	PE_parse_boot_argn("sweetfb_native", &native, sizeof(native));
+-	fLogicalW = native ? 1080 : 1125;
+-	fLogicalH = native ? 2400 : 2436;
+-	fOffX = (fLogicalW - 1080) / 2;
+-	fOffY = (fLogicalH - 2400) / 2;
++	int dali = 0;
++	PE_parse_boot_argn("daligui", &dali, sizeof(dali));
++	PE_Video video;
++	PE_current_console(&video);
++	fDaliCoordinates = dali == 1 && video.v_width == 1280 && video.v_height == 2772;
++	fPhysicalW = fDaliCoordinates ? 1280 : 1080;
++	fPhysicalH = fDaliCoordinates ? 2772 : 2400;
++	fLogicalW = native ? fPhysicalW : 1125;
++	fLogicalH = native ? fPhysicalH : 2436;
++	fSwipe = NULL;
++	fSwipeDelay = fSwipeTicks = fSwipeReady = fSwipeStep = fSwipeArms = 0;
++	fSwipeArmed = fSwipeActive = false;
+ 	/* The digitizer covers the main display (backboardd maps it 1:1). */
+ 	setProperty("DisplayIntegrated", kOSBooleanTrue);
+ 	setProperty("SurfaceWidth", (unsigned long long)(68 << 16), 32);	/* mm, 16.16 */
+@@ -445,7 +459,77 @@
+ 	gSweetTouch = this;
+ 	registerService();
+ 	IOLog("SWEET HID: touch registered\n");
++	if (fDaliCoordinates && PE_parse_boot_argn("sweethidswipe", &fSwipeDelay, sizeof(fSwipeDelay)) &&
++	    fSwipeDelay >= 1 && fSwipeDelay <= 300) {
++		fSwipe = IOTimerEventSource::timerEventSource(this, &SweetHIDTouch::swipeFired);
++		if (fSwipe && _hidWorkLoop->addEventSource(fSwipe) == kIOReturnSuccess) {
++			IOLog("DALI HID: one diagnostic swipe armed; client-delay=%u seconds\n", fSwipeDelay);
++			fSwipe->setTimeoutMS(1000);
++		} else {
++			OSSafeReleaseNULL(fSwipe);
++			IOLog("DALI HID: diagnostic swipe timer unavailable\n");
++		}
++	}
+ 	return true;
++}
++
++void
++SweetHIDTouch::swipeFired(OSObject *owner, IOTimerEventSource *sender)
++{
++	SweetHIDTouch *self = (SweetHIDTouch *)owner;
++	if (self->fSwipeStep >= 24)
++		return;
++	if (!self->fSwipeActive) {
++		if (++self->fSwipeTicks >= 600) {
++			IOLog("DALI HID: diagnostic swipe expired without a ready client\n");
++			return;
++		}
++		IOLockLock(self->_clientLock);
++		bool ready = self->_clients && self->_clients->getCount() != 0;
++		IOLockUnlock(self->_clientLock);
++		ready = ready && sweet_dali_gui_presented();
++		if (!ready) {
++			self->fSwipeArmed = false;
++			sender->setTimeoutMS(1000);
++			return;
++		}
++		if (!self->fSwipeArmed) {
++			self->fSwipeArmed = true;
++			self->fSwipeReady = self->fSwipeTicks + self->fSwipeDelay;
++			if (self->fSwipeArms++ < 4)
++				IOLog("DALI HID: touch client ready; delayed diagnostic swipe\n");
++		}
++		IOLockLock(self->fLock);
++		bool busy = self->fDown[0];
++		IOLockUnlock(self->fLock);
++		if (busy || self->fSwipeTicks < self->fSwipeReady) {
++			sender->setTimeoutMS(1000);
++			return;
++		}
++		self->fSwipeActive = true;
++	}
++	if (self->fSwipeStep == 0) {
++		/* Menu is a wake hint, not the power toggle that could lock an awake screen. */
++		if (gSweetButtons) gSweetButtons->key(kHIDUsage_Csmr_Menu, true);
++		self->fSwipeStep++;
++		sender->setTimeoutMS(100);
++	} else if (self->fSwipeStep == 1) {
++		if (gSweetButtons) gSweetButtons->key(kHIDUsage_Csmr_Menu, false);
++		self->fSwipeStep++;
++		sender->setTimeoutMS(1000);
++	} else if (self->fSwipeStep <= 22) {
++		int start = self->fPhysicalH - 2;
++		int end = self->fPhysicalH / 3;
++		int y = start - (start - end) * (int)(self->fSwipeStep - 2) / 20;
++		self->touch(0, true, self->fPhysicalW / 2, y);
++		self->fSwipeStep++;
++		sender->setTimeoutMS(20);
++	} else {
++		self->touch(0, false, self->fPhysicalW / 2, self->fPhysicalH / 3);
++		self->fSwipeStep = 24;
++		IOLog("DALI HID: one diagnostic swipe complete; physical input remains unverified\n");
++		/* Deliberately do not re-arm. */
++	}
+ }
+ 
+ void
+@@ -458,22 +542,25 @@
+ 	if (finger < 0 || finger >= SWEET_TOUCH_FINGERS) {
+ 		return;
+ 	}
+-	x = x < 0 ? 0 : (x > 1079 ? 1079 : x);
+-	y = y < 0 ? 0 : (y > 2399 ? 2399 : y);
++	x = x < 0 ? 0 : (x >= fPhysicalW ? fPhysicalW - 1 : x);
++	y = y < 0 ? 0 : (y >= fPhysicalH ? fPhysicalH - 1 : y);
+ 
+ 	IOLockLock(fLock);
+ 	bool was = fDown[finger];
+-	/* Panel pixels -> the presented 1125x2436 display (SweetFramebuffer.cpp). */
+-	IOFixed nx = (IOFixed)(((int64_t)(x + fOffX) << 16) / fLogicalW);
+-	IOFixed ny = (IOFixed)(((int64_t)(y + fOffY) << 16) / fLogicalH);
++	/* Dali scales its full panel; Sweet retains the centered logical crop. */
++	int32_t nx, ny;
++	if (!sweet_hid_normalize(x, y, fPhysicalW, fPhysicalH, fLogicalW, fLogicalH, fDaliCoordinates, &nx, &ny)) {
++		IOLockUnlock(fLock);
++		return;
++	}
+ 	bool moved = down && (nx != fX[finger] || ny != fY[finger]);
+ 	if (was == down && !moved) {
+ 		IOLockUnlock(fLock);
+ 		return;
+ 	}
+ 	if (!was && down) {
+-		fEdge[finger] = x < SWEET_TOUCH_EDGE_PX || x > 1079 - SWEET_TOUCH_EDGE_PX ||
+-		    y < SWEET_TOUCH_EDGE_PX || y > 2399 - SWEET_TOUCH_EDGE_PX;
++		fEdge[finger] = x < SWEET_TOUCH_EDGE_PX || x > fPhysicalW - 1 - SWEET_TOUCH_EDGE_PX ||
++		    y < SWEET_TOUCH_EDGE_PX || y > fPhysicalH - 1 - SWEET_TOUCH_EDGE_PX;
+ 	}
+ 
+ 	collection = IOHIDEvent::digitizerEvent(now, 0, kIOHIDDigitizerTransducerTypeHand, false, 0, 0, 0);
+--- /dev/null
++++ b/iokit/Kernel/arm/hid/SweetHIDGeometry.h
+@@ -0,0 +1,25 @@
++/* Shared physical-to-logical HID normalization; no hardware access. */
++#ifndef SWEET_HID_GEOMETRY_H
++#define SWEET_HID_GEOMETRY_H
++#include <stdbool.h>
++#include <stdint.h>
++
++static inline bool
++sweet_hid_normalize(int32_t x, int32_t y, int32_t physical_width, int32_t physical_height,
++    int32_t logical_width, int32_t logical_height, bool scaled, int32_t *nx, int32_t *ny)
++{
++	if (!nx || !ny || physical_width <= 0 || physical_height <= 0 ||
++	    logical_width <= 0 || logical_height <= 0 || physical_width > 16384 ||
++	    physical_height > 16384 || logical_width > 16384 || logical_height > 16384)
++		return false;
++	if (!scaled && (logical_width < physical_width || logical_height < physical_height))
++		return false;
++	x = x < 0 ? 0 : (x >= physical_width ? physical_width - 1 : x);
++	y = y < 0 ? 0 : (y >= physical_height ? physical_height - 1 : y);
++	int32_t dx = scaled ? 0 : (logical_width - physical_width) / 2;
++	int32_t dy = scaled ? 0 : (logical_height - physical_height) / 2;
++	*nx = (int32_t)(((int64_t)(x + dx) * 65536) / (scaled ? physical_width : logical_width));
++	*ny = (int32_t)(((int64_t)(y + dy) * 65536) / (scaled ? physical_height : logical_height));
++	return true;
++}
++#endif

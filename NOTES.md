@@ -1,4 +1,76 @@
-## CURRENT HANDOFF — bounded desktop diagnostics locally verified; full CI pending (2026-10-30)
+## CURRENT HOST STATUS — new12-file push/CI approved; COW evidence preservation complete (2026-10-30)
+
+User explicitly approved the selected12-file source/test/doc/workflow commit/push and new full CI; no new hardware trial is authorized. User separately approved replacing the redundant snapshot inode with the verified full COW reconstruction. That replacement is complete at the original root.raw path: before/after SHA256dabbb9453b59bfdd724ce1937e1e590832db699a2527093d12f8613f79f62cee, all16GiB and sidecar/log/delta evidence retained, about27GiB now free. No phone command or write was involved; original Android/clean-root recovery and closed authorizations remain unchanged.
+
+New GUI/HID readiness was tightened within the approved scope: synthetic input waits for both a client and a real frame with successful retained refresh; refresh failure clears readiness. New C symbols' definition/reference and updated local object compiles pass. A brittle test-string replacement initially stopped before CI-gate update; corrected the exact fragment and reran tests/objects before any commit. No full new CI/hardware result is claimed yet. Next: push selected12 files and run full CI, then verify exact artifacts and separately request a new bounded trial. Do not stage original mkadt/mkiosroot edits, .tmp/out, Apple material or device data.
+
+---
+
+## OFFLINE MILESTONE — startup/GUI/HID patches locally verified; new CI approval pending (2026-10-30)
+
+Device is safely recovered: original Android/physical boot pair and full clean16GiB prefix verified; first trial consumed and all write authorizations closed. Actual trial snapshot and logs remain preserved. Latest findings do not certify HFS reliability; do not reuse the dirty root or claim a desktop. No device write has been attempted after the user-completed restore.
+
+New uncommitted0161 adds bounded exit/final task events and a heartbeat without proc/user-stack inspection.0162 is daligui=1 opt-in: logical1125x2436 buffer surface, bounded scale/32-bit adopted-format copy, shared nonblocking early/GUI DSI guard and workloop retry/power fade; default/Sweet path preserved.0163 is opt-in one-shot delayed virtual wake/swipe after client readiness, with matching geometry; real physical input remains unverified. All6modified source files pass syntax and ARM64 object codegen, C GUI symbols match across components, and 0160-0163 replay zero-fuzz to all14compiled/added files. Full new kernel CI/link and actual display have NOT occurred. Host suites total29passing tests, including1200C renderer and1600C HID reference cases.
+
+A standalone complete16GiB COW reconstruction of the actual snapshot is hash-identical(dabbb945...), and a35-block143,868-byte delta also reconstructs it fully. Original full raw is still retained and no evidence replacement/deletion has been authorized. About12GiB free is insufficient for another ordinary full capture. Ask separately before atomically replacing that redundant raw inode with the verified complete COW image; contents/path/metadata would remain the same while freeing duplicate storage.
+
+Next: obtain approval for the selected12source/doc/test/workflow files' commit/push/new full CI, excluding original mkadt/mkiosroot edits and all artifacts. Also obtain separate COW storage approval or another capture location. Only after successful full CI/package verification request a fresh exact-pair hardware trial; no old approval is reusable. Proposed future args and identity-only D22 preview are in .tmp/desktop-diagnostics-20261030, not a flashable candidate yet.
+
+---
+
+## CURRENT HANDOFF — 0160 trial fully recovered; offline GUI/boot-task work (2026-10-30)
+
+The user personally ran the approved root restoration after auto-mode blocked the agent's write command. Local recovery records now verify chunks0/11/13/107/119/186 read back, final full16GiB clean SHA2560984638dc5b16a2284681bba408977c521c7532366f2886ad6e48802ad427751, Android original physical boot/init_boot hashes and completed boot. trial_attempts=1; all device/root/stock-restore authorization flags are false. No trial is active and no repeat is approved. Candidate verification.json has been updated accordingly. The entire actual dirty16GiB capture remains preserved (dabbb945...), not repaired.
+
+Latest controlled trial: same UUID8BDC11F4... in both streams, Loaded persona manifest, DONE UMD_INIT, then tasks through init_featureflags; no GUI evidence and no photo. Logs contain no allocator mismatch, but actual readonly fsck exits8. Actual inode318422 firstlink0 and bitmap/catalog/header divergence are preserved. Forced-stop non-journaled consistency and lazy hardlink compatibility remain hypotheses, not UFS bad-block proof. Never reuse this dirty root for another trial; clean restore has now completed.
+
+Uncommitted host work: readonly root capture tool/six tests;0161 bounded exit/heartbeat diagnostics/two tests/compile;0162 daligui=1 opt-in logical surface, scale/format and shared guarded refresh (3-file syntax compile passes after isolated export-header refresh); actual pure C blit helper matches1200 seeded reference cases. These have NOT passed new full CI or hardware, and are not part of d5d7001/CI41003130969. Existing mkadt/mkiosroot dirty changes remain preserved. Next: complete actual-code GUI tests/replay/object checks and analyze hardlink/bitmap evidence; obtain further source-push/CI approval only for selected new files, then separate exact-pair hardware approval. No visible desktop yet.
+
+---
+
+## CURRENT BLOCKER — stock safe; root restore denied by auto classifier (2026-10-30)
+
+Stock Android completion and original physical boot hashes are verified. The actual posttrial16GiB snapshot is safely saved and verified at candidate/trial/attempt1/posttrial-root/root.raw, SHA256dabbb9453b59bfdd724ce1937e1e590832db699a2527093d12f8613f79f62cee. Readonly fsck exits8 (hardlink count, under-allocated bitmap, file/free counts/VH). All256 chunks were compared with exact approved clean0984638...; changed chunks are0/11/13/107/119/186,384MiB total. No root repair was applied to the snapshot or device.
+
+IMPORTANT: actual restore-trial-root.py --write command was blocked by auto-mode classifier [Unverifiable Deletion Scope], before execution. Root restoration is NOT complete; device iOS root remains posttrial. Do not claim clean recovery or repeat the candidate. The user was given an exact ! command to run personally; wait for its result/permission rather than bypassing denial through other commands, agents or tests. The helper has fresh identity/original-pair/current-root gates, actual captured diff, per-chunk readback and final16GiB hash gates. Original scope is six known64MiB chunks inside root prefix, not userdata/GPT/tail. The complete snapshot remains untouched regardless of eventual restoration.
+
+Offline progress: uncommitted0161 exit/heartbeat diagnostics compile and two host tests pass; pure C GUI scaling/pixel helper in work/source has1200 seeded cases matching independent reference with guard bytes intact. No new CI/push/trial authorized for these. Continue offline implementation and actual-image analysis without device writes while root recovery is blocked.
+
+---
+
+## CURRENT RECOVERY — stock physical hashes verified; actual-root capture running (2026-10-30)
+
+Original Android completion and both full physical boot hashes are verified. Posttrial logs are saved; both streams share UUID8BDC11F4-A77D-4C54-A6F2-CF12909FC8B5. The actual16GiB root is being read-only captured by background booropxd0, with length and before/local/after hash gates; no root repair/restore has occurred. Do not overwrite the root before this capture verifies. Candidate trial/attempt1 holds the raw logs, decoded texts and stage-summary.json.
+
+The log explicitly says Loaded persona manifest and DONE UMD_INIT. No bitmap mismatch/unallocated-free/runtime-corruption marker occurred in this window; this is not yet an offline integrity pass. Last visible task init_featureflags, no real GUI spawn/sample/IOK evidence, samples0..9 retained. The interval to recovery evidence is at most282.9seconds, so the last task is not proof of a hang. Next: after capture notification, readonly fsck/bitmap/catalog analysis, prepare complete actual diff, restore approved clean base from actual diff and verify whole16GiB plus original pair. One trial is consumed; no repeat authorized.
+
+---
+
+## RECOVERY IN PROGRESS — original boot images flashed; root现场 preserved (2026-10-30)
+
+User reported Fastboot return. device_pair recover verified target/slot/unlocked/sizes, restored original init_boot_b then boot_b, and requested Android reboot; both writes returned OKAY. Physical Android/hash verification is pending in background bvxw69lvj. The iOS root has NOT been restored or repaired: actual posttrial bytes must be captured first. Next immediately after Android verification: save pstore and exact SWEET area, run read-only16GiB capture, analyze on a copy, then perform approved clean-root restoration and full-prefix verification. Candidate retry remains forbidden (one attempt consumed). No screen photo or desktop evidence received.
+
+---
+
+## ACTIVE TRIAL — patch0160 exact pair started; recovery pending (2026-10-30)
+
+The user explicitly approved one exact CI41003130969 trial and bounded root/log writes plus stock/clean-root recovery. Fresh Android and Fastboot preflight passed. The11-block/45,056-byte root delta was applied/read back and complete target prefix eb3192... was verified. Both exact candidate images were flashed once and fastboot reboot returned OKAY at2026-10-30T04:58:43.046101+00:00. Single trial authorization is consumed; DO NOT retry the candidate. The phone has not yet been restored. Background transport/deadline watcher b635mroo2 is running. User was asked for screen evidence and Fastboot return if panic/reboot/no progress. Observe no longer than600seconds from trial start.
+
+Next priority: on target Fastboot return, recover original init_boot_b then boot_b using the candidate's guarded device_pair.py recover; verify Android original physical hashes. Save pstore and exact SWEET log range, then capture actual unmounted16GiB root with before/local/after hash BEFORE restoring/repairing any root bytes. Preserve evidence, analyze offline, restore the approved clean base and verify full prefix. Candidate/pair state: shim/out-dali/ufs-41003130969/candidate-bounded-hfs-desktop-diag-20261030/trial-state.json. No desktop is verified yet.
+
+---
+
+## CURRENT HANDOFF — patch0160 full CI passed; exact pair awaits trial approval (2026-10-30)
+
+Commit d5d70015b95db7c178760a44ab2b37a40cf3d32f was explicitly approved, pushed and built by full XNU CI41003130969 successfully. Build/link, new host tests, source/linked markers and both uploads passed. Downloaded kernel SHA256 7a2f96c105960051c688b2b2313837157762fb8b842e305d5e88b805a0cedbe5 matches CI; all four resulting HFS sources equal local replay/object-compiled files. Candidate: shim/out-dali/ufs-41003130969/candidate-bounded-hfs-desktop-diag-20261030/. Exact boot ddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39; init_boot 17e87df432b8b88fe1430b76265564e5ad69a776238924ae3fdeb4337bf94f67. Offline v4, payload/ADT/CPIO, LZ4 profile and complete AVB descriptor verification pass. First AVB filename-resolution failure was corrected and rerun successfully; it was not accepted as a pass.
+
+NO device command or partition write has occurred. Device authorization flags remain false and trial count0. Guarded private helpers add explicit serial, exact hashes, fresh stock/identity/slot checks, an unmounted full-target-root hash gate before reboot and a one-use trial count. Transport-mocked tests prove no approval means no transport calls, and wrong root means no reboot/write. The uncommitted read-only root capture utility and six tests prepare actual dirty-prefix preservation; no real capture has occurred. Next requires separate user approval of this exact pair, the11-block root delta, possible runtime writes in unixnu_data first16GiB, unixnu_logs+16MiB length4,198,400, one maximum10-minute observation and stock/clean-root recovery after evidence capture.
+
+Root base/target remain0984638.../eb3192... (full hashes in candidate README/verification). Existing mkadt/mkiosroot changes preserved. For later GUI work only, fetched exact20H392 D22 DeviceTree component from Apple's CDN, CRC checked and extracted separately; existing filter yields61 static product properties and drops5 flagged fields. Product-only ADT preview is isolated under .tmp/desktop-diagnostics-20261030/gui-preview, not active in the first candidate. GUI refresh/geometry and actual home-screen acceptance remain undone.
+
+---
+
+## PREVIOUS HANDOFF — bounded desktop diagnostics locally verified; full CI pending (2026-10-30)
 
 The approved desktop plan is being implemented host-side. No phone access or partition write occurred. Patch0160 adds opt-in, bounded HFS allocation/exchange/free/bitmap context; it does not change persona, HFS semantics or GUI behavior. Exact replay against CI40927108866 sources is zero-fuzz and matches compiled source. Three modified HFS files pass syntax and real ARM64 object compiles; five host policy tests, six payload-limit tests and two existing fbcon tests pass. Full new kernel build/link, linked-marker gates, candidate packaging and hardware trials have NOT occurred. New kernel/init_boot hashes are therefore not available. See docs/dali-desktop-diagnostics.md and .tmp/desktop-diagnostics-20261030/{candidate-spec.json,boot-evidence.json,baseline-check.log}.
 

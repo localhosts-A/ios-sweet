@@ -1,0 +1,490 @@
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -35,6 +35,10 @@
+  * the first swap on (it still reaches the persistent log; panics draw).
+  */
+ #include "SweetSurface.h"
++#include "SweetFBBlit.h"
++extern "C" {
++#include <arm64/sweet_early.h>
++}
+ 
+ extern "C" int sweet_console_muted;     /* osfmk/console/serial_console.c */
+ 
+@@ -50,6 +54,11 @@
+ #include <pexpert/pexpert.h>
+ #include <kern/clock.h>
+ #include <sys/proc.h>
++#include <libkern/OSAtomic.h>
++
++static volatile UInt32 sweet_dali_gui_frame_ready;
++extern "C" int sweet_dali_gui_presented(void);
++extern "C" int sweet_dali_gui_presented(void) { return (int)OSAddAtomic(0, &sweet_dali_gui_frame_ready); }
+ 
+ enum {
+ 	kSweetFBGetLayerDefaultSurface  = 3,
+@@ -106,7 +115,10 @@
+ 	int32_t       fOffX, fOffY;             /* logical origin of the panel */
+ 	uintptr_t     fPixels;          /* kernel mapping of the panel memory */
+ 	IOMemoryMap  *fMap;
+-	SweetSurface *fSurface;         /* the panel memory as an IOSurface */
++	SweetSurface *fSurface;         /* userland default canvas */
++	SweetSurface *fPanelSurface;    /* physical scanout */
++	bool          fDaliGui, fRefreshPending;
++	uint32_t      fPanelFormat, fGuiFrames, fGuiRejects, fRefreshes, fRefreshFailures;
+ 	IOLock       *fLock;            /* swaps and client list */
+ 	OSArray      *fClients;
+ 	uint32_t      fSwapID;
+@@ -122,6 +134,8 @@
+ 	void removeClient(IOMobileFramebufferUserClient *client);
+ 	void swap(const uint8_t *rec);
+ 	void present(const uint8_t *rec);
++	void presentDali(const uint8_t *rec);
++	void flushPanel(void);
+ };
+ 
+ OSDefineMetaClassAndStructors(AppleCLCD, IOMobileFramebuffer);
+@@ -168,9 +182,19 @@
+ 	}
+ 	int native = 0;
+ 	PE_parse_boot_argn("sweetfb_native", &native, sizeof(native));
++	int dali = 0;
++	PE_parse_boot_argn("daligui", &dali, sizeof(dali));
++	fDaliGui = dali == 1 && fWidth == 1280 && fHeight == 2772;
++	fRefreshPending = false;
++	fGuiFrames = fGuiRejects = fRefreshes = fRefreshFailures = 0;
++	fPanelFormat = 2;
++	if (fDaliGui && (!sweet_early_gui_format(&fPanelFormat) || !sweet_fb_format_supported(fPanelFormat))) {
++		IOLog("DALI GUI: retained 32-bit display format unavailable\n");
++		return false;
++	}
+ 	fLogicalW = fWidth;
+ 	fLogicalH = fHeight;
+-	if (!native && fWidth <= SWEET_FB_LOGICAL_W && fHeight <= SWEET_FB_LOGICAL_H) {
++	if (!native && (fDaliGui || (fWidth <= SWEET_FB_LOGICAL_W && fHeight <= SWEET_FB_LOGICAL_H))) {
+ 		fLogicalW = SWEET_FB_LOGICAL_W;
+ 		fLogicalH = SWEET_FB_LOGICAL_H;
+ 	}
+@@ -178,12 +202,19 @@
+ 	fOffY = (int32_t)(fLogicalH - fHeight) / 2;
+ 	fLock = IOLockAlloc();
+ 	fClients = OSArray::withCapacity(4);
+-	fSurface = sweet_surface_create_physical(fPhys, fWidth, fHeight, fRowBytes, SWEET_FB_FORMAT_BGRA);
+-	fPixels = fSurface != NULL ? fSurface->kernelAddress() : 0;
++	fPanelSurface = sweet_surface_create_physical(fPhys, fWidth, fHeight, fRowBytes, SWEET_FB_FORMAT_BGRA);
++	if (fDaliGui) {
++		fSurface = sweet_surface_create_buffer(fLogicalW, fLogicalH, SWEET_FB_FORMAT_BGRA);
++	} else if (fPanelSurface != NULL) {
++		fPanelSurface->retain();
++		fSurface = fPanelSurface;
++	}
++	fPixels = fPanelSurface != NULL ? fPanelSurface->kernelAddress() : 0;
+ 	fWorkLoop = IOWorkLoop::workLoop();
+-	if (fLock == NULL || fClients == NULL || fPixels == 0 || fWorkLoop == NULL) {
++	if (fLock == NULL || fClients == NULL || fPixels == 0 || fSurface == NULL || fWorkLoop == NULL) {
+ 		IOLog("SWEET FB: setup failed\n");
+ 		OSSafeReleaseNULL(fSurface);    /* stays published: also held by the table */
++		OSSafeReleaseNULL(fPanelSurface);
+ 		OSSafeReleaseNULL(fWorkLoop);
+ 		return false;
+ 	}
+@@ -200,6 +231,9 @@
+ 	setProperty(kIOUserClientClassKey, "IOMobileFramebufferUserClient");
+ 	setProperty("external", false);
+ 	setProperty("DisplayPipePlaneBaseAlignment", 64ULL, 32);
++	if (fDaliGui)
++		IOLog("DALI GUI: logical %ux%u physical %ux%u format=0x%x logical-surface=%u scanout-surface=%u\n",
++		    fLogicalW, fLogicalH, fWidth, fHeight, fPanelFormat, fSurface->id, fPanelSurface->id);
+ 	registerService();
+ 	IOLog("SWEET FB: AppleCLCD %ux%u stride %u at 0x%llx, default surface %u, presented as %ux%u\n",
+ 	    fWidth, fHeight, fRowBytes, fPhys, fSurface->id, fLogicalW, fLogicalH);
+@@ -235,10 +269,19 @@
+ 			for (uint32_t y = 0; y < fb->fHeight; y++) {
+ 				volatile uint32_t *row = (volatile uint32_t *)(fb->fPixels + (uint64_t)y * fb->fRowBytes);
+ 				for (uint32_t x = 0; x < fb->fWidth; x++) {
+-					row[x] = step < 6 ? (row[x] >> 1) & 0x7f7f7f7f : 0;
++					if (fb->fDaliGui) {
++						uint32_t pixel = sweet_fb_unpack_pixel(row[x], fb->fPanelFormat);
++						pixel = step < 6 ? (pixel >> 1) & 0x007f7f7f : 0;
++						row[x] = sweet_fb_pack_pixel(pixel, fb->fPanelFormat);
++					} else {
++						row[x] = step < 6 ? (row[x] >> 1) & 0x7f7f7f7f : 0;
++					}
+ 				}
+ 			}
+ 		}
++		if (step <= 6 && fb->fDaliGui)
++			fb->fRefreshPending = true;
++		fb->flushPanel();
+ 		sender->setTimeoutUS(SWEET_FB_VSYNC_US);
+ 		return;
+ 	}
+@@ -256,6 +299,7 @@
+ 		fb->present(rec);
+ 		IOFreeData(rec, SWEET_FB_SWAP_REC_SIZE);
+ 	}
++	fb->flushPanel();
+ 	sender->setTimeoutUS(SWEET_FB_VSYNC_US);
+ }
+ 
+@@ -309,6 +353,80 @@
+ }
+ 
+ void
++AppleCLCD::flushPanel(void)
++{
++	if (!fDaliGui || !fRefreshPending)
++		return;
++	/* Only this workloop submits GUI refresh; console uses the same try-guard. */
++	int result = sweet_early_gui_refresh();
++	if (result == 2)
++		return; /* Coalesce and retry next vsync; never spin on console/panic. */
++	fRefreshPending = false;
++	if (result == 1) {
++		if (fGuiFrames)
++			(void)OSCompareAndSwap(0, 1, &sweet_dali_gui_frame_ready);
++		if (++fRefreshes <= 4)
++			IOLog("DALI GUI: refresh complete n=%u frames=%u\n", fRefreshes, fGuiFrames);
++	} else {
++		(void)OSCompareAndSwap(1, 0, &sweet_dali_gui_frame_ready);
++		if (fRefreshFailures++ < 4)
++			IOLog("DALI GUI: refresh unavailable result=%d; retained timeout policy preserved\n", result);
++	}
++}
++
++void
++AppleCLCD::presentDali(const uint8_t *rec)
++{
++	uint32_t mask = get32(rec, 0x104);
++	bool copied = false;
++	for (uint32_t layer = 0; layer < SWEET_FB_LAYERS; ++layer) {
++		uint32_t id = get32(rec, 0x54 + 4 * layer);
++		if (!(mask & (1u << layer)) || !id)
++			continue;
++		SweetSurface *s = sweet_surface_copy(id);
++		if (s == NULL)
++			continue;
++		if (s == fPanelSurface) {
++			copied = true; /* Direct scanout writes still need command refresh. */
++			s->release();
++			continue;
++		}
++		const uint8_t *a = rec + 0x64 + 16 * layer;
++		const uint8_t *b = rec + 0xc4 + 16 * layer;
++		struct sweet_fb_rect from = {(int32_t)get32(a, 0), (int32_t)get32(a, 4), (int32_t)get32(a, 8), (int32_t)get32(a, 12)};
++		struct sweet_fb_rect to = {(int32_t)get32(b, 0), (int32_t)get32(b, 4), (int32_t)get32(b, 8), (int32_t)get32(b, 12)};
++		if (from.width <= 0 || from.height <= 0) {
++			from.width = (int32_t)s->width;
++			from.height = (int32_t)s->height;
++		}
++		if (to.width <= 0 || to.height <= 0) {
++			to.width = from.width;
++			to.height = from.height;
++		}
++		uintptr_t address = s->kernelAddress();
++		bool valid = false;
++		if (address && s->memory && s->offset <= s->memory->getLength() &&
++		    s->pixelFormat == SWEET_FB_FORMAT_BGRA && s->bytesPerElement == 4 &&
++		    s->elementWidth == 1 && s->elementHeight == 1) {
++			struct sweet_fb_plane source = {(uint8_t *)(address + s->offset), s->memory->getLength() - s->offset,
++			    s->width, s->height, s->bytesPerRow};
++			struct sweet_fb_plane target = {(uint8_t *)fPixels, fPanelSurface->memory->getLength(),
++			    fWidth, fHeight, fRowBytes};
++			valid = sweet_fb_blit_scaled(target, source, fLogicalW, fLogicalH, from, to, fPanelFormat);
++		}
++		if (!valid && fGuiRejects++ < 8)
++			IOLog("DALI GUI: rejected/empty layer=%u surface=%u fmt=0x%x bpr=%u\n", layer, id, s->pixelFormat, s->bytesPerRow);
++		copied |= valid;
++		s->release();
++	}
++	if (copied) {
++		fRefreshPending = true;
++		if (++fGuiFrames <= 4)
++			IOLog("DALI GUI: present n=%u layer-mask=0x%x\n", fGuiFrames, mask);
++	}
++}
++
++void
+ AppleCLCD::present(const uint8_t *rec)
+ {
+ 	uint32_t mask = get32(rec, 0x104);
+@@ -322,6 +440,11 @@
+ 			 * writes the read-only-late cons_ops_index and panics. */
+ 			sweet_console_muted = 1;
+ 		}
++	}
++
++	if (fDaliGui) {
++		presentDali(rec);
++		return;
+ 	}
+ 
+ 	for (uint32_t layer = 0; layer < SWEET_FB_LAYERS; layer++) {
+--- a/iokit/Kernel/arm/SweetSurface.cpp
++++ b/iokit/Kernel/arm/SweetSurface.cpp
+@@ -242,6 +242,45 @@
+ 	s->memory = IOMemoryDescriptor::withPhysicalAddress(phys, s->allocSize, kIODirectionInOut);
+ 	s->mapCache = kIOMapWriteCombineCache;
+ 	if (s->memory == NULL || !sweet_surface_publish(s)) {
++		s->release();
++		return NULL;
++	}
++	return s;
++}
++
++SweetSurface *
++sweet_surface_create_buffer(uint32_t width, uint32_t height, uint32_t pixelFormat)
++{
++	if (!width || !height || width > SWEET_SURFACE_MAX_DIM || height > SWEET_SURFACE_MAX_DIM)
++		return NULL;
++	uint64_t row = ((uint64_t)width * 4 + SWEET_SURFACE_ROW_ALIGN - 1) & ~(uint64_t)(SWEET_SURFACE_ROW_ALIGN - 1);
++	uint64_t size = round_page(row * height);
++	if (!size || size > SWEET_SURFACE_MAX_ALLOC)
++		return NULL;
++	SweetSurface *s = sweet_surface_alloc();
++	if (s == NULL)
++		return NULL;
++	s->width = width;
++	s->height = height;
++	s->bytesPerRow = (uint32_t)row;
++	s->bytesPerElement = 4;
++	s->elementWidth = s->elementHeight = 1;
++	s->pixelFormat = pixelFormat;
++	s->allocSize = (uint32_t)size;
++	IOBufferMemoryDescriptor *mem = NULL;
++	if ((uint64_t)OSAddAtomic64(s->allocSize, (volatile SInt64 *)&sweet_surface_wired) +
++	    s->allocSize <= SWEET_SURFACE_WIRED_MAX)
++		mem = IOBufferMemoryDescriptor::inTaskWithOptions(kernel_task,
++		    kIODirectionInOut | kIOMemoryKernelUserShared, s->allocSize, page_size);
++	if (mem == NULL) {
++		OSAddAtomic64(-(SInt64)s->allocSize, (volatile SInt64 *)&sweet_surface_wired);
++		s->release();
++		return NULL;
++	}
++	bzero(mem->getBytesNoCopy(), s->allocSize);
++	s->memory = mem;
++	s->mapCache = kIOMapDefaultCache;
++	if (!sweet_surface_publish(s)) {
+ 		s->release();
+ 		return NULL;
+ 	}
+--- a/iokit/Kernel/arm/SweetSurface.h
++++ b/iokit/Kernel/arm/SweetSurface.h
+@@ -58,6 +58,9 @@
+ SweetSurface *sweet_surface_create_physical(uint64_t phys, uint32_t width,
+     uint32_t height, uint32_t bytesPerRow, uint32_t pixelFormat);
+ 
++/* Logical CPU-rendered canvas, distinct from physical scanout memory. */
++SweetSurface *sweet_surface_create_buffer(uint32_t width, uint32_t height, uint32_t pixelFormat);
++
+ /* Send right for the surface in task (IOSurfaceLookupFromMachPort). */
+ mach_port_name_t sweet_surface_port_in_task(SweetSurface *surface, task_t task);
+ 
+--- a/osfmk/arm64/sweet_early.c
++++ b/osfmk/arm64/sweet_early.c
+@@ -4,6 +4,7 @@
+ #if defined(SWEET)
+ #include <stdint.h>
+ #include <kern/misc_protos.h>
++#include <libkern/OSAtomic.h>
+ 
+ static volatile uint32_t *early_fb;
+ static volatile uint8_t *early_io_base;
+@@ -19,7 +20,9 @@
+ /* Initialized data must remain writable until disable, including panics. */
+ static unsigned int early_row, early_col;
+ static unsigned int early_started, early_disabled, early_panicking;
+-static unsigned int early_flushing, early_display_ready, early_mutex_id;
++static volatile UInt32 early_flushing;
++static unsigned int early_display_ready, early_mutex_id;
++static uint32_t early_surface_format;
+ static uint64_t early_mutex_pa[4];
+ static unsigned int early_mutex_count;
+ static uint64_t early_fb_pa;
+@@ -114,6 +117,7 @@
+ 	    pa != early_fb_pa || (pa & 3) || (pitch & 3)) {
+ 		return 0;
+ 	}
++	early_surface_format = fmt;
+ 	return 1;
+ }
+ 
+@@ -184,13 +188,18 @@
+ 	return 1;
+ }
+ 
+-static void
++static int
+ dali_display_flush(void)
+ {
+-	if (!early_display_ready || early_flushing) {
+-		return;
+-	}
+-	early_flushing = 1;
++	if (!early_display_ready)
++		return 0;
++	/* Console/panic callers never wait for a preempted runtime owner. */
++	if (!OSCompareAndSwap(0, 1, &early_flushing))
++		return 2;
++	if (!early_display_ready) {
++		(void)OSCompareAndSwap(1, 0, &early_flushing);
++		return 0;
++	}
+ 	uint64_t intsta = DALI_DSI_PA + DALI_DSI_INTSTA;
+ 	uint64_t cmdq0 = DALI_DSI_PA + DALI_DSI_CMDQ0;
+ 	uint64_t cmdq_con = DALI_DSI_PA + DALI_DSI_CMDQ_CON;
+@@ -221,17 +230,33 @@
+ 	if (!done || !idle) {
+ 		goto failed;
+ 	}
+-	early_flushing = 0;
+-	return;
++	(void)OSCompareAndSwap(1, 0, &early_flushing);
++	return 1;
+ failed:
+ 	early_display_ready = 0;
+-	early_flushing = 0;
++	(void)OSCompareAndSwap(1, 0, &early_flushing);
++	return -1;
+ }
+ 
+ void
+ sweet_early_refresh(void)
+ {
+ 	dali_display_flush();
++}
++
++int
++sweet_early_gui_format(uint32_t *format)
++{
++	if (!early_display_ready || format == NULL)
++		return 0;
++	*format = early_surface_format;
++	return 1;
++}
++
++int
++sweet_early_gui_refresh(void)
++{
++	return dali_display_flush();
+ }
+ 
+ void
+--- a/osfmk/arm64/sweet_early.h
++++ b/osfmk/arm64/sweet_early.h
+@@ -15,6 +15,9 @@
+ void sweet_early_relocate(uint64_t base, uint64_t io_base);
+ void sweet_early_disable(void);
+ void sweet_early_refresh(void);
++int sweet_early_gui_format(uint32_t *format);
++/* 1 complete, 2 busy/retry, 0 unavailable, -1 timed out/disabled. */
++int sweet_early_gui_refresh(void);
+ #else
+ static inline void sweet_early_init(const boot_args *args)
+ {
+@@ -27,6 +30,8 @@
+ }
+ static inline void sweet_early_disable(void) {}
+ static inline void sweet_early_refresh(void) {}
++static inline int sweet_early_gui_format(uint32_t *format) { (void)format; return 0; }
++static inline int sweet_early_gui_refresh(void) { return 0; }
+ #endif
+ 
+ #endif
+--- /dev/null
++++ b/iokit/Kernel/arm/SweetFBBlit.h
+@@ -0,0 +1,94 @@
++/* Bounded BGRA logical-canvas copy into an adopted 32-bit scanout surface. */
++#ifndef SWEET_FB_BLIT_H
++#define SWEET_FB_BLIT_H
++#include <stdbool.h>
++#include <stdint.h>
++
++struct sweet_fb_plane {
++	uint8_t *pixels;
++	uint64_t bytes;
++	uint32_t width, height, row_bytes;
++};
++struct sweet_fb_rect { int32_t x, y, width, height; };
++
++static inline bool
++sweet_fb_format_supported(uint32_t format)
++{
++	uint32_t code = format & 15u;
++	return (code == 2 || code == 3) && !(format & ((1u << 4) | (3u << 8)));
++}
++
++static inline uint32_t
++sweet_fb_pack_pixel(uint32_t pixel, uint32_t format)
++{
++	pixel |= 0xff000000u;
++	if (format & (1u << 17))
++		pixel = (pixel & 0xff00ff00u) | ((pixel & 0xffu) << 16) | ((pixel >> 16) & 0xffu);
++	if ((format & 15u) == 3)
++		pixel = (pixel << 8) | 255u;
++	if (format & (1u << 16))
++		pixel = __builtin_bswap32(pixel);
++	return pixel;
++}
++
++static inline uint32_t
++sweet_fb_unpack_pixel(uint32_t pixel, uint32_t format)
++{
++	if (format & (1u << 16))
++		pixel = __builtin_bswap32(pixel);
++	if ((format & 15u) == 3)
++		pixel = (pixel >> 8) | 0xff000000u;
++	if (format & (1u << 17))
++		pixel = (pixel & 0xff00ff00u) | ((pixel & 0xffu) << 16) | ((pixel >> 16) & 0xffu);
++	return pixel | 0xff000000u;
++}
++
++static inline bool
++sweet_fb_plane_valid(const struct sweet_fb_plane *p)
++{
++	return p->pixels && p->width && p->height && p->width <= 16384 && p->height <= 16384 &&
++	    p->row_bytes >= (uint64_t)p->width * 4 &&
++	    (uint64_t)(p->height - 1) * p->row_bytes + (uint64_t)p->width * 4 <= p->bytes;
++}
++
++static inline bool
++sweet_fb_blit_scaled(struct sweet_fb_plane dst, struct sweet_fb_plane src,
++    uint32_t canvas_width, uint32_t canvas_height, struct sweet_fb_rect source,
++    struct sweet_fb_rect target, uint32_t format)
++{
++	if (!sweet_fb_plane_valid(&src) || !sweet_fb_plane_valid(&dst) ||
++	    !sweet_fb_format_supported(format) || !canvas_width || !canvas_height ||
++	    canvas_width > 16384 || canvas_height > 16384 || source.width <= 0 ||
++	    source.height <= 0 || target.width <= 0 || target.height <= 0)
++		return false;
++	int64_t left = target.x < 0 ? 0 : target.x;
++	int64_t top = target.y < 0 ? 0 : target.y;
++	int64_t right = (int64_t)target.x + target.width;
++	int64_t bottom = (int64_t)target.y + target.height;
++	if (right > canvas_width) right = canvas_width;
++	if (bottom > canvas_height) bottom = canvas_height;
++	if (left >= right || top >= bottom)
++		return false;
++	uint32_t x0 = (uint32_t)((left * dst.width + canvas_width - 1) / canvas_width);
++	uint32_t y0 = (uint32_t)((top * dst.height + canvas_height - 1) / canvas_height);
++	uint32_t x1 = (uint32_t)((right * dst.width + canvas_width - 1) / canvas_width);
++	uint32_t y1 = (uint32_t)((bottom * dst.height + canvas_height - 1) / canvas_height);
++	bool copied = false;
++	for (uint32_t y = y0; y < y1; ++y) {
++		int64_t logical = (uint64_t)y * canvas_height / dst.height;
++		int64_t sy = (int64_t)source.y + (logical - target.y) * source.height / target.height;
++		if (sy < 0 || sy >= src.height) continue;
++		for (uint32_t x = x0; x < x1; ++x) {
++			logical = (uint64_t)x * canvas_width / dst.width;
++			int64_t sx = (int64_t)source.x + (logical - target.x) * source.width / target.width;
++			if (sx < 0 || sx >= src.width) continue;
++			uint32_t pixel;
++			__builtin_memcpy(&pixel, src.pixels + (uint64_t)sy * src.row_bytes + (uint64_t)sx * 4, 4);
++			pixel = sweet_fb_pack_pixel(pixel, format);
++			__builtin_memcpy(dst.pixels + (uint64_t)y * dst.row_bytes + (uint64_t)x * 4, &pixel, 4);
++			copied = true;
++		}
++	}
++	return copied;
++}
++#endif

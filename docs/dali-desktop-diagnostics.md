@@ -2,10 +2,11 @@
 
 ## Current milestone (2026-10-30)
 
-Patch0160 is a diagnostic-only continuation of CI40927108866 / commit313baa5.
-It has passed exact incremental patch replay, three single-file syntax checks,
-three real ARM64 object compiles, and host policy tests. It has **not** passed a
-new full kernel build/link or hardware trial. There is no new flashable pair yet.
+Patch0160 (commitd5d7001) passed full XNU CI41003130969, exact-source and linked
+marker gates, packaging checks and one separately approved hardware trial.
+Stock boot/init_boot and the complete clean root prefix are now restored and
+verified. No trial remains active. Later patches0161-0163 are only locally
+verified until another full CI/hardware gate; see [GUI bring-up](dali-gui-bringup.md).
 
 The goal remains a real SpringBoard home screen. Kernel text, `DONE UMD_INIT`,
 registered AppleCLCD services and a lock screen are separate milestones, not
@@ -64,8 +65,13 @@ packaging test, **not** a kernel containing patch0160.
 The retained SWEET active ring (total39637/seq49) belongs to UUID602C8DC7...;
 the retained ramoops belongs to UUID5E451CCD.... Keep those histories separate.
 No raw-log concatenation, stale ring tail, or matching filename establishes a
-single boot. The latest actual dirty root was overwritten during restoration;
-a clean-root owner lookup cannot reconstruct its runtime bitmap/extent state.
+single boot. The earlier persona trial's actual dirty root was overwritten; a clean-root
+owner lookup cannot reconstruct it. The newer0160 trial preserves a complete
+verified actual16GiB image, with matching UUID8BDC11F4... in both raw streams.
+It loads the binary persona manifest and finishes UMD, then reaches
+init_featureflags without GUI evidence. Readonly posttrial fsck exits8 with
+hardlink, bitmap and counter inconsistencies; log silence is not an integrity
+pass. Its clean root was restored only after the complete actual image was saved.
 
 Before each separately authorized trial:
 
