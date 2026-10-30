@@ -1,0 +1,186 @@
+diff --git a/bsd/dev/sweet_sample.c b/bsd/dev/sweet_sample.c
+--- a/bsd/dev/sweet_sample.c
++++ b/bsd/dev/sweet_sample.c
+@@ -58,6 +58,74 @@
+     (void)OSCompareAndSwap(1, 0, &sweet_ff_guard);
+ }
+ 
++
++#include "SweetFeatureFault.h"
++
++static unsigned int sweet_ff_screen_enabled, sweet_ff_fault_enabled;
++static volatile UInt32 sweet_ff_fault_dropped;
++static struct sweet_ff_fault_event sweet_ff_last_fault;
++extern int sweet_console_muted;
++extern void sweet_ramoops_append(const char *, int);
++void sweet_ff_fault_trace(unsigned int, struct arm_saved_state *, uint32_t, uint64_t, int);
++
++/* Pure retained-RAM breadcrumb: no printf, framebuffer, UFS or user copyin. */
++void
++sweet_ff_fault_trace(unsigned int phase, struct arm_saved_state *state,
++    uint32_t esr, uint64_t far, int result)
++{
++    if (sweet_ff_fault_enabled != 1)
++        return;
++    proc_t p = current_proc();
++    if (p == PROC_NULL || !sweet_ff_target(sweet_ff_fault_enabled, p->p_comm) ||
++        !is_saved_state64(state))
++        return;
++    if (!OSCompareAndSwap(0, 1, &sweet_ff_guard)) {
++        (void)OSCompareAndSwap(0, 1, &sweet_ff_fault_dropped);
++        return;
++    }
++    struct sweet_ff_fault_event event = {
++        .phase = phase, .esr = esr, .pid = proc_pid(p), .result = result,
++        .tid = thread_tid(current_thread()), .pc = get_saved_state_pc(state),
++        .lr = get_saved_state_lr(state), .sp = get_saved_state_sp(state), .far = far,
++    };
++    bool accepted = sweet_ff_fault_record(&sweet_ff_last_fault, &event);
++    event.seq = sweet_ff_last_fault.seq;
++    (void)OSCompareAndSwap(1, 0, &sweet_ff_guard);
++    if (!accepted)
++        return;
++    char line[256];
++    int size = sweet_ff_fault_format(line, sizeof(line), &event);
++    if (size != 0)
++        sweet_ramoops_append(line, size);
++}
++
++/* Called only from the normal sampler thread, after releasing producer locks. */
++static void
++sweet_ff_screen_dump(unsigned int sample)
++{
++    if (sweet_ff_screen_enabled != 1)
++        return;
++    sweet_console_muted = 0;
++    if (!OSCompareAndSwap(0, 1, &sweet_ff_guard)) {
++        printf("SWEET SCREEN: tick=%u observer-busy; diagnostic, not desktop\n", sample);
++        return;
++    }
++    uint32_t calls = sweet_ff_events.total;
++    struct sweet_ff_event last_svc = {0};
++    if (calls != 0)
++        last_svc = sweet_ff_events.events[(calls - 1) % SWEET_FF_RECORDS];
++    struct sweet_ff_fault_event fault = sweet_ff_last_fault;
++    bool dropped = OSCompareAndSwap(1, 0, &sweet_ff_fault_dropped);
++    (void)OSCompareAndSwap(1, 0, &sweet_ff_guard);
++    printf("SWEET SCREEN: tick=%u calls=%u faults=%u lost=%u full=%u\n",
++        sample, calls, fault.seq, dropped ? 1u : 0u,
++        fault.seq == SWEET_FF_FAULT_LIMIT ? 1u : 0u);
++    printf("SWEET SCREEN: last-call=%d phase=%u pc=0x%llx\n",
++        last_svc.call, last_svc.phase, (unsigned long long)last_svc.pc);
++    printf("SWEET SCREEN: last-fault phase=%u pc=0x%llx esr=0x%x result=%d\n",
++        fault.phase, (unsigned long long)fault.pc, fault.esr, fault.result);
++}
++
+ /* Only the existing sampler thread calls this; no console output under guard. */
+ static void
+ sweet_ff_dump(unsigned int sample)
+@@ -140,7 +208,7 @@
+ 	}
+ 	if (sweet_sample_names[0] == '-' && heartbeat != 1
+ #if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
+-        && sweet_ff_enabled != 1
++        && sweet_ff_enabled != 1 && sweet_ff_screen_enabled != 1
+ #endif
+         ) {
+ 		return;
+@@ -162,6 +230,9 @@
+ #endif
+ 		if (heartbeat == 1)
+ 			printf("SWEET BOOTHEART: sample=%d\n", i);
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++        sweet_ff_screen_dump((unsigned int)i);
++#endif
+ 		if (sweet_sample_names[0] != '-') {
+ 			printf("SMP --- sample %d\n", i);
+ 			proc_iterate(PROC_ALLPROCLIST, sweet_sample_proc, NULL, NULL, NULL);
+@@ -178,6 +249,12 @@
+     (void)PE_parse_boot_argn("sweetfftrace", &enabled, sizeof(enabled));
+     /* Initialized before userland starts; immutable after publication. */
+     sweet_ff_enabled = enabled == 1 ? 1u : 0u;
++    enabled = 0;
++    (void)PE_parse_boot_argn("sweetffscreen", &enabled, sizeof(enabled));
++    sweet_ff_screen_enabled = enabled == 1 ? 1u : 0u;
++    enabled = 0;
++    (void)PE_parse_boot_argn("sweetfffault", &enabled, sizeof(enabled));
++    sweet_ff_fault_enabled = enabled == 1 ? 1u : 0u;
+ #endif
+ 	thread_t thread;
+ 	if (kernel_thread_start(sweet_sample_thread, NULL, &thread) == KERN_SUCCESS) {
+diff --git a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -172,6 +172,9 @@
+ 
+ typedef void (*abort_handler_t)(arm_saved_state_t *, uint32_t, vm_offset_t, fault_status_t, vm_prot_t, expected_fault_handler_t);
+ static void handle_user_abort(arm_saved_state_t *, uint32_t, vm_offset_t, fault_status_t, vm_prot_t, expected_fault_handler_t);
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++extern void sweet_ff_fault_trace(unsigned int, struct arm_saved_state *, uint32_t, uint64_t, int);
++#endif
+ static void handle_kernel_abort(arm_saved_state_t *, uint32_t, vm_offset_t, fault_status_t, vm_prot_t, expected_fault_handler_t);
+ 
+ static void handle_pc_align(arm_saved_state_t *ss) __dead2;
+@@ -1369,6 +1372,10 @@
+ 		panic_with_thread_kernel_state("Apparently on interrupt stack when taking user abort!\n", state);
+ 	}
+ 
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++    sweet_ff_fault_trace(0, state, esr, fault_addr, -1);
++#endif
++
+ 	thread->iotier_override = THROTTLE_LEVEL_NONE; /* Reset IO tier override before handling abort from userspace */
+ 
+ 	if (!is_vm_fault(fault_code) &&
+@@ -1402,6 +1409,9 @@
+ 				    /* caller_pmap */ NULL, /* caller_pmap_addr */ 0);
+ 			}
+ 		}
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++        sweet_ff_fault_trace(1, state, esr, fault_addr, result);
++#endif
+ 		if (thread->t_rr_state.trr_fault_state != TRR_FAULT_NONE) {
+ 			thread_reset_pcs_done_faulting(thread);
+ 		}
+diff --git a/bsd/dev/SweetFeatureFault.h b/bsd/dev/SweetFeatureFault.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/SweetFeatureFault.h
+@@ -0,0 +1,37 @@
++/* Fixed-size user-abort breadcrumbs; no user-memory access. */
++#ifndef SWEET_FEATURE_FAULT_H
++#define SWEET_FEATURE_FAULT_H
++
++#define SWEET_FF_FAULT_LIMIT 4096u
++struct sweet_ff_fault_event {
++    uint32_t seq, phase, esr;
++    int32_t pid, result;
++    uint64_t tid, pc, lr, sp, far;
++};
++
++/* Serialized by the nonblocking observer guard. */
++static inline bool
++sweet_ff_fault_record(struct sweet_ff_fault_event *last,
++    const struct sweet_ff_fault_event *event)
++{
++    if (last->seq >= SWEET_FF_FAULT_LIMIT)
++        return false;
++    uint32_t seq = last->seq + 1;
++    *last = *event;
++    last->seq = seq;
++    return true;
++}
++
++static inline int
++sweet_ff_fault_format(char *buffer, unsigned int bytes,
++    const struct sweet_ff_fault_event *event)
++{
++    int size = snprintf(buffer, bytes,
++        "SWEET FFFAULT: n=%u phase=%u pid=%d tid=%llu esr=0x%x "
++        "far=0x%llx pc=0x%llx lr=0x%llx sp=0x%llx result=%d\n",
++        event->seq, event->phase, event->pid, (unsigned long long)event->tid,
++        event->esr, (unsigned long long)event->far, (unsigned long long)event->pc,
++        (unsigned long long)event->lr, (unsigned long long)event->sp, event->result);
++    return size > 0 && (unsigned int)size < bytes ? size : 0;
++}
++#endif

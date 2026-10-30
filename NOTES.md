@@ -1,3 +1,89 @@
+## CURRENT HOST AUTHORIZATION — selectedscreen5files/fullCI and third-sceneCOW approved (2026-10-30)
+
+User approved exact5file0165commit/push/fullCI and separately exactthird-scene68d2...byte-identicalCOWpreservation/replacement. COWtaskbf6g2ilse isrunningfullbefore/new/afterhashgates; do notclaimcompleteyet. No newdevice-trialapproval; phonefullyrecovered/allwriteflagsfalse. Preserveoriginalmkadt/mkiosrootedits,privateassets andpreviousscenes.
+
+---
+
+## OFFLINE SCREEN DIAGNOSTICS — 0165locally verified, newCI/trial absent (2026-10-30)
+
+User requested visible screen output. New0165default-off sweetffscreen=1 keeps consoleunmuted andprints tick/call/fault/lastPC in normal sampler thread; sweetfffault=1 records currentinit_featureflaguserabort entry/VMreturn only throughnonblockingpureRAMsweet_ramoops_append.4096eventcap,<1MiBtext,no printf/DSI/UFS/usercopy fromfaultcontext. No fakemain-screen or taskskip. All35hosttests pass;2ARM64objects, Cdefinition/references and3sourcezero-fuzzreplayverified. Fullnewlink/hardwarepixelsNOTverified. Future450byteargs:keeppriorGUI/root; sweetfb_noconsole=0,sweethidswipe=0,addsweetffscreen=1,sweetfffault=1.
+
+Phoneoriginal/cleanrecoveryCOMPLETE,allwriteflagsclosed. Actualthirdscene68d2e0868ee95bbc998470ea117bd1c4fbbb7fd8be61ad7ec66ce8f5c796bcac retainedfull16GiB; freebytes10531270656 insufficientfornextfullcapture. Third-sceneCOWreplacement scriptpreparedonly,notapproved/executed; priorsecond-sceneapprovalnotreused. Futureshell-v2rootrestoretemplate+mockedflowpass,oldcandidatehelpersunchanged. UserclarifiedFastbootonlyaftersecondrestart; twoUUIDstreamsmuststayseparate.
+
+Nextapprovalbatch5files:0165patch,tools/test_dali_screen_diagnostics.py,docs/dali-screen-diagnostics.md,.github/workflows/xnu.yml,NOTES.md forcommit/push/fullCI; originalmkadt/mkiosrootedits andprivateassets excluded. SeparatenewexactthirdsceneCOWdecisionrequired. No newhardwaretrialapproved.
+
+---
+
+## NEXT DIAGNOSIS — recovery complete; validated recorded dyld callsites, actualscreen/reset history needed (2026-10-30)
+
+AlloriginalAndroid/physicalpair/fullcleanrootcheckscomplete; allwriteflagsfalse. Actual68d2...fullscene andpartial-restorefailure/reviewhistoryretained; nochunk13retry. No furthertrialapproved. CorrectcacheASLR0x39fb8000(pagealigned,3dyldMachtrapcrosschecks); lastrecordedVMcallLRsindyldwithredactednames,sysctlbynameLRsinlibsystem_c. Priorunalignedlibkernelclusterreportmarkedinvalid. Recordedtransition!=currentCPUlocation; donotclaimdeadlock/main-not-reached. TwoUUIDstreamsneeduseractualscreen/manualresethistoryclarificationbeforeanotherdiagnostic.
+
+---
+
+## CURRENT HANDOFF — 0164trial fully recovered after reviewed continuation (2026-10-30)
+
+OriginalAndroid/physicalbootpair andentireclean16GiB0984638dc5b16a2284681bba408977c521c7532366f2886ad6e48802ad427751 VERIFIED. All4writeflagsfalse; trialclosed/consumed, no newtrialapproved. Initialchunk13readbackmismatchcausedstop; readonly3hashreview thenprovedchunk13clean andwholeprefixexactcaptured+clean0/11/13(77daec3a...). DidNOTrewrite13. Onlyremaining107/119/186writtenonceusingbinaryshell-v2withverifiedremoteexitstatus;fullfinalclean/stockchecks pass. Initialfailureandreview/resumeprogresspreserved; causeoftransientmismatchunproven.
+
+Actualfull16GiB68d2e0868ee95bbc998470ea117bd1c4fbbb7fd8be61ad7ec66ce8f5c796bcac remainsuntouched. Readonlyfsck8includesoverlappedextentpersona.kb/usermanagerd.log.0. TwoRAWstreamsareDIFFERENTboots:earlierpstoreFB633567...withFF450events/64tail/32normalreturns(lastVMallocate/protect/deallocate0),laterSWEETBF62CF48...withbitmapmismatches3059244/49. Nevermerge. No GUI/desktopverified. Nextofflinepreciseaddress/exception/repeatedbootanalysis,notblindshm/argvchange; do not reusehardwareapproval.
+
+---
+
+## CURRENT RECOVERY FAILURE — chunk13readback mismatch; writes suspended (2026-10-30)
+
+Authorized0164rollback verifiedchunks0and11, then chunk13hashmismatch. Helperstopped,recordstatusfailed_partial_restore_requires_review; DO NOT auto-retry. iOSroot is PARTIALLYRESTORED,NOTclean. OriginalAndroid/physicalbootpairverifiedbeforewrite; fullactual16GiB68d2e0868ee95bbc998470ea117bd1c4fbbb7fd8be61ad7ec66ce8f5c796bcac andalllogs intact. Nextreadonlyrepeatread+preservefailed64MiBchunk13, compareexactclean/capturedbytes and fullprefixscope, then review/seekexplicitcontinuation beforemorewrites. No newcandidateboot.
+
+---
+
+## CURRENT ROOT RECOVERY — 0164fullactualcapture verified; clean rollback pending (2026-10-30)
+
+Entireactual16GiBcaptureverified3hashes:68d2e0868ee95bbc998470ea117bd1c4fbbb7fd8be61ad7ec66ce8f5c796bcac. Readonlyfsckexit8; actualall256chunkcomparechanged[0, 11, 13, 107, 119, 186] (402653184bytes). OriginalAndroid/physicalbootpair alreadyverified. RootNOTrestoredyet; executeonlyexistingauthorizedactual-diffrestore andwholeprefix/stockverification. PreservebothdifferentUUIDstreams; donotmergeorclaimdeadlock. Trialconsumed/no retry.
+
+---
+
+## CURRENT FORENSICS — stock Android verified; actual root capture running; mixed boot sessions (2026-10-30)
+
+Originalphysicalbootpair andcompletedAndroid verified. ExactpostSWEET35768validbytes/seq34 andpstore50972bytes preserved. Fullactual16GiBcaptureb0po1kypg running withthreehashgates; ROOTNOTRESTORED. Logs aredifferentboots:ramoopsFB633567-CD87-4859-8196-C55955ED885F vsSWEETBF62CF48-F621-42A0-89B9-BE03A1BCC6C1; NEVERmerge. Agentflashedonce,no retry; resetcauseunknown. EarlierFFSVCsample9retainsseq387..450,all32pairednormalreturns,lastMachallocate/protect/deallocate0; no unmatchedretainedcall. LaterSWEET hasbitmapmismatches3059244/49. Do notclaimFeatureFlagsdeadlock/shmunsupported or attributelaterHFSerrorstoearlierboot. Nextfullcaptureverification/readonlyfsck/actualall256chunkdiff,thenapprovedcleanrollback.
+
+---
+
+## CURRENT RECOVERY — 0164observationlimit reached; original pair flashed (2026-10-30)
+
+600sobservation watcherbxm0cthfw exited2(limit), no targettransport beforedeadline. User then reported Fastboot. Guarded already-authorized recovery verified identity/slot/unlocked/sizes and flashed originalinit_boot_b thenboot_b, bothOKAY; Android reboot requested. Backgroundbpdxzyw03 verifies Androidcompletion/fullphysicalhashes. iOSroot NOT restored: immediately preservepostlogs/pstore andfullactual16GiB before actual-diff rollback. No retry; oneattemptconsumed. No real desktop evidence received.
+
+---
+
+## ACTIVE FEATUREFLAGS TRIAL — exact0164pair booted once; recovery pending (2026-10-30)
+
+New user-approved CI41028474693bootddfbc184.../init_boot012517eb... flashed once toinit_boot_b thenboot_b withOKAY; rebootUTC2026-10-30T09:00:19.789674+00:00. Freshoriginalphysicalpair/Daliidentity/slot/unmounted/entireclean->seededroot/Fastbootgatespass. Singletrialconsumed(attempts1); DO NOT retry. Backgroundbxm0cthfw watches targettransports and600sdeadline. Originalbootpair andcleanroot NOT restored. Preserveexactpostlogs/pstore andactualfull16GiB before anyrootrollback. Candidate:shim/out-dali/ufs-41028474693/candidate-featureflags-svc-20261030/. No screenevidence/desktopresultyet.
+
+---
+
+## CURRENT HANDOFF — 0164fullCI and exact diagnostic candidate verified; newtrialapproval absent (2026-10-30)
+
+FullCI41028474693 completedSUCCESS at exact61aceecb584a47fbcd8b61a12fba469d61097e83; build/link, newtests/source/nm/linkedgates andbothuploads pass. Kernelac66c06674d8432653945eb13bbec54e2fb9642027f34fee4c3e177aa10a6244 matchesartifactmanifest; all17selectedCIsources match finalsource. Privatecandidate:shim/out-dali/ufs-41028474693/candidate-featureflags-svc-20261030/. Exact unchangedbootddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39; newinit_boot012517eb14bbe0d9ff162ad06b645d2fd43cf47dd607142ab86ade489f5f2497.
+
+Full offlinev4/LZ4/CPIO/420bytebootargs/embeddedADT/rebuiltpayload/AVBdescriptor andentire16GiBclean+virtualseededhash checks pass. GUIADT/rootdelta remainbyte-identical; onlyargaddition=sweetfftrace=1.13staticfileshashbound; missingauthorization/wrongroot mockedgatespass beforeanytransport/reboot/write. Currentnewmanifestapproved_trials=trial_attempts=0,allwriteflagsfalse; noactualdevicecommands forpackaging. Phone remains recoveredAndroid+cleanroot. Bothpriorfullsnapshots/logs retained; secondCOWreplacementverified; freecapturebytes27931254784atcandidatecheck.
+
+Next singleaction: obtain NEW exactpairsingletrial approval includingboundedroot/log/runtimewrites,<=600sobservation,originalpairrecovery andfullactual16GiBcapturebeforecleanrollback. No thirdtrialapproved; noactualdesktop/FeatureFlagscallresultyet. Do not reuse previousapprovals or inferfixfromCI.
+
+---
+
+## CURRENT HOST STATUS — second-scene COW complete; 0164fullCI pending (2026-10-30)
+
+User-approved byte-identical COW replacement completed at original secondscene root.raw path. Full16GiB before/new/after hash remainsb74d7cf3e96204511b8b192175bfac0b71c09befadd1161a5321694ea1158eaf; mode0600, sidecar andall4pre/postrawlogs unchanged. 35changedblocks and full reconstruction manifest retained. Free space28176355328bytes; firstscene fullcapture also retained. No device operation.
+
+0164commit61aceecb584a47fbcd8b61a12fba469d61097e83 fullCI41028474693 watcher b9u0384xo remains pending; do not claim link/artifacts pass until verified. Phone fullyrecovered, allwriteflagsclosed. Future stager/verifier ready but not run before CI/provenance. No thirdtrialapproved.
+
+---
+
+## CURRENT HOST STATUS — 0164pushed; fullCI/COW verification running (2026-10-30)
+
+Permission-mode change allowed the exact approved operations. Selected5filecommit61aceecb584a47fbcd8b61a12fba469d61097e83 pushed to fork/port/dali-mt6991; fullCI41028474693 dispatched (https://github.com/localhosts-A/ios-sweet/actions/runs/41028474693), watcher b9u0384xo binds exact head and awaits build/link. No success claim yet. Separately approved second-scene COW full reconstruction/hash/replacement is running as b2m27m2q8; original/sidecar/log hash gates before and after replacement. Do not claim finished until notification/verification. Phone fully recovered, all4devicewriteflagsfalse; no newtrialapproved.
+
+Next: verify exact CI result/artifacts and complete COW record; build a host-only candidate with same GUI/root semantics and ONLY sweetfftrace=1 added. Then separately request new precise single-trial approval; no previous approval reusable.
+
+---
+
 ## CURRENT HOST STATUS — execution mode changed; approved source/CI and COW work resuming (2026-10-30)
 
 The user reported completion of the requested execution-permission mode change. Resume only the already approved selected5file0164commit/push/onefullCI and exact second-snapshot byte-identical COW preservation/replacement. Prior denied commands did not execute; this is not a third device-trial approval. Phone remains fully recovered, all4devicewriteflagsfalse.32hosttests/3ARM64objects/zero-fuzzreplay passed; full new kernel/link remains pending. Original mkadt/mkiosroot edits and private artifacts stay outside the commit.
