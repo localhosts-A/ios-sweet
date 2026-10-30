@@ -1,3 +1,75 @@
+## CURRENT AUTHORIZATION — 0166selected5files/fullCI approved; existing raw MUST remain (2026-10-30)
+
+Userapprovedselected5filecommit/push/onefullCI. UserprefersNOTreplacinglatestoriginalscene; conditionalCOWreplacementapprovalisNOTusedbecauseanewfuturecapturecanbecreatedasindependentCOWfromstart. Preserveexisting9b0a...root.rawinode/content/path/sidecar/logs; no replacement/deletion. Prepare/testanoptionalnewCOWcapturelocallyseparately,notpartofapproved5filecommit. Phonefullyrecovered/allwriteflagsfalse; no newhardwaretrialapproved.
+
+---
+
+## OFFLINE FIX READY — Dali completion integrity; desktop-first candidate policy (2026-10-30)
+
+PhoneoriginalAndroid/physicalpair/fullclean16GiB verifiedrestored; allwriteflagsclosed,no newtrialapproved. Latestfullactual9b0a61b4052c4c3b49e6714549d054998185408c73a622fc9739d92bf2e79c4c/logs retained; no COWreplacementapprovalforthisscene. Freebytes10274717696 insufficientfornextfullcapture.
+
+New0166fixesrealSCSIcompletiongap:DaliOCSsuccessvalidatesUPIUtype+LUN+currentincrementingtag; rejectsresidual/underflow/overflowonGOODfixedREAD10/WRITE10/READCAP10beforebouncecopy. Badidentity/typepoisonschannel(no implicitretry); shortfixedrequestEIO,existingSense/nonGOODandvariablelength/Sweetpolicypreserved. Actualold/newtailfixture reproducesoldfalsesuccessforshort16KiB/wrongtag/LUNandnewEIO.38hosttestspass; actualUFSARM64object+2sourcezero-fuzzreplaypass. Fullnewlink/hardwareNOTtested; NOproofthisgapcausedlastlibobjcfault.
+
+Nextcandidate460byteargsdesktop-first:serial1auxiliary,sweetffscreen0,sweetfb_noconsole1,sweethidswipe60(waitclient+actualGUIrefresh),sameADT/rootseed. Notanotherlog-onlytrial. Selectedsourcebatch5files:0166patch,tools/test_dali_ufs_completion.py,docs/dali-ufs-completion.md,.github/workflows/xnu.yml,NOTES.md. Commit/push/fullCI needsnewapproval; allprioruseredits/privateassets excluded. Exactlatest9b0a...COWpreservationdecisionalsoseparate; preparedscriptnotexecuted.
+
+---
+
+## CURRENT HANDOFF — screen trial fully recovered; focus actual desktop page-in blocker (2026-10-30)
+
+Reviewedbinaryshell-v2restorecompletedall6actualrangesandwholeclean16GiB0984638dc5b16a2284681bba408977c521c7532366f2886ad6e48802ad427751,originalAndroid/fullphysicalpairverified. All4writeflagsfalse; attempt1consumed/closed,NOnewtrialapproved. Actual16GiB9b0a61b4052c4c3b49e6714549d054998185408c73a622fc9739d92bf2e79c4c andalllogs/userobservationretained,readonlyfsck8.
+
+Mainstartupblockerlead:sameUUID11858EA4...,461consecutivefaultrecords/230returns0/lastentryunmatchedinlibobjcreadingRXcache.15page0x1698000. Exactlocal+currentAndroidpagehashmatchesCodeDirectory;noextentboundary/no pointer-slidinginfo; do notreplacecacheorclaimphysicalfailure. NeedordinaryVM/vnode/HFSpageincompletion/lockingcausefornarrowfix. Userexplicitlydesktopprimary/logssecondary. MissingserialOUTPUTbootargexplainspossiblevisibleconsolehandoffgap; serial1auxiliaryonly,notanotherlog-onlytrial.
+
+---
+
+## PRIMARY GOAL REMINDER — fix desktop startup, not a standalone logging milestone (2026-10-30)
+
+Userclarifiedlogssecondaryanddesktopprimary. DoNOTspendnewdevicecycleonlyonconsoleoutput; serial=1isauxiliarytoafuturefix-focusedcandidate. Mainlead:lastlibobjcdatareadfaultmappingcache.15page0x1698000/physicalHFS2438267..70. LocallyreadableandembeddedCodeDirectorySHA256matches,notEOF/extentboundary;3otherpagesofsamecachepreviouslysucceeded. No cachecorruption/provenIOerrorclaim. ContinueVMpager/HFSlockUPLclusterchainauditfornarrowfix,notblindformat/shmchanges. Fullactualcapturebufjyxlyystillrunning; stockverifiedbutrootNOTrestoreduntilcapturepasses.
+
+---
+
+## CURRENT FORENSICS — stock verified, full root capture active; visible-console gap found (2026-10-30)
+
+OriginalAndroid/physicalbootpairverified. Fullactual16GiBcapturebufjyxlyyRUNNING; rootNOTrestored. SameUUID11858EA4...inpostSWEET/pstore; statusprints30lines butuserobservesONLYearlykprintf/colorblocks(noactualnewscreenstatus). No screenshotyet. Concretegap:450byteargslackserial=; arm_initselectsframebuffer-serialonlyifSERIALMODE_OUTPUT=1beforeconsolelockdown,otherwiseVCdefaultmaydisablephysicaloutputafterlogs. Preparedfuture459byteargsaddingONLYserial=1(outputonly); no runtimecons_opswrite,no newkernelpatch,NOTauthorizednewtrial.
+
+RAMPfaultrecords461consecutive,230pairsresult0,lastn461entryunmatched. ValidatedcacheASLR0x3096c000mapslastPC0x1b0a2cd98tolibobjcprivatecode(ldr w8,[x0]); readtranslationfaultL3 FAR0x1e1ba7ea0incache.15. Notproofdeadlock/physicalIOfailure. Priorityaftercapturenotification:3hash/readonlyfsck/all256diff,existingauthorizedshell-v2cleanrollback+wholeclean/stockverification. Onlythenprepareseparatelyapprovedserial1trial. No repeatedcandidateboot.
+
+---
+
+## CURRENT RECOVERY — visible output failed; stockpair flashed, Android verification pending (2026-10-30)
+
+User reports noSWEETSCREENlines,onlyearlierkprintflineandcoloredblocksbelow. This is NOTvisibleoutputsuccess; no photographyet. WatchandindependenttransportconfirmedFastboot; authorizedoriginalinit_boot_bthenboot_brestoredOKAY,Androidrebootrequested. Backgroundb74skn9zf verifiesphysicalstockpair/completion. RootNOTrestored; saveexactlogs/pstoreandfullactual16GiB before rollback. Nextdiagnosispriority: early->normalconsolehandoff/fbmap/retainedDSI, not assumecountersimplypixels. Trialconsumed,no retry.
+
+---
+
+## ACTIVE VISIBLE SCREEN TRIAL — exact0165pair started; recovery pending (2026-10-30)
+
+FreshlyapprovedCI41041646589bootddfbc184.../init_boote5983583...flashedonce,init_boot_bthenboot_bOKAY; rebootUTC2026-10-30T10:50:08.015866+00:00. Completeclean->seededrootverified; allfreshdevice/physicalstock/Fastbootgatespass. Singleattemptconsumed,no retry. Watchbfc2d78rstransport/600sdeadline. UseraskedcameraforSWEETSCREEN/status; firstunexpectedrestart->Fastboot,avoid2nddirtyboot. OriginalbootpairandcleanrootNOTrestored. NextonFastbootreturn:stockrecover/physicalhashes,exactlogs/pstore,wholeactual16GiBcapturebeforeactual-diffshell-v2rollback. No screenevidenceyet.
+
+---
+
+## CURRENT HANDOFF — visible-screen candidate fully verified; freshtrialapproval absent (2026-10-30)
+
+FullCI41041646589SUCCESSatd6295729cbf1409568ac4d12ae9ff800dadc0d18; kernel4e2e5ac59143abd9288a8f0922642f923d928857e0511e2bed30078862b45d9b,18sourcesmatchlocalfinal. Privatecandidate:shim/out-dali/ufs-41041646589/candidate-visible-screen-20261030/. Exactunchangedbootddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39; init_boote59835838517862aba21f79080213162f702f8438806abc00495176b2e9564bc. Fullv4/LZ4/CPIO/450byteargs/ADT/payloadrebuild/AVBdescriptor/full16GiBclean+seededhashandmockeddeploymentgatespass.13staticfilesbound;reviewedshell-v2restoretemplateverified.
+
+Screenmodekeepsconsoleunmuted,swipeoff,statusontick/faultregistersnapshots; exceptionproduceronlyboundedretainedRAM. RealpixelsNOTtested. Newmanifestallflagsfalse,0trials; phonefullyrecovered. ThirdsceneCOWretainedall16GiB/path/logs/hash68d2...;capturefree27467644928bytes. Nextfreshsingletrialapproval, thenfreshpreflight/onceboot/cameraevidence/firstrestart->Fastboot/fullcapturebeforerollback. No fourthtrialapprovedyet.
+
+---
+
+## CURRENT HOST STATUS — thirdsceneCOW complete; screenCIpending (2026-10-30)
+
+Approvedthird-sceneCOWreplacementcompletedwithfull16GiBbefore/new/afterSHA68d2e0868ee95bbc998470ea117bd1c4fbbb7fd8be61ad7ec66ce8f5c796bcacunchangedatoriginalroot.rawpath. Mode0600,sidecarand4rawloghashesunchanged; allpriorscenesretained. Freebytes27711692800. No phoneoperation. Screencommitd629572...fullCI41041646589watchbyoigbymkstillpending; do notclaimbuild/link/pixelsuntilverified. Phonefullyrecovered/allflagsclosed,no fourthtrialapproved.
+
+---
+
+## CURRENT HOST STATUS — screen0165pushed, fullCI andthirdsceneCOW running (2026-10-30)
+
+Approvedselected5filecommitd6295729cbf1409568ac4d12ae9ff800dadc0d18 pushedtofork/port/dali-mt6991. FullCI41041646589 exactheadbound bybackgroundbyoigbymk (https://github.com/localhosts-A/ios-sweet/actions/runs/41041646589). No fullbuild/linksuccessclaimyet. Thirdscene68d2...COWpreservation/replacement taskbf6g2ilse runningapprovedbefore/new/afterhashgates; no completionclaimyet. Phonefullyrecovered/all4writeflagsfalse,no newtrialapproved.
+
+Host-onlyscreenstager/verifierprepared,notexecuted:requireexactCI/artifacts/18sources,450byteargs withconsoleunmuted/swipeoff/screen+faultoptins,unchangedGUIADT/rootseed,andreviewedshell-v2restoretemplate(mocktested). NextverifyCI/COWthenpackage,thenfreshsingletrialapproval. Do not promisefinalfrozenfaultonscreen ifnormalthreadcannotrun; pureRAMbreadcrumbmaybeonlysource.
+
+---
+
 ## CURRENT HOST AUTHORIZATION — selectedscreen5files/fullCI and third-sceneCOW approved (2026-10-30)
 
 User approved exact5file0165commit/push/fullCI and separately exactthird-scene68d2...byte-identicalCOWpreservation/replacement. COWtaskbf6g2ilse isrunningfullbefore/new/afterhashgates; do notclaimcompleteyet. No newdevice-trialapproval; phonefullyrecovered/allwriteflagsfalse. Preserveoriginalmkadt/mkiosrootedits,privateassets andpreviousscenes.

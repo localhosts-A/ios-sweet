@@ -33,6 +33,7 @@ on:
       - "tools/test_dali_hid_geometry.py"
       - "tools/test_dali_featuretrace.py"
       - "tools/test_dali_screen_diagnostics.py"
+      - "tools/test_dali_ufs_completion.py"
 
 concurrency:
   group: xnu-${{ github.ref }}
@@ -121,6 +122,7 @@ jobs:
           python3 tools/test_dali_hid_geometry.py
           python3 tools/test_dali_featuretrace.py
           python3 tools/test_dali_screen_diagnostics.py
+          python3 tools/test_dali_ufs_completion.py
 
       - name: Build
         working-directory: dxb
@@ -452,6 +454,11 @@ jobs:
           nm fakeroot/System/Library/Kernels/kernel.development.sweet | grep ' _sweet_ff_fault_trace$'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET SCREEN: tick=%u calls=%u faults=%u lost=%u full=%u'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET FFFAULT: n=%u phase=%u pid=%d tid=%llu esr=0x%x'
+          grep -Fq 'if (su.dali && ocs == 0)' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'sweet_ufs_check_response(' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'response[2] != lun || response[3] != tag' xnu/bsd/dev/SweetUFSCompletion.h
+          grep -Fq '(response[1] & 0x60u) != 0 || residual != 0' xnu/bsd/dev/SweetUFSCompletion.h
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UFS: rejected completion op=0x%02x reason=%u'
           grep -Fq 'PE_parse_boot_argn("daligui"' xnu/iokit/Kernel/arm/SweetFramebuffer.cpp
           grep -Fq 'sweet_surface_create_buffer(fLogicalW, fLogicalH' xnu/iokit/Kernel/arm/SweetFramebuffer.cpp
           grep -Fq 'OSCompareAndSwap(0, 1, &early_flushing)' xnu/osfmk/arm64/sweet_early.c

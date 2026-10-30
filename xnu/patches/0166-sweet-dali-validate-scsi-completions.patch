@@ -1,0 +1,79 @@
+diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -39,6 +39,7 @@
+ #include <pexpert/device_tree.h>
+ #include <libkern/libkern.h>
+ #include <machine/atomic.h>
++#include "SweetUFSCompletion.h"
+ 
+ extern ppnum_t pmap_find_phys(pmap_t pmap, addr64_t va);
+ /* osfmk/arm/machine_routines.h, not exported to the BSD layer */
+@@ -377,6 +378,21 @@
+ 	}
+ 
+ 	uint32_t ocs = utrd->dw2 & 0xff;
++	if (su.dali && ocs == 0) {
++		enum sweet_ufs_response_result result = sweet_ufs_check_response(
++		    ucd->resp, sizeof(ucd->resp), lun, ucd->cmd[3], cdb[0]);
++		if (result != SWEET_UFS_RESPONSE_OK) {
++			/* A response for another transaction must not be followed by slot reuse. */
++			if (sweet_ufs_response_desynchronized(result))
++				su.command_poisoned = true;
++			printf("SWEET UFS: rejected completion op=0x%02x reason=%u "
++			    "lun=%u/%u tag=%u/%u flags=0x%02x residual=%u expected=%u\n",
++			    cdb[0], (unsigned int)result, ucd->resp[2], lun,
++			    ucd->resp[3], ucd->cmd[3], ucd->resp[1],
++			    ufs_be32(ucd->resp + 12), len);
++			return EIO;
++		}
++	}
+ 	if (ocs || ucd->resp[0] != 0x21 || ucd->resp[6] || ucd->resp[7]) {
+ 		printf("SWEET UFS: command 0x%02x failed: ocs 0x%x upiu 0x%x response 0x%x status 0x%x\n",
+ 		    cdb[0], ocs, ucd->resp[0], ucd->resp[6], ucd->resp[7]);
+diff --git a/bsd/dev/SweetUFSCompletion.h b/bsd/dev/SweetUFSCompletion.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/SweetUFSCompletion.h
+@@ -0,0 +1,41 @@
++/* Completion checks for Dali's serialized, fixed-length block I/O. */
++#ifndef SWEET_UFS_COMPLETION_H
++#define SWEET_UFS_COMPLETION_H
++
++enum sweet_ufs_response_result {
++    SWEET_UFS_RESPONSE_OK = 0,
++    SWEET_UFS_RESPONSE_INVALID,
++    SWEET_UFS_RESPONSE_IDENTITY,
++    SWEET_UFS_RESPONSE_INCOMPLETE,
++};
++
++/* OCS is checked by the caller; non-GOOD SCSI status uses existing sense logic. */
++static inline enum sweet_ufs_response_result
++sweet_ufs_check_response(const uint8_t *response, uint32_t size,
++    uint8_t lun, uint8_t tag, uint8_t opcode)
++{
++    if (response == NULL || size < 16 || response[0] != 0x21)
++        return SWEET_UFS_RESPONSE_INVALID;
++    if (response[2] != lun || response[3] != tag)
++        return SWEET_UFS_RESPONSE_IDENTITY;
++    if (response[6] != 0 || response[7] != 0)
++        return SWEET_UFS_RESPONSE_OK;
++    /* INQUIRY and other variable-length commands retain their existing policy. */
++    if (opcode == 0x28 || opcode == 0x2a || opcode == 0x25) {
++        uint32_t residual = ((uint32_t)response[12] << 24) |
++            ((uint32_t)response[13] << 16) | ((uint32_t)response[14] << 8) |
++            (uint32_t)response[15];
++        /* Response flags: overflow=0x40, underflow=0x20. */
++        if ((response[1] & 0x60u) != 0 || residual != 0)
++            return SWEET_UFS_RESPONSE_INCOMPLETE;
++    }
++    return SWEET_UFS_RESPONSE_OK;
++}
++
++static inline bool
++sweet_ufs_response_desynchronized(enum sweet_ufs_response_result result)
++{
++    return result == SWEET_UFS_RESPONSE_INVALID ||
++           result == SWEET_UFS_RESPONSE_IDENTITY;
++}
++#endif
