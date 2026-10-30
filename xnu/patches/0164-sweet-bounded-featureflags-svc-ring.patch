@@ -1,0 +1,241 @@
+diff --git a/bsd/dev/sweet_sample.c b/bsd/dev/sweet_sample.c
+--- a/bsd/dev/sweet_sample.c
++++ b/bsd/dev/sweet_sample.c
+@@ -20,6 +20,72 @@
+ #include <kern/task.h>
+ #include <kern/thread.h>
+ #include <pexpert/pexpert.h>
++
++
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++#include <arm64/proc_reg.h>
++#include <libkern/OSAtomic.h>
++#include "SweetFeatureTrace.h"
++
++static unsigned int sweet_ff_enabled;
++static volatile UInt32 sweet_ff_guard, sweet_ff_dropped;
++static struct sweet_ff_ring sweet_ff_events;
++
++void sweet_ff_trace(unsigned int, int, struct arm_saved_state *);
++
++/* Current-thread state only: no user-memory reads or process iteration. */
++void
++sweet_ff_trace(unsigned int phase, int call, struct arm_saved_state *state)
++{
++    if (sweet_ff_enabled != 1)
++        return;
++    proc_t p = current_proc();
++    if (p == PROC_NULL || !sweet_ff_target(sweet_ff_enabled, p->p_comm) ||
++        !is_saved_state64(state))
++        return;
++    if (!OSCompareAndSwap(0, 1, &sweet_ff_guard)) {
++        (void)OSCompareAndSwap(0, 1, &sweet_ff_dropped);
++        return;
++    }
++    struct sweet_ff_event event = {
++        .phase = phase, .pid = proc_pid(p), .call = call,
++        .tid = thread_tid(current_thread()),
++        .pc = get_saved_state_pc(state), .lr = get_saved_state_lr(state),
++        .sp = get_saved_state_sp(state), .x0 = get_saved_state_reg(state, 0),
++        .cpsr = get_saved_state_cpsr(state),
++    };
++    (void)sweet_ff_record(&sweet_ff_events, &event);
++    (void)OSCompareAndSwap(1, 0, &sweet_ff_guard);
++}
++
++/* Only the existing sampler thread calls this; no console output under guard. */
++static void
++sweet_ff_dump(unsigned int sample)
++{
++    static struct sweet_ff_event snapshot[SWEET_FF_RECORDS];
++    if (sweet_ff_enabled != 1)
++        return;
++    if (!OSCompareAndSwap(0, 1, &sweet_ff_guard)) {
++        printf("SWEET FFSVC: sample=%u busy=1\n", sample);
++        return;
++    }
++    uint32_t count = sweet_ff_snapshot(&sweet_ff_events, snapshot);
++    uint32_t total = sweet_ff_events.total;
++    bool dropped = OSCompareAndSwap(1, 0, &sweet_ff_dropped);
++    (void)OSCompareAndSwap(1, 0, &sweet_ff_guard);
++    printf("SWEET FFSVC: sample=%u count=%u total=%u dropped=%u exhausted=%u\n",
++        sample, count, total, dropped ? 1u : 0u,
++        total == SWEET_FF_EVENT_LIMIT ? 1u : 0u);
++    for (uint32_t i = 0; i < count; ++i) {
++        const struct sweet_ff_event *e = &snapshot[i];
++        printf("SWEET FFSVC: n=%u phase=%u pid=%d tid=%llu call=%d "
++            "pc=0x%llx lr=0x%llx sp=0x%llx x0=0x%llx cpsr=0x%x\n",
++            e->seq, e->phase, e->pid, (unsigned long long)e->tid, e->call,
++            (unsigned long long)e->pc, (unsigned long long)e->lr,
++            (unsigned long long)e->sp, (unsigned long long)e->x0, e->cpsr);
++    }
++}
++#endif
+ 
+ extern task_t proc_task(proc_t);
+ extern int hz;
+@@ -72,7 +138,11 @@
+ 	if (!PE_parse_boot_argn("sweetsample", sweet_sample_names, sizeof(sweet_sample_names))) {
+ 		strlcpy(sweet_sample_names, "SpringBoard,backboardd", sizeof(sweet_sample_names));
+ 	}
+-	if (sweet_sample_names[0] == '-' && heartbeat != 1) {
++	if (sweet_sample_names[0] == '-' && heartbeat != 1
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++        && sweet_ff_enabled != 1
++#endif
++        ) {
+ 		return;
+ 	}
+ 	if (!PE_parse_boot_argn("sweetsampledelay", &delay_seconds, sizeof(delay_seconds)) ||
+@@ -87,6 +157,9 @@
+ 	    delay_seconds, interval_seconds, sweet_sample_names);
+ 	(void)tsleep(&chan, PZERO, "sweetsmp", delay_seconds * hz);
+ 	for (int i = 0; i < 40; i++) {
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++        sweet_ff_dump((unsigned int)i);
++#endif
+ 		if (heartbeat == 1)
+ 			printf("SWEET BOOTHEART: sample=%d\n", i);
+ 		if (sweet_sample_names[0] != '-') {
+@@ -100,6 +173,12 @@
+ void
+ sweet_sample_start(void)
+ {
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++    unsigned int enabled = 0;
++    (void)PE_parse_boot_argn("sweetfftrace", &enabled, sizeof(enabled));
++    /* Initialized before userland starts; immutable after publication. */
++    sweet_ff_enabled = enabled == 1 ? 1u : 0u;
++#endif
+ 	thread_t thread;
+ 	if (kernel_thread_start(sweet_sample_thread, NULL, &thread) == KERN_SUCCESS) {
+ 		thread_deallocate(thread);
+diff --git a/bsd/dev/arm/systemcalls.c b/bsd/dev/arm/systemcalls.c
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -20,6 +20,7 @@
+ extern uint64_t sweet_boot_counter_ms(void);
+ static unsigned int sweet_pid1_syscalls;
+ static uint64_t sweet_persona_syscalls;
++extern void sweet_ff_trace(unsigned int, int, struct arm_saved_state *);
+ #endif
+ 
+ #include <sys/kernel.h>
+@@ -311,6 +312,9 @@
+ 	 * Get index into sysent table
+ 	 */
+ 	arm_prepare_syscall_return(callp, regs, uthread, error);
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++    sweet_ff_trace(2, code, regs);
++#endif
+ 
+ 	uthread->uu_flag &= ~UT_NOTCANCELPT;
+ 	uthread->syscall_code = 0;
+diff --git a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -1637,12 +1637,20 @@
+ 
+ extern void syscall_trace(struct arm_saved_state * regs);
+ 
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++extern void sweet_ff_trace(unsigned int, int, struct arm_saved_state *);
++#endif
++
+ static void
+ handle_svc(arm_saved_state_t *state)
+ {
+ 	int      trap_no = get_saved_state_svc_number(state);
+ 	thread_t thread  = current_thread();
+ 	struct   proc *p;
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++    int sweet_ff_call = trap_no < 0 ? trap_no :
++        (unsigned short)(trap_no == 0 ? get_saved_state_reg(state, 0) : trap_no);
++#endif
+ 
+ #define handle_svc_kprintf(x...) /* kprintf("handle_svc: " x) */
+ 
+@@ -1659,6 +1667,10 @@
+ 	}
+ 
+ 	mach_kauth_cred_thread_update();
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++    if (trap_no != MACH_ARM_TRAP_ABSTIME && trap_no != MACH_ARM_TRAP_CONTTIME)
++        sweet_ff_trace(0, sweet_ff_call, state);
++#endif
+ 
+ 	if (trap_no < 0) {
+ 		switch (trap_no) {
+@@ -1682,6 +1694,9 @@
+ 
+ 		unix_syscall(state, thread, p);
+ 	}
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++    sweet_ff_trace(1, sweet_ff_call, state);
++#endif
+ }
+ 
+ static void
+@@ -2064,6 +2079,9 @@
+ 
+ 	assert(is_saved_state64(state));
+ 	saved_state64(state)->x[0] = error;
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++    sweet_ff_trace(3, get_saved_state_svc_number(state), state);
++#endif
+ 
+ #if MACH_ASSERT
+ 	kern_allocation_name_t
+diff --git a/bsd/dev/SweetFeatureTrace.h b/bsd/dev/SweetFeatureTrace.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/SweetFeatureTrace.h
+@@ -0,0 +1,48 @@
++/* Bounded kernel-resident FeatureFlags events; callers serialize access. */
++#ifndef SWEET_FEATURE_TRACE_H
++#define SWEET_FEATURE_TRACE_H
++
++#define SWEET_FF_RECORDS 64u
++#define SWEET_FF_EVENT_LIMIT 65536u
++
++struct sweet_ff_event {
++    uint32_t seq, phase;
++    int32_t pid, call;
++    uint64_t tid, pc, lr, sp, x0;
++    uint32_t cpsr;
++};
++struct sweet_ff_ring {
++    uint32_t total, count;
++    struct sweet_ff_event events[SWEET_FF_RECORDS];
++};
++
++static inline bool
++sweet_ff_target(unsigned int enabled, const char *name)
++{
++    return enabled == 1 && name != NULL &&
++           strncmp(name, "init_featureflag", sizeof("init_featureflag")) == 0;
++}
++
++static inline bool
++sweet_ff_record(struct sweet_ff_ring *ring, const struct sweet_ff_event *event)
++{
++    if (ring->total >= SWEET_FF_EVENT_LIMIT)
++        return false;
++    uint32_t seq = ++ring->total;
++    ring->events[(seq - 1) % SWEET_FF_RECORDS] = *event;
++    ring->events[(seq - 1) % SWEET_FF_RECORDS].seq = seq;
++    if (ring->count < SWEET_FF_RECORDS)
++        ++ring->count;
++    return true;
++}
++
++static inline uint32_t
++sweet_ff_snapshot(struct sweet_ff_ring *ring, struct sweet_ff_event *events)
++{
++    uint32_t count = ring->count;
++    for (uint32_t i = 0; i < count; ++i)
++        events[i] = ring->events[(ring->total - count + i) % SWEET_FF_RECORDS];
++    ring->count = 0;
++    return count;
++}
++#endif

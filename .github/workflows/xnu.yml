@@ -31,6 +31,7 @@ on:
       - "tools/test_dali_boottrace.py"
       - "tools/test_dali_gui.py"
       - "tools/test_dali_hid_geometry.py"
+      - "tools/test_dali_featuretrace.py"
 
 concurrency:
   group: xnu-${{ github.ref }}
@@ -117,6 +118,7 @@ jobs:
           python3 tools/test_dali_boottrace.py
           python3 tools/test_dali_gui.py
           python3 tools/test_dali_hid_geometry.py
+          python3 tools/test_dali_featuretrace.py
 
       - name: Build
         working-directory: dxb
@@ -431,6 +433,15 @@ jobs:
           grep -Fq 'PE_parse_boot_argn("sweetheartbeat"' xnu/bsd/dev/sweet_sample.c
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET BOOTTASK: %s name=%s pid=%d'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET BOOTHEART: sample=%d'
+          grep -Fq '"sweetfftrace"' xnu/bsd/dev/sweet_sample.c
+          grep -Fq '#define SWEET_FF_RECORDS 64u' xnu/bsd/dev/SweetFeatureTrace.h
+          grep -Fq '#define SWEET_FF_EVENT_LIMIT 65536u' xnu/bsd/dev/SweetFeatureTrace.h
+          grep -Fq 'sweet_ff_trace(0, sweet_ff_call, state)' xnu/osfmk/arm64/sleh.c
+          grep -Fq 'sweet_ff_trace(1, sweet_ff_call, state)' xnu/osfmk/arm64/sleh.c
+          grep -Fq 'sweet_ff_trace(2, code, regs)' xnu/bsd/dev/arm/systemcalls.c
+          grep -Fq 'sweet_ff_trace(3, get_saved_state_svc_number(state), state)' xnu/osfmk/arm64/sleh.c
+          nm fakeroot/System/Library/Kernels/kernel.development.sweet | grep ' _sweet_ff_trace$'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET FFSVC: sample=%u count=%u total=%u dropped=%u exhausted=%u'
           grep -Fq 'PE_parse_boot_argn("daligui"' xnu/iokit/Kernel/arm/SweetFramebuffer.cpp
           grep -Fq 'sweet_surface_create_buffer(fLogicalW, fLogicalH' xnu/iokit/Kernel/arm/SweetFramebuffer.cpp
           grep -Fq 'OSCompareAndSwap(0, 1, &early_flushing)' xnu/osfmk/arm64/sweet_early.c

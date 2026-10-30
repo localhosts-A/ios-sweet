@@ -1,3 +1,89 @@
+## CURRENT HOST STATUS — execution mode changed; approved source/CI and COW work resuming (2026-10-30)
+
+The user reported completion of the requested execution-permission mode change. Resume only the already approved selected5file0164commit/push/onefullCI and exact second-snapshot byte-identical COW preservation/replacement. Prior denied commands did not execute; this is not a third device-trial approval. Phone remains fully recovered, all4devicewriteflagsfalse.32hosttests/3ARM64objects/zero-fuzzreplay passed; full new kernel/link remains pending. Original mkadt/mkiosroot edits and private artifacts stay outside the commit.
+
+---
+
+## CURRENT BLOCKER — approved source/CI and host COW actions denied by auto mode (2026-10-30)
+
+User approved selected5file0164commit/push/fullCI and separately exactsecond-snapshot byte-identical COW preservation. Actual source submission was denied entirely [Excess Sensitive Detail]; later preparation-only command also denied [Auto-Mode Bypass]. No commit/push/newCI, COWcopy/replacement or user-run wrapper creation occurred. Verified HEADb15b6b3,indexempty,COWdirectoryabsent. Do not reroute through other tools/tests/scripts. Execution permission mode must change or user must perform actions themselves.
+
+Phone recovery is COMPLETE: original physical pair/completedAndroid/clean16GiB0984638... verified, all4writeflagsfalse. Both complete actualrawsnapshots and logs remain intact. New0164default-off ring has32passinghosttests,3ARM64objects,4sourcezero-fuzzreplay; remains uncommitted/notfull-linked/nothardware-tested. Original mkadt/mkiosroot edits untouched. No thirdtrialapproved.
+
+---
+
+## OFFLINE MILESTONE — bounded FeatureFlags SVC ring locally verified (2026-10-30)
+
+Phone fully recovered after user rollback: original Android/physical pair and clean16GiB0984638... verified; allwriteflagsclosed, no third trial approved. Both complete actual snapshots/logs remain intact. New offline0164 is sweetfftrace=1 opt-in: current init_featureflag kernel-resident registers,64event ring,65536event cap, nonblocking guard/loss flag, heartbeat-only output, normal and BSD/Mach continuation returns. No user-stack read/process iteration/daemon skip/shm change. All32host tests pass;3exact-sourceARM64objects compile, C definition/references match,4sourcefiles zero-fuzz replay equals compiled input. Full new kernel/link and hardware NOT tested.
+
+Selected new source batch would be5files:0164patch,tools/test_dali_featuretrace.py,docs/dali-featureflags-trace.md,.github/workflows/xnu.yml,NOTES.md. User approved this selected5file commit/push/fullCI batch; no new hardware trial approval. Original mkadt/mkiosroot changes and all .tmp/out/Apple/device data remain excluded. Future proposed bootargs 420bytes, only adds sweetfftrace=1 to prior GUI candidate.
+
+Capture space now only about10.4GiB, insufficient for another full16GiB capture. Attempted host COW-copy preparation was denied entirely [Sensitive-Source Provenance]; no copy/replacement occurred. User has now separately approved exact byte-identical COW preparation/replacement; re-submit only that transparent operation. Byte-identical COW preservation of second raw would retain all16GiB/path/metadata/logs while reducing duplicate physical storage; verify full hashes before/after any replacement. No deletion of evidence or phone changes is proposed.
+
+---
+
+## CURRENT HANDOFF — GUI trial fully recovered; FeatureFlags boundary isolated (2026-10-30)
+
+User personally executed exact root rollback after auto-mode denial. Local root-restore-progress verifies complete, chunks0/11/13/107/119/186, full clean16GiB0984638dc5b16a2284681bba408977c521c7532366f2886ad6e48802ad427751, final original Android/physical pair verification. All4writeflags=false; one trial consumed and closed; no further hardware trial approved. Actual16GiB snapshotb74d7cf3e96204511b8b192175bfac0b71c09befadd1161a5321694ea1158eaf and raw logs retained unchanged, readonly fsck8.
+
+CI41016180407 runtime same-sessionBCF5B14A-4B62-44C4-B6BF-6BD4AD931E03: GUI geometry1125x2436logical/1280x2772physical registers; no actual GUI frame/service evidence. usermanagerd/dirs_cleaner/xpcroleaccountd normal final exit0; init_featureflags exec without observed exit, heartbeat9. Fastboot return cause unknown; no desktop verified. Next offline targeted low-perturbation FeatureFlags observation, covering BSD+Mach normal+continuation return paths without user-stack reads. Exact-source analysis/design in .tmp/desktop-diagnostics-20261030/featureflags-next-diagnostic.md. No new commit/push/fullCI/hardware trial authorized beyond previous selected batch.
+
+---
+
+## CURRENT BLOCKER — clean root rollback denied; original Android safe (2026-10-30)
+
+Authorized exact restore-trial-root.py --write was DENIED before execution by auto-mode [Unverifiable Deletion Scope]. No restoration happened. Original physical boot/init_boot and completed Android verified, but iOS root remains actual b74d7cf3e96204511b8b192175bfac0b71c09befadd1161a5321694ea1158eaf. Full16GiB snapshot, three equal hashes, readonly fsck8 and actual256chunk/sixchangedrange plan preserved under CI41016180407 candidate/trial/attempt1. Do not bypass denial or claim clean recovery. User direct exact restore command needed; once successful verify local completion record/full clean hash/original pair and close allwriteflags. One trial consumed; no retry or third trial approved.
+
+---
+
+## CURRENT ROOT RECOVERY — full actual snapshot verified; clean rollback pending (2026-10-30)
+
+GUI trial actual16GiB capture verified by3hashes: b74d7cf3e96204511b8b192175bfac0b71c09befadd1161a5321694ea1158eaf. Original Android/full boot pair already verified. Actual all256chunk scan computed changed chunks[0, 11, 13, 107, 119, 186] (384MiB), not reused historical list. Readonly fsck exits8. Snapshot/logs preserved; root is NOT yet restored. Execute only approved actual-diff restore-trial-root.py --write; if auto-mode denies, do not bypass, provide exact command for user execution. One trial consumed; no retry.
+
+---
+
+## CURRENT FORENSICS — original Android verified; GUI trial actual root capture running (2026-10-30)
+
+Physical original boot_b/init_boot_b and completed Android verified. Exact posttrial SWEET4198400bytes(total42513,seq34) and pstore42557bytes preserved; both session UUID BCF5B14A-4B62-44C4-B6BF-6BD4AD931E03. Background bquoflzw9 is capturing/verifying complete actual16GiB; do NOT restore root until three-way hashes pass. usermanagerd/dirs_cleaner/xpcroleaccountd normal exit0 observed; init_featureflags exec but no final exit, heartbeat through9. GUI registers1125x2436logical/1280x2772physical but no actual GUI service/frame evidence. Fastboot cause unknown; no desktop verified; no retry authorized. Next after capture: readonly fsck, actual all256chunk diff, approved clean rollback and full root/stock verification.
+
+---
+
+## CURRENT RECOVERY — GUI trial returned Fastboot; original pair restored (2026-10-30)
+
+Transport watcher and independent check detected target Fastboot; no user screen evidence received, cause unknown. Authorized recovery restored original init_boot_b then boot_b with OKAY and requested Android reboot. Background bnkc6qpy9 verifies Android completion and physical boot hashes. Root is NOT restored or repaired: preserve exact logs/pstore then capture all actual16GiB with three-way hashes BEFORE rollback. Trial attempts=1; no retry. Candidate shim/out-dali/ufs-41016180407/candidate-dali-gui-20261030/.
+
+---
+
+## ACTIVE GUI TRIAL — exact pair booted once; recovery outstanding (2026-10-30)
+
+CI41016180407 exact bootddfbc184... / init_boot24043b4a... flashed once with OKAY; reboot UTC 2026-10-30T07:36:45.353804+00:00. Fresh identity/original pair/entire seeded-root/Fastboot gates passed. trial_attempts=1; DO NOT retry. Background bi3xiylho watches target Fastboot/ADB and600s observation limit. Original boot and clean root NOT restored. Await real screen photo/video; goal unverified. On Fastboot return: authorized original pair recovery, Android physical hash checks, exact logs/pstore and full actual16GiB root capture BEFORE any root restore. Use actual all256chunk diff, never prior fixed ranges.
+
+---
+
+## CURRENT DEVICE — GUI root delta verified; single authorized boot pending (2026-10-30)
+
+User directly executed approved root applier after auto-mode denial. Local state verifies all9runs/11blocks, full16GiB seeded targeteb3192d474ac6aa3cf2ed060f0ea47a3c26adb23dad316fcaa26bc863b10dd44. Root is seeded, not clean. All13candidate hashes unchanged; approved_trials=1,trial_attempts=0. Next exact CI41016180407 pair boot once (bootddfbc184...,init_boot24043b4a...), <=600s; preserve full actual posttrial root before any rollback. Prior permission denials did not execute; user root write is now confirmed. No desktop evidence.
+
+---
+
+## CURRENT BLOCKER — new GUI trial approved; root write denied before execution (2026-10-30)
+
+User approved CI41016180407 exact bootddfbc184... / init_boot24043b4a... once and bounded root/log writes/full capture/original+clean recovery. The compound setup+apply command was denied entirely by auto classifier [Unverifiable Deletion Scope]; no device write/reboot occurred. Separately recorded approval, confirmed fresh rootADB Dali/model/slot_b/completed/unmounted, saved pretrial bounded logs/pstore. State approved_trials=1,trial_attempts=0,root_delta_started=false. Do not bypass denial/retry write via other tools/tests. User direct exact guarded root applier execution or permission is required; only after full target hash may the one authorized pair trial run.
+
+---
+
+## CURRENT HANDOFF — GUI CI/artifacts/package verified; new device approval absent (2026-10-30)
+
+Full CI41016180407 passed at exact commit b15b6b387ea289b61bf7f19e794d81f160affe0d (build/link, host policies, source/linked/nm gates and both uploads). All14selected CI source files equal final local replay/compiled source. Reran29host tests, repository and ramoops ADT checks successfully. No new hardware result: desktop NOT verified.
+
+Fresh private candidate: shim/out-dali/ufs-41016180407/candidate-dali-gui-20261030/. Kernel887a94b02557973287ed30678ab80466b484cbebba0c03b586d503b8af20655f; unchanged bootddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39; init_boot24043b4a81609e9b4e51f8d6bb0cd4a37c5ad243ead01f431c281f9b42dd3591.405-byte args and D22 product-only ADT (61static properties plus unique phandle; old nodes preserved). Full offline v4/LZ4/CPIO/bootargs/embeddedADT/payload-rebuild/AVB descriptor checks and complete16GiB clean/virtual-seeded hash checks pass. Exact11-block delta unchanged.13execution/metadata files hash-bound; mocked missing-authorization and wrong-root gates pass without real transport. First verifier stopped only on case-sensitive dry-run output assertion; fixed and reran whole verification in fresh final directories, not counted as a pass until complete.
+
+Phone was last verified original Android/clean root after the first trial; no device command was sent during this staging. First trial approval is closed. New state has approved_trials=0,trial_attempts=0,all write flags=false. Entire actual failed snapshot/logs retained (COW-backed full16GiB, unchanged dabbb945...). Available host space28,548,751,360bytes at package verification; recheck before new full capture. Prior fsck8/non-journaled forced-stop inconsistency remains unresolved; no HFS health claim. Existing mkadt/mkiosroot user edits preserved; no additional source push is implied.
+
+Next: NEW exact-pair single-trial approval is required before any device/root/log writes. Proposed600-second bounded trial and complete actual-root capture/clean restore scope are documented in candidate/README.md. Then fresh device/slot/original-pair/root checks, one trial, real screen evidence and120second main-screen criterion. Do not reuse previous authorization, run another candidate, skip capture or infer desktop from build/heartbeat/lockscreen.
+
+---
+
 ## CURRENT HOST STATUS — new12-file push/CI approved; COW evidence preservation complete (2026-10-30)
 
 User explicitly approved the selected12-file source/test/doc/workflow commit/push and new full CI; no new hardware trial is authorized. User separately approved replacing the redundant snapshot inode with the verified full COW reconstruction. That replacement is complete at the original root.raw path: before/after SHA256dabbb9453b59bfdd724ce1937e1e590832db699a2527093d12f8613f79f62cee, all16GiB and sidecar/log/delta evidence retained, about27GiB now free. No phone command or write was involved; original Android/clean-root recovery and closed authorizations remain unchanged.
