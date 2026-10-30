@@ -1,3 +1,79 @@
+## CURRENT OFFLINE GUI BOUNDARY — 0168 ready locally, no new trial (2026-10-30)
+
+Desktop is NOT reached. 0167 already proved normal FeatureFlags exit and early-boot completion; the remaining gap is GUI exec/bootstrap, not the old last-fault page. Original Android/physical stock pair/full clean16GiB0984638... remain the latest verified device state; all trial write permissions closed, full c7f1b911...scene and prior evidence preserved. No new device operation in this continuation.
+
+New default-off `sweetguiexec=1` patch0168 records activation after successful proc switch, raw proc/thread signature returns, true signature failure before the existing SIGKILL/error-zero branch, spawnattr return and before/after final-wait clear on both exec paths. Five exact-name independent32-event budgets (max160), no explicit retry loop/proc enumeration/task lock/user-memory reads; no existing statements or service/signature behavior changed. Missing records are not a deadlock proof; release-after is not userspace/GUI success.
+
+Local verification:46 policy tests +2 existingfbcon tests pass; exact-C failure fragment preserves original spawn-error-zero behavior while retaining true failure; two sources replay with fuzz0; real ARM64 kern_exec object compiles and contains gate strings. Ramoops policy check passes with existing missing research/ipsw-x/d22ap.adt warning, not candidate ADT verification. Full link/remote CI/runtime NOT verified. Evidence `.tmp/desktop-diagnostics-20261030/gui-exec-local-validation.json`, `gui-exec-compile-final.log`, `gui-exec-replay-v3.log`, test logs. Proposed492-byte arguments only add sweetguiexec=1 to0167. No approved new image pair.
+
+User explicitly approved ONLY patch0168, tools/test_dali_gui_exec.py, docs/dali-gui-exec.md, .github/workflows/xnu.yml, NOTES.md commit/push/fullCI via the source-build dialog. Execution now authorized; full CI result pending. No device trial or flash approved. Original user edits tools/mkadt.py and tools/mkiosroot.sh stay excluded. Then validate exact CI artifacts/candidate and obtain separate one-trial approval; never reuse0167 approval. See docs/dali-gui-exec.md for phases and interpretation limits.
+
+---
+
+## CURRENT SAFE STATE / NEXT GUI CHECK — 0167recovery closed, actual launchd evidence retained (2026-10-30)
+
+OriginalAndroid/physicalpair/fullclean16GiB0984638...verifiedrestored,all4writeflagsfalse. Actual16GiBc7f1b9116511dce3faae42bff1ca14135cf1157aae495f7493095c585f52c1d5 preservedwith3hashes,readonlyfsck8hardlink/directorycount,logsandsmallfileextractsretained. No newtrialapproved.
+
+Actualpersistedlaunchd.logshowsSpringBoardelidexpcproxypath;backboardd/runningboardd/notifydpendingduringon-demanddomainimport; lastflushedentrysymptomsdspawning. Thisisnotproofofmisconfiguration/deadlock,donotdisablejobsorforceactivationblindly. Existingexecmarkerprecedesproc_process_signature/thread_process_signature andtaskresume; needactualGUIexecoutcomes/bootstrapwaittoclosegap. EarlytasksFFnormalexit0+earlybootcompleteareproved,notmain-screen. BothUUIDsessionsremainseparate. Nextnarrowdiagnosis should coverGUIactivation/signatureresult/resumeandprocesswaitwithoutoldtasklock/userstackwalk.
+
+---
+
+## CURRENT GUI BOUNDARY — early tasks now complete, SpringBoard spawn marker; actualcapture pending (2026-10-30)
+
+OriginalAndroid/fullphysicalpairverified; fullactual16GiBcaptureb67svc3qeRUNNING,rootNOTrestored. BothseparateUUIDstreamsconfirmlease600/mode17d/f000,init_featureflagfinalexit0,launchdEarlybootcompleteandSpringBoardspawnpermissionmarker. RetainedFFSHMopen/truncate/mmap/unmap/closeallcomplete; priorfaultwasnotstabledeadlock. No backboarddexec,GUIclient/frame/refresh orreadyHID; swipeexpires.68xpcproxyspawnmarkersandheartbeats0..39. Markerinkern_execplatformcheckdoesNOTprovecompletedexec/userentry/liveness.
+
+Exactcleanrootlaunchcachehas530jobs;backboarddRunAtLoad+KeepAlive/Usermobile,SpringBoardKeepAlive,notifydMachservices,runningboarddRunAtLoadpresent. Nodisabled/missingGUIjobfound; do notblindlydisable/replacecache. Newnextfocus: xpcproxy->servicehandoff/actualexecoutcome,requiredbackboarddstartup orcoldstartcontention. Firstpreservefullactualrootandinspectrealcrash/servicefiles,thenrestorebeforeanothertrial. No newapproval/retry.
+
+---
+
+## CURRENT RECOVERY — user returnedFastboot; original pair flashed, root preservation pending (2026-10-30)
+
+UsergenuinelyconfirmedFastbootviaquestiondialogafter600slimit. Guardedidentity/slot/unlocked/sizespass; authorizedoriginalinit_boot_bthenboot_brestoredOKAY,Androidrebootrequested. Backgroundbqg9wga62 verifiesAndroidcompletion/fullphysicalhashes. ActualiOSrootNOTrestored; savepostlogs/pstoreandfull16GiBwith3hashesbeforeanyrollback. No candidate retry. Priorno-connectionblockerresolvedbyuser,notbyStopfeedback. Needassessactualselectedlease/heartbeat/earlytaskprogressvsunchangedstop; no desktopclaim/photo.
+
+---
+
+## CURRENT DEVICE ACTION NEEDED — 0167limit reached; manual Fastboot return for recovery (2026-10-30)
+
+600sobservationwatchbkqbycd8vendedexit2, independentADB/Fastbootcheckbothabsent. AskeduserphotooflastscreenandFastbootreturn. No newhumanGUI/progressreport. DoNOTretrycandidateorextendtrial. OriginalbootpairandcleanrootNOTrestored. Oneauthorizedattemptconsumed; originalpair/rootrestorepermissionsremainonlyforrecovery. OnFastbootreturn:exactcandidate device_pair.py recover,wait-watchdog-lease-stock-android.pyverify,savepostrawlogs/pstore,fullactual16GiBcapturetocandidatetrial/attempt1/posttrial-rootwith3hashesBEFOREactualall256diff/shell-v2cleanrollbackandfullstockhashes. Transportabsence!=deadlock/noreset/watchdogproof. Allolderproject/HOMEevidenceretained.
+
+---
+
+## ACTIVE FINITE-LEASE TRIAL — 0167exactpair started; recovery pending (2026-10-30)
+
+ApprovedCI41055548976bootddfbc184.../init_bootd51a0670...flashedonce,init_boot_bthenboot_bOKAY; rebootUTC2026-10-30T12:50:25.527256+00:00. FreshDali/slot/root/originalphysical/fullclean->seeded/Fastbootgatespass. Oneattemptconsumed,no retry. Backgroundbkqbycd8vwatchtransports/600sdeadline; firstunexpectedrestart->Fastboot. Candidateonlynewbootargdaliwdtlease600(defaultotherwisestill120),no WDTmode/length/status/PMICwrites. No runtimeresultyet.
+
+OriginalbootpairandcleanrootNOTrestored. OnFastbootreturn:approvedstockrecovery/physicalhashes,postlogs+pstore,fullactual16GiBtrial/attempt1/posttrial-root/root.rawwith3hashes BEFORE actualall256diff/shell-v2rollback/fullclean+stockverification. Allpriorproject/HOMEscenesretained. Nextrequireactualprogress/grid+Dock120s,notcounters.
+
+---
+
+## CURRENT HANDOFF — 0167finitelease candidate ready; priortrialfullyrecovered, freshapproval absent (2026-10-30)
+
+0167CI41055548976SUCCESS/exact6edb68f.../kernelb7af4767.../22sourcesverified. Newcandidate:shim/out-dali/ufs-41055548976/candidate-desktop-watchdog-lease-20261030/. bootddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39; init_bootd51a0670cc0a17eedb698916b8a1c65822e29f94ea918aae8552c36e120d8740. Fullofflinev4/LZ4/CPIO/477args/embeddedADT/payloadrebuild/AVBdescriptor/wholebase+seededhashes/mockgatesPASS.13filesbound,allwriteflagsfalse/0trials; sameGUI/root/UFSfix,ONLYnewargdaliwdtlease600. Default120/reload-onlyhardwareguardsretained; currentresetcauseunproven.
+
+Prior0166Android/physicalpair/fullcleanroot0984638...restored/allflagsclosed. Allactualscenesretained. Explicit9b0aCOWpreservationcompletewithfullbytes/path/sidecar/logunchanged,HOME09f8...untouched; projectfree26957938688bytes. Nextfreshsingletrialapproval<=600s/firstresetFastboot/fullprojectcapturebeforerollback. No nexttrialapproved,stillnomain-screenverification.
+
+---
+
+## CURRENT HOST STATUS — 0166recovery complete; 0167fullCI verified, COWspace running (2026-10-30)
+
+0166trialfullyrecovered: originalAndroid/physicalpair/fullclean16GiB0984638...verified; all4writeflagsfalse. ActualHOME16GiB09f859938e28b23896fd5d886780c337f79da97f0bf16ab4a5870bb217f426eepreserved,readonlyfsck8. No activehardwaretrial/newapproval.
+
+0167fullCI41055548976SUCCESSatexact6edb68f0d7850a1705893dd5660883df826acbe2; kernelb7af476720a91b1b008895368c117c4ff1a302bab515e4ee0c7dcb7553abc0e3manifestverified;all22criticalsourcesmatchlocalfinal. Hoststager/verifierready(notrununtilspacegate),sameADT/root/GUIargsONLYaddsfinite daliwdtlease=600,477bytes. No guaranteeofresetcause/desktop.
+
+Projectfree~9GiB,HOME~13GiBafteractualcapture; neitherenoughnextfullraw. ExecutinguserEXPLICITunconditional9b0a...oldsceneCOWapproval(latest-scene-cow-approval.json)asblpzamu7m:fullbefore/new/afterhashsame,path/sidecar/logsretained. CurrentHOME09f8...notmodified. Awaitcompletionrecordbeforeclaimingspaceorpackagingpass. No newrawdeletion. NextCOWverified->package/offlinegates->freshsingletrialdecision.
+
+---
+
+## CURRENT HOST / DEVICE STATUS — 0167fullCI running; 0166actualcapture/recovery outstanding (2026-10-30)
+
+Approved5filecommit6edb68f0d7850a1705893dd5660883df826acbe2pushed; fullCI41055548976exactheadwatchb290tp240running(https://github.com/localhosts-A/ios-sweet/actions/runs/41055548976). No newfull-linksuccessclaim. Finitedaliwdtlease120..600default120,MMIOreloadonly; sameGUI-first477byteproposedargs. Currenttrialstill0166/120sbudget,notchangedlive.
+
+DeviceoriginalAndroid/physicalpairverified,butiOSrootNOTrestored. Fullactualcapturebe66fgyemrunningat/home/baka/ios-dali-evidence/ci-41050041840-attempt1/root.raw; await3hashesBEFORErollback. Projecttrial/attempt1keepslogs,HOMEkeepsraw/sidecar. Nextcapturenotification: verifylength/3hash/read-onlyfsck,computeall256actualchunksusingcandidate0166restore-trial-root.pywithHOMErawargument,thenexistingauthorizedshell-v2rollback/fullclean+stockverification/closeflags. Donotuseprojectempty-posttrial-rootortheprior9b0ascene. No newleasehardwaretrialapproved.
+
+Userconfirmedtextonactualscreen; no main-screenphoto/evidence. UFSnewpolicyrejections0inretainedwindow; latestfaultmoved,notstablepagebugproof. 120snativeleasevs>120sslowbootbudgetisnextdirectprogresshypothesis; historicalenabledWDTmodeevidencebutcurrentresetcauseunproven. No morelogging-onlytrials.
+
+---
+
 ## CURRENT SOURCE AUTHORIZATION — 0167selected5files/fullCI approved; existing trial recovery pending (2026-10-30)
 
 Userapproved0167patch/test/docsdali-watchdog/workflow/NOTEScommitpushandonefullCIonly. No newdevice-trialapproval.41hosttests/nativeARM64object/zero-fuzzreplaypassed; default120boundedoverride600,reloadonlyexistingfirmwareenabledwatchdog. Current0166actualHOMEcapturebe66fgyemrunning,ROOTNOTRESTORED; do notoverwriteactualrootbeforecaptureverified. Olduseredits/privateassets excludedfromcommit.

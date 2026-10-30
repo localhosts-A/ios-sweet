@@ -1,0 +1,336 @@
+diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -358,24 +358,52 @@
+     "log cdhashes for all platform binary executions");
+ 
+ static os_log_t peLog = OS_LOG_DEFAULT;
+ 
+ struct exec_port_actions {
+ 	uint32_t portwatch_count;
+ 	uint32_t registered_count;
+ 	ipc_port_t *portwatch_array;
+ 	ipc_port_t *registered_array;
+ };
+ 
+ struct image_params;    /* Forward */
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++#include <libkern/OSAtomic.h>
++#include "SweetGUIExecPolicy.h"
++
++/* Current exec path holds the existing proc reference; no task/user-memory reads. */
++static void
++sweet_gui_exec_observe(proc_t p, const char *phase, int result, unsigned int image_flags)
++{
++	unsigned int enabled = 0;
++	if (!PE_parse_boot_argn("sweetguiexec", &enabled, sizeof(enabled)) || enabled != 1 ||
++		p == PROC_NULL)
++		return;
++	unsigned int kind = sweet_gui_exec_kind(p->p_name);
++	if (kind == SWEET_GUI_EXEC_TARGETS)
++		return;
++	static volatile UInt32 counters[SWEET_GUI_EXEC_TARGETS];
++	unsigned int ticket = sweet_gui_exec_ticket(&counters[kind]);
++	if (ticket == 0)
++		return;
++	printf("SWEET GUIEXEC: name=%s pid=%d phase=%s result=%d csflags=0x%llx "
++		"imageflags=0x%x n=%u exhausted=%u\n", sweet_gui_exec_names[kind], proc_getpid(p), phase,
++		result, (unsigned long long)proc_getcsflags(p), image_flags, ticket,
++		ticket == SWEET_GUI_EXEC_LIMIT ? 1u : 0u);
++}
++#else
++#define sweet_gui_exec_observe(p, phase, result, flags) do {} while (0)
++#endif
++
+ static int exec_activate_image(struct image_params *imgp);
+ static int exec_copyout_strings(struct image_params *imgp, user_addr_t *stackp);
+ static int load_return_to_errno(load_return_t lrtn);
+ static int execargs_alloc(struct image_params *imgp);
+ static int execargs_free(struct image_params *imgp);
+ static int exec_check_permissions(struct image_params *imgp);
+ static int exec_extract_strings(struct image_params *imgp);
+ static int exec_add_apple_strings(struct image_params *imgp, const load_result_t *load_result);
+ static int exec_handle_sugid(struct image_params *imgp);
+ static int sugid_scripts = 0;
+ SYSCTL_INT(_kern, OID_AUTO, sugid_scripts, CTLFLAG_RW | CTLFLAG_LOCKED, &sugid_scripts, 0, "");
+ static kern_return_t create_unix_stack(vm_map_t map, load_result_t* load_result, proc_t p);
+@@ -4078,24 +4106,25 @@
+ 	 *    The new thread is allowed to run in kernel. It cannot yet get to userland
+ 	 * 7. More things done here. This is your chance to affect the task before it runs in
+ 	 *    userspace
+ 	 * 8. task_clear_return_wait(get_threadtask(imgp->ip_new_thread), TCRW_CLEAR_FINAL_WAIT);
+ 	 *     The new thread is allowed to run in userland
+ 	 */
+ 
+ 	if (error == 0 && !spawn_no_exec) {
+ 		p = proc_exec_switch_task(current_proc(), p, old_task, new_task, imgp->ip_new_thread, &inherit);
+ 		/* proc ref returned */
+ 		should_release_proc_ref = TRUE;
+ 	}
++	sweet_gui_exec_observe(p, "activate-return", error, imgp->ip_flags);
+ 
+ 	if (error == 0) {
+ 		/* process completed the exec, but may have failed after point of no return */
+ 		exec_done = TRUE;
+ 		/*
+ 		 * Enable new task IPC access if exec_activate_image() returned an
+ 		 * active task. (Checks active bit in ipc_task_enable() under lock).
+ 		 */
+ 		ipc_task_enable(new_task);
+ 	}
+ 
+ 	if (!error && imgp->ip_px_sa != NULL) {
+@@ -4393,24 +4422,25 @@
+ 	 * and bind any portwatch ports to the new task.
+ 	 * This must be done after the exec so that the child's thread is ready,
+ 	 * and after the in transit state has been released, because priority is
+ 	 * dropped here so we need to be prepared for a potentially long preemption interval
+ 	 *
+ 	 * TODO: Consider splitting this up into separate phases
+ 	 */
+ 	if (error == 0 && imgp->ip_px_sa != NULL) {
+ 		struct _posix_spawnattr *psa = (struct _posix_spawnattr *) imgp->ip_px_sa;
+ 
+ 		error = exec_handle_spawnattr_policy(p, imgp->ip_new_thread, psa->psa_apptype, psa->psa_qos_clamp,
+ 		    psa->psa_darwin_role, &port_actions);
++		sweet_gui_exec_observe(p, "spawnattr-return", error, imgp->ip_flags);
+ 	}
+ 
+ 	/* Transfer the turnstile watchport boost to new task if in exec */
+ 	if (error == 0 && !spawn_no_exec) {
+ 		task_transfer_turnstile_watchports(old_task, new_task, imgp->ip_new_thread);
+ 	}
+ 
+ 	if (error == 0 && imgp->ip_px_sa != NULL) {
+ 		struct _posix_spawnattr *psa = (struct _posix_spawnattr *) imgp->ip_px_sa;
+ 
+ 		if (psa->psa_no_smt) {
+ 			task_set_no_smt(new_task);
+@@ -4636,25 +4666,27 @@
+ 	 * Do not terminate the current task, if proc_exec_switch_task did not
+ 	 * switch the tasks, terminating the current task without the switch would
+ 	 * result in loosing the SIGKILL status.
+ 	 */
+ 	if (task_did_exec(old_task)) {
+ 		/* Terminate the current task, since exec will start in new task */
+ 		task_terminate_internal(old_task);
+ 	}
+ 
+ 	/* Release the thread ref returned by cloneproc/fork1 */
+ 	if (imgp != NULL && imgp->ip_new_thread) {
+ 		/* wake up the new thread */
++		sweet_gui_exec_observe(p, "release-before", error, imgp->ip_flags);
+ 		task_clear_return_wait(get_threadtask(imgp->ip_new_thread), TCRW_CLEAR_FINAL_WAIT);
++		sweet_gui_exec_observe(p, "release-after", error, imgp->ip_flags);
+ 		thread_deallocate(imgp->ip_new_thread);
+ 		imgp->ip_new_thread = NULL;
+ 	}
+ 
+ 	/* Release the ref returned by cloneproc/fork1 */
+ 	if (new_task) {
+ 		task_deallocate(new_task);
+ 		new_task = NULL;
+ 	}
+ 
+ 	if (should_release_proc_ref) {
+ 		proc_rele(p);
+@@ -5025,24 +5057,25 @@
+ 		new_task = get_threadtask(imgp->ip_new_thread);
+ #if defined(HAS_APPLE_PAC)
+ 		ml_task_set_disable_user_jop(new_task, imgp->ip_flags & IMGPF_NOJOP ? TRUE : FALSE);
+ 		ml_thread_set_disable_user_jop(imgp->ip_new_thread, imgp->ip_flags & IMGPF_NOJOP ? TRUE : FALSE);
+ #endif
+ 	}
+ 
+ 	if (!error) {
+ 		p = proc_exec_switch_task(current_proc(), p, old_task, new_task, imgp->ip_new_thread, &inherit);
+ 		/* proc ref returned */
+ 		should_release_proc_ref = TRUE;
+ 	}
++	sweet_gui_exec_observe(p, "activate-return", error, imgp->ip_flags);
+ 
+ 	kauth_cred_unref(&context.vc_ucred);
+ 
+ 	if (!error) {
+ 		exec_done = TRUE;
+ 		assert(imgp->ip_new_thread != NULL);
+ 		/*
+ 		 * Enable new task IPC access if exec_activate_image() returned an
+ 		 * active task. (Checks active bit in ipc_task_enable() under lock).
+ 		 */
+ 		ipc_task_enable(new_task);
+ 
+@@ -5190,25 +5223,27 @@
+ 		 * Do not terminate the current task, if proc_exec_switch_task did not
+ 		 * switch the tasks, terminating the current task without the switch would
+ 		 * result in loosing the SIGKILL status.
+ 		 */
+ 		if (task_did_exec(old_task)) {
+ 			/* Terminate the current task, since exec will start in new task */
+ 			task_terminate_internal(old_task);
+ 		}
+ 
+ 		/* Release the thread ref returned by cloneproc */
+ 		if (imgp->ip_new_thread) {
+ 			/* wake up the new exec thread */
++			sweet_gui_exec_observe(p, "release-before", error, imgp->ip_flags);
+ 			task_clear_return_wait(get_threadtask(imgp->ip_new_thread), TCRW_CLEAR_FINAL_WAIT);
++			sweet_gui_exec_observe(p, "release-after", error, imgp->ip_flags);
+ 			thread_deallocate(imgp->ip_new_thread);
+ 			imgp->ip_new_thread = NULL;
+ 		}
+ 	}
+ 
+ 	/* Release the ref returned by fork_create_child */
+ 	if (new_task) {
+ 		task_deallocate(new_task);
+ 		new_task = NULL;
+ 	}
+ 
+ 	if (should_release_proc_ref) {
+@@ -7344,24 +7379,25 @@
+ static int
+ process_signature(proc_t p, struct image_params *imgp)
+ {
+ 	mach_port_t port = IPC_PORT_NULL;
+ 	kern_return_t kr = KERN_FAILURE;
+ 	int error = EACCES;
+ 	boolean_t unexpected_failure = FALSE;
+ 	struct cs_blob *csb;
+ 	boolean_t require_success = FALSE;
+ 	int spawn = (imgp->ip_flags & IMGPF_SPAWN);
+ 	const int vfexec = 0;
+ 	os_reason_t signature_failure_reason = OS_REASON_NULL;
++	sweet_gui_exec_observe(p, "signature-enter", 0, imgp->ip_flags);
+ 
+ 	/*
+ 	 * Override inherited code signing flags with the
+ 	 * ones for the process that is being successfully
+ 	 * loaded
+ 	 */
+ 	proc_lock(p);
+ 	proc_csflags_update(p, imgp->ip_csflags);
+ 	proc_unlock(p);
+ 
+ 	/* Set the switch_protect flag on the map */
+ 	if (proc_getcsflags(p) & (CS_HARD | CS_KILL)) {
+@@ -7539,77 +7575,82 @@
+ 			}
+ 		}
+ 	}
+ 
+ done:
+ 	if (0 == error) {
+ 		/*
+ 		 * Update the new process's signature-dependent process state.
+ 		 * state.
+ 		 */
+ 
+ 		error = proc_process_signature(p, &signature_failure_reason);
++		sweet_gui_exec_observe(p, "proc-signature-return", error, imgp->ip_flags);
+ 	}
+ 
+ 	if (0 == error) {
+ 		/*
+ 		 * Update the new main thread's signature-dependent thread
+ 		 * state. This was also called when the thread was created,
+ 		 * but for the main thread the signature was not yet attached
+ 		 * at that time.
+ 		 */
+ 		kr = thread_process_signature(imgp->ip_new_thread, proc_get_task_raw(p));
++		sweet_gui_exec_observe(p, "thread-signature-return", kr, imgp->ip_flags);
+ 
+ 		if (kr != KERN_SUCCESS) {
+ 			error = EINVAL;
+ 			signature_failure_reason = os_reason_create(OS_REASON_EXEC, EXEC_EXIT_REASON_MACHINE_THREAD);
+ 		}
+ 	}
+ 
+ 	if (0 == error) {
+ 		/* The process's code signature related properties are
+ 		 * fully set up, so this is an opportune moment to log
+ 		 * platform binary execution, if desired. */
+ 		if (platform_exec_logging != 0 && csproc_get_platform_binary(p)) {
+ 			uint8_t cdhash[CS_CDHASH_LEN];
+ 			char cdhash_string[CS_CDHASH_STRING_SIZE];
+ 			proc_getcdhash(p, cdhash);
+ 			cdhash_to_string(cdhash_string, cdhash);
+ 
+ 			os_log(peLog, "CS Platform Exec Logging: Executing platform signed binary "
+ 			    "'%s' with cdhash %s\n", p->p_name, cdhash_string);
+ 		}
+ 	} else {
+ 		if (!unexpected_failure) {
+ 			proc_csflags_set(p, CS_KILLED);
+ 		}
++
++		sweet_gui_exec_observe(p, "signature-failure-before-kill", error, imgp->ip_flags);
+ 		/* make very sure execution fails */
+ 		if (vfexec || spawn) {
+ 			assert(signature_failure_reason != OS_REASON_NULL);
+ 			psignal_vfork_with_reason(p, proc_task(p), imgp->ip_new_thread,
+ 			    SIGKILL, signature_failure_reason);
+ 			signature_failure_reason = OS_REASON_NULL;
+ 			error = 0;
+ 		} else {
+ 			assert(signature_failure_reason != OS_REASON_NULL);
+ 			psignal_with_reason(p, SIGKILL, signature_failure_reason);
+ 			signature_failure_reason = OS_REASON_NULL;
+ 		}
+ 	}
+ 
+ 	if (port != IPC_PORT_NULL) {
+ 		ipc_port_release_send(port);
+ 	}
+ 
+ 	/* If we hit this, we likely would have leaked an exit reason */
++	sweet_gui_exec_observe(p, "signature-final", error, imgp->ip_flags);
+ 	assert(signature_failure_reason == OS_REASON_NULL);
+ 	return error;
+ }
+ 
+ /*
+  * Typically as soon as we start executing this process, the
+  * first instruction will trigger a VM fault to bring the text
+  * pages (as executable) into the address space, followed soon
+  * thereafter by dyld data structures (for dynamic executable).
+  * To optimize this, as well as improve support for hardware
+  * debuggers that can only access resident pages present
+  * in the process' page tables, we prefault some pages if
+diff --git a/bsd/kern/SweetGUIExecPolicy.h b/bsd/kern/SweetGUIExecPolicy.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/kern/SweetGUIExecPolicy.h
+@@ -0,0 +1,32 @@
++/* Fixed GUI exec targets and independent bounded observation budgets. */
++#ifndef SWEET_GUI_EXEC_POLICY_H
++#define SWEET_GUI_EXEC_POLICY_H
++
++#define SWEET_GUI_EXEC_TARGETS 5u
++#define SWEET_GUI_EXEC_LIMIT 32u
++
++static const char *const sweet_gui_exec_names[SWEET_GUI_EXEC_TARGETS] = {
++    "SpringBoard", "backboardd", "xpcproxy", "notifyd", "runningboardd"
++};
++
++static inline unsigned int
++sweet_gui_exec_kind(const char *name)
++{
++    if (name == NULL)
++        return SWEET_GUI_EXEC_TARGETS;
++    for (unsigned int i = 0; i < SWEET_GUI_EXEC_TARGETS; ++i)
++        if (strncmp(name, sweet_gui_exec_names[i], strlen(sweet_gui_exec_names[i]) + 1) == 0)
++            return i;
++    return SWEET_GUI_EXEC_TARGETS;
++}
++
++static inline unsigned int
++sweet_gui_exec_ticket(volatile UInt32 *counter)
++{
++    UInt32 value = (UInt32)OSAddAtomic(0, counter);
++    if (value >= SWEET_GUI_EXEC_LIMIT)
++        return 0;
++    /* One attempt only: a contending observation is dropped, never waited for. */
++    return OSCompareAndSwap(value, value + 1, counter) ? value + 1 : 0;
++}
++#endif

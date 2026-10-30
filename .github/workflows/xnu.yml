@@ -35,6 +35,7 @@ on:
       - "tools/test_dali_screen_diagnostics.py"
       - "tools/test_dali_ufs_completion.py"
       - "tools/test_dali_watchdog_lease.py"
+      - "tools/test_dali_gui_exec.py"
 
 concurrency:
   group: xnu-${{ github.ref }}
@@ -125,6 +126,7 @@ jobs:
           python3 tools/test_dali_screen_diagnostics.py
           python3 tools/test_dali_ufs_completion.py
           python3 tools/test_dali_watchdog_lease.py
+          python3 tools/test_dali_gui_exec.py
 
       - name: Build
         working-directory: dxb
@@ -419,6 +421,13 @@ jobs:
           grep -Fq 'bsdinit_task entry' xnu/bsd/kern/bsd_init.c
           grep -Fq 'initproc return wait cleared' xnu/bsd/kern/bsd_init.c
           grep -Fq 'execve returned path=%s errno=%d' xnu/bsd/kern/kern_exec.c
+          grep -Fq 'PE_parse_boot_argn("sweetguiexec"' xnu/bsd/kern/kern_exec.c
+          grep -Fq '#define SWEET_GUI_EXEC_LIMIT 32u' xnu/bsd/kern/SweetGUIExecPolicy.h
+          grep -Fq '"signature-failure-before-kill"' xnu/bsd/kern/kern_exec.c
+          grep -Fq '"release-after"' xnu/bsd/kern/kern_exec.c
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET GUIEXEC: name=%s pid=%d phase=%s result=%d csflags=0x%llx'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -Fx 'signature-failure-before-kill'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -Fx 'release-after'
           grep -Fq 'sweet_init_trace = sweet_init_call < 16;' xnu/bsd/dev/arm/systemcalls.c
           grep -Fq 'if (code == 494)' xnu/bsd/dev/arm/systemcalls.c
           grep -Fq 'SWEET PERSONA SYSCALL: enter' xnu/bsd/dev/arm/systemcalls.c
