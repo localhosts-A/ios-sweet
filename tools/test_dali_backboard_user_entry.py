@@ -179,13 +179,19 @@ int main(void) {
 }
 ''')
 
-    def test_actual_sampler_late_finite_schedule_without_process_walk(self):
+    def run_sampler_fixture(self, prefix=''):
         start = SAMPLER.index('static void\nsweet_sample_thread(')
         thread = SAMPLER[start:SAMPLER.index('\nvoid\nsweet_sample_start(void)', start)]
-        self.run_c(r'''
+        self.run_c(prefix + r'''
 #define DEVELOPMENT 1
 #define ARM64_BOARD_CONFIG_SWEET 1
+#ifndef __unused
 #define __unused __attribute__((unused))
+#endif
+#ifdef strlcpy
+#undef strlcpy
+#endif
+#define strlcpy sample_fixture_strlcpy
 #define PZERO 0
 #define PROC_ALLPROCLIST 0
 typedef int wait_result_t;
@@ -194,7 +200,7 @@ static unsigned int sweet_ff_enabled=3,sweet_ff_screen_enabled;
 static unsigned int sleeps,dumps,screen_dumps,walks,last_sample;
 static unsigned int elapsed;
 static int hz=100;
-static size_t strlcpy(char *dst,const char *src,size_t n) { size_t len=strlen(src);assert(len<n);memcpy(dst,src,len+1);return len; }
+static size_t sample_fixture_strlcpy(char *dst,const char *src,size_t n) { size_t len=strlen(src);assert(len<n);memcpy(dst,src,len+1);return len; }
 static int PE_parse_boot_argn(const char *key,void *value,unsigned size) {
     if(!strcmp(key,"sweetsample")) { assert(size==128);strcpy(value,"-"); }
     else { assert(size==sizeof(unsigned));
@@ -226,6 +232,20 @@ int main(void) {
     assert(dumps==40 && sleeps==41 && !walks);
     puts("PASS");return 0;
 }
+''')
+
+    def test_actual_sampler_late_finite_schedule_without_process_walk(self):
+        self.run_sampler_fixture()
+
+    def test_sampler_fixture_with_preexisting_darwin_macros(self):
+        self.run_sampler_fixture(r'''
+#ifndef __unused
+#define __unused __attribute__((__unused__))
+#endif
+#ifndef strlcpy
+extern size_t strlcpy(char *, const char *, size_t);
+#define strlcpy(dst, ...) __builtin___strlcpy_chk(dst, __VA_ARGS__, __builtin_object_size(dst, 1))
+#endif
 ''')
 
     def test_scope_preserves_fault_hook_budget_and_wait_policies(self):

@@ -1,3 +1,19 @@
+## CURRENT NATIVE CI TEST FIX LOCAL PASS — kernel Build not reached (2026-10-31)
+
+CI41127058628 macos-15Arm64/Xcode16.4 setup/deps/guardsPASS; testfailedbecause0171samplerfixture collidedwithDarwin__unused/securestrlcpy, BuildSKIPPED. Packagingmissingxnu/fakeroot secondary; iigcompatibilityUNKNOWN, not actualkernelcompilefailure. Watchbovg4o819 completedexit1; no activebackgroundtask.
+
+LocalFIXONLYtestfixture: conditional__unused/privatealiasedstrlcpy, addsDarwinpreexistingmacro+prototype regression. Negativecontrol oldfixture reproducesbotherrors; fixed7BBtests/all68unittest/repo+ADT PASS; all25kernelsources unchanged/Werror preserved. Twofilepublicationbatch tools/test_dali_backboard_user_entry.py + NOTES.md awaitsnewapproval/fullCI. No blindABIchange/newkernelclaim/devicewrite. PhoneoriginalAndroid/physicalpair/fullcleanverified/allflagsclosed; latestfe1fullscene+COWcopyretained/originaluntouched/no replacementpermission; desktopNOTachieved.
+
+---
+
+## CURRENT macOS15 ARM64 CI — migration pushed, full build pending (2026-10-31)
+
+Humanapprovedexactfourfilemigration; commit0ef8573ebe5ddcf0ca3a9a101fbdcb7f7b55b725 pushedforkbranch. NEWCI41127058628 dispatched13.5/DEVELOPMENT/SWEET onstandardmacos-15Arm64/pinnedXcode16.4. Nativearch/OSguards/67localtests/kernel25sources unchanged; realiigcompatibility/fullbuild/linkNOTverifiedyet. Watchnewrun, inspectactualerrorsbeforeABI/narrowfix; no blindkernelContentchange. Oldmacos14run/deferredtasksnotactive.
+
+DeviceoriginalAndroid/physicalpair/fullcleanverified/allwriteflagsfalse; latestfullfe1scene+COWcopy preserved/originaluntouched/no replacementapproval. No newdeviceauthorization, no desktop. Next actualCIresultthen independentkernel25sources/markers; no stage/flashbeforegates.
+
+---
+
 ## CURRENT macOS15 ARM64 MIGRATION LOCAL PASS — publication/CI pending (2026-10-31)
 
 UserselectedmacOS15Arm64; localworkflowselects officialstandardmacos-15, explicitXcode16.4, actualARM64/unamearm64/macOS15guards beforedeps. Usesrealpreinstalledxcodes, removesold/usr/localno-op shim; upstreamhandles/opt/homebrew. XNUtarget13.5/DEVELOPMENT/SWEET/runtimeABI/patches unchanged, all25kernelsourcehashes retained.5newactualshellguardtests/all67unittest/repo+ADTgatesPASS. Actualnativebuild/iigcompatibility NOTverified; no speculativeIORPC.kernelContentfield/code-stripping. FirstfullCI mustprovideactualerrors ifany.
