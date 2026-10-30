@@ -34,6 +34,7 @@ on:
       - "tools/test_dali_featuretrace.py"
       - "tools/test_dali_screen_diagnostics.py"
       - "tools/test_dali_ufs_completion.py"
+      - "tools/test_dali_watchdog_lease.py"
 
 concurrency:
   group: xnu-${{ github.ref }}
@@ -123,6 +124,7 @@ jobs:
           python3 tools/test_dali_featuretrace.py
           python3 tools/test_dali_screen_diagnostics.py
           python3 tools/test_dali_ufs_completion.py
+          python3 tools/test_dali_watchdog_lease.py
 
       - name: Build
         working-directory: dxb
@@ -406,6 +408,10 @@ jobs:
           python3 ../tools/inspect-boot-counter.py fakeroot/System/Library/Kernels/kernel.development.sweet --symbol __ZN12_GLOBAL__N_112millisecondsEv
           if grep -Fq 'isb; mrs' xnu/iokit/Kernel/arm/DaliXHCI.cpp; then exit 1; fi
           grep -Fq '#define DALI_WDT_BOOT_SECONDS 120u' xnu/pexpert/arm/pe_dali_watchdog.c
+          grep -Fq '"daliwdtlease"' xnu/pexpert/arm/pe_dali_watchdog.c
+          grep -Fq '#define DALI_WDT_MAX_SECONDS 600u' xnu/pexpert/arm/DaliWatchdogPolicy.h
+          grep -Fq 'dali_wdt_boot_seconds = dali_wdt_select_lease(requested)' xnu/pexpert/arm/pe_dali_watchdog.c
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI WDT: mode=0x%x length=0x%x boot lease=%us interval=1s'
           grep -Fq 'dali_wdt[2] = DALI_WDT_RELOAD;' xnu/pexpert/arm/pe_dali_watchdog.c
           grep -Fq 'dali_watchdog_init();' xnu/pexpert/arm/pe_init.c
           grep -Fq 'dali_watchdog_poll();' xnu/osfmk/arm/rtclock.c

@@ -1,3 +1,49 @@
+## CURRENT SOURCE AUTHORIZATION — 0167selected5files/fullCI approved; existing trial recovery pending (2026-10-30)
+
+Userapproved0167patch/test/docsdali-watchdog/workflow/NOTEScommitpushandonefullCIonly. No newdevice-trialapproval.41hosttests/nativeARM64object/zero-fuzzreplaypassed; default120boundedoverride600,reloadonlyexistingfirmwareenabledwatchdog. Current0166actualHOMEcapturebe66fgyemrunning,ROOTNOTRESTORED; do notoverwriteactualrootbeforecaptureverified. Olduseredits/privateassets excludedfromcommit.
+
+---
+
+## CURRENT FORENSICS / OFFLINE FIX — actual HOME capture pending, finite watchdog budget ready (2026-10-30)
+
+OriginalAndroid/physicalpairverified; actualfull16GiBcapturebe66fgyemRUNNINGat/home/baka/ios-dali-evidence/ci-41050041840-attempt1/root.raw. ROOTNOTRESTORED; awaitcapture3hashes,readonlyfsck/all256diff,thenexistingauthorizedshell-v2rollback/fullclean+stockverification. Alloldscenesretained;9b0aCOWallowedbutnotneeded/executed. Userreportsactualtextvisiblewithserial1; noGUI/main-screenproof. SameUUID34414EB9...,UFSrejections0,lastfault277atdifferentPC/FARvsprior461.
+
+Offline0167addressesHARD120sWDTbootleasevs>120sslowearlytasks. Default120unchanged,optindaliwdtlease120..600,onlyfirmwareenabledbootCPU1Hzreload0x1971at+8; neverdisable/arm/reconfiguremode/length/status/PMIC. Historicalmode17d/f000enabledbutcurrentresetcauseNOTproven.41hosttests/nativeARM64object/2sourcezero-fuzzreplayPASS; initialprintfheaderconflictfixed.477bytefutureGUI-firstargsonlyadddaliwdtlease600. No newcommit/push/fullCI/trialyet. Nextafterrecoveryapprove5files0167patch/test/docsdali-watchdog/workflow/NOTESforfullCI; notanotherlogging-onlytrial.
+
+---
+
+## CURRENT RECOVERY — user reports screen text now visible; original pair flashed (2026-10-30)
+
+Watch/independentcheckconfirmFastboot,userreportsvisibletextoutput(notdesktop,photopending). serial1startup-routegapnowhaspositivehumanobservation. Authorizedoriginalinit_boot_bthenboot_brestoredOKAY,Androidrebootrequested; backgroundbzxvafarjcheckscompletedAndroid/fullphysicalhashes. RootNOTrestored. Savepostlogs/pstorethenfullactual16GiBto/home/baka/ios-dali-evidence/ci-41050041840-attempt1/root.raw BEFOREactual-diffshell-v2rollback. NeedassessUPIUrejectionsvscontinuedlibobjcfault/GUIadvancement. No candidate retry.
+
+---
+
+## ACTIVE DESKTOP-FIRST TRIAL — exact0166pair started; recovery outstanding (2026-10-30)
+
+UserapprovedCI41050041840bootddfbc184.../init_bootd37bc5a3...flashedonce,init_boot_bthenboot_bOKAY,rebootUTC2026-10-30T12:01:43.419933+00:00. Freshphysicalstock/Daliidentity/unmounted/entireclean->seededroot/Fastbootgatespass. Singleattemptconsumed,no retry. Backgroundb24sr08qawatchestransports/600sdeadline; firstunexpectedrestart->Fastboot. OriginalbootpairandcleanrootNOTrestored.
+
+FullposttrialrootMUSTcaptureatnewprivate/home/baka/ios-dali-evidence/ci-41050041840-attempt1/root.raw onindependentpersistentdisk beforeactual-diffshell-v2rollback. Pre/postrawlogsstayinprojecttrialdir. Oldscene9b0a...unchanged; newCOWpermissionrecordedbutreplacementnotneeded/performed. AwaitrealGUI/screenprogress;nomain-screenclaim.
+
+---
+
+## CURRENT HANDOFF — 0166fullCI/candidate verified, freshdesktoptrialapproval absent (2026-10-30)
+
+CI41050041840SUCCESSatexact19a03e085e01763294126cebb0cd79ddc2585218; kernelc45759dce482f8e8424a4a2bfa21d20314050f676d6c94926767bf48b4d6cd83. ALL20criticalCIsourcesmatchlocalfinal(countcorrectedfrominitial19becauseUFSsourceitselfwasnewcriticalfile). Newprivatecandidate:shim/out-dali/ufs-41050041840/candidate-desktop-ufs-integrity-20261030/. Exactbootddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39; init_bootd37bc5a33b0df5fb925e47b4d142d819cdb2ce89273800e092b0e013bce79fc9. Fullv4/LZ4/CPIO/460args/ADT/rebuiltpayload/AVBdescriptor/wholeclean+virtualseededhashesandmockeddeploymentgatespass;13staticfilesbound,newallflagsfalse/0trials.
+
+Userprefersnoexistingrawreplacement:NOlatest9b0a...COWreplacementexecuted;oldinode/statrecordpreserved. Futurefullactual16GiBcaptureproposedNEW/home/baka/ios-dali-evidence/ci-41050041840-attempt1/root.raw onindependentpersistentdisk,23673380864freebytesatofflinecheck. No homedirectorycreatedyet; newlocationmustbeincludedinfreshsingletrialapproval. Phonefullyrecovered/allwriteflagsclosed.
+
+CandidateGUI-first:screenstatusoff,consolequietafterfirstGUIframe,controlledswipe60withrealframereadiness,serial1auxiliary. Realcompletiondefectreproducedbutnotprovenlastfaultcause;nomain-screenclaim. Nextfreshsingletrialdecision,preflight,oneboot+camera,fullnewcapturebeforeactual-diffrollback.
+
+---
+
+## CURRENT HOST STATUS — 0166pushed/fullCI running; preserve raw, use separate future capture disk (2026-10-30)
+
+Approved5filecommit19a03e085e01763294126cebb0cd79ddc2585218 pushedtofork/port/dali-mt6991; exactCI41050041840watchbzpridt6arunning. No fullnewlinksuccessclaimyet. Userprefersnoexistingrawreplacement; NO latestsceneCOWreplacementexecuted. Found/homeonindependentpersistentsda2Btrfswith23673823232freebytes(vsproject10274394112),enoughforfull16GiB+reserve. PreferunchangedfullcaptureformatinNEWprivate/home/baka/ios-dali-evidence directorywhennewtrialapproved,notCOWrewriteorephemeral/tmp(nearfull). Recheckspaceandconfirmnewlocationinexacttrialscope. No directory/capturecreatedthereyet.
+
+Phonefullyrecovered/allwriteflagsclosed. Maingoaldesktop, future460byteGUI-firstargsrestoreconsolemuteafterfirstswap/swipe60,screenstatusoff,serial1auxiliary. CompletionfixrealunitreprobutcurrentfaultcauseNOTproven; no newhardwaretrialapproved.
+
+---
+
 ## CURRENT AUTHORIZATION — 0166selected5files/fullCI approved; existing raw MUST remain (2026-10-30)
 
 Userapprovedselected5filecommit/push/onefullCI. UserprefersNOTreplacinglatestoriginalscene; conditionalCOWreplacementapprovalisNOTusedbecauseanewfuturecapturecanbecreatedasindependentCOWfromstart. Preserveexisting9b0a...root.rawinode/content/path/sidecar/logs; no replacement/deletion. Prepare/testanoptionalnewCOWcapturelocallyseparately,notpartofapproved5filecommit. Phonefullyrecovered/allwriteflagsfalse; no newhardwaretrialapproved.

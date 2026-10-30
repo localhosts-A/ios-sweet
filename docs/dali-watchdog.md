@@ -74,3 +74,50 @@ No disabled watchdog is armed. Mode, length, status, software reset and PMIC
 registers are not written. This is a finite diagnostic boot lease, not a
 complete production watchdog/watchdogd implementation. Actual reset behavior
 and new native reload path require a temporary hardware trial.
+
+
+## Slow iOS startup: explicitly bounded lease override (patch0167)
+
+The original native120-second diagnostic lease was retained through the UFS
+root bring-up. Recent iOS early tasks take longer than that; this creates a
+budget mismatch independent of whether a particular last recorded user fault
+is truly blocked. The last recorded fault also changes between trials, so it
+must not automatically be labelled a stable failing page.
+
+This does **not** establish current reset attribution. The confirmed firmware
+mode/length values above came from historical photos, not a fresh post-reset
+register capture. Host flash-to-recovery intervals include bootloader entry and
+human action; they are not precise fault/reset timestamps. No panic is observed
+in the recent retained windows. The UFS completion guard produced no rejection
+in the latest window, so it is not evidence of short IO in that trial.
+
+`daliwdtlease=N` now selects a finite native-kernel lease in120..600seconds;
+missing,0,negative-as-unsigned,too-small or too-large values retain120. The
+shim's own120-second decompression lease is unchanged. The override does not
+modify the hardware's timeout or mode, enable a disabled watchdog, touch PMIC,
+clear status, reset the device, or introduce an unbounded keepalive. The sole
+MMIO write remains vendor reload0x1971 at+0x08, at most once per second, only
+on the validated boot CPU while firmware mode.EN is already set. Configuration
+is parsed once at init, never in the interrupt path. Invalid clock arithmetic,
+backwards time or elapsed lease makes the policy refuse a reload.
+
+The init snapshot now uses the normal console/persistent-log path once during
+platform init, outside the polling IRQ. It reports mode,length and selected
+lease to help distinguish disabled hardware and the selected startup budget.
+This is not a production watchdogd handoff; after the finite lease expires,
+feeding stops, and hardware reset can follow. A hung/non-interruptible kernel
+can still reset earlier because the existing IRQ poll may not run.
+
+A future `daliwdtlease=600` candidate must still be separately approved with a
+maximum600-second observed trial, first-reset Fastboot return, exact boot/root
+bounds, full actual-root capture before rollback and final original/clean
+hashes. Extending a native boot budget does not authorize longer unattended
+experiments or permanently hide failure. Keep GUI-first behavior, not another
+logging-only trial; require actual SpringBoard grid/Dock and120seconds stable
+with a UI update to report desktop success.
+
+`python3 tools/test_dali_watchdog_lease.py` compiles actual policy/poll code with
+only MMIO/register-read assembly adapters: default/bounds/expiry,1Hz rate, clock
+overflow/backwards time, non-boot CPUs, disabled firmware and unchanged register
+sentinels. The actual native ARM64 object and zero-fuzz replay supplement these
+host tests; full new kernel link and runtime progression remain separate gates.

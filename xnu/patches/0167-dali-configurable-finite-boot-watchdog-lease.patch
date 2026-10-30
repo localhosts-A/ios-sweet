@@ -1,0 +1,118 @@
+diff --git a/pexpert/arm/pe_dali_watchdog.c b/pexpert/arm/pe_dali_watchdog.c
+--- a/pexpert/arm/pe_dali_watchdog.c
++++ b/pexpert/arm/pe_dali_watchdog.c
+@@ -1,71 +1,77 @@
+ /* Native MT6991 TOPRGU boot keepalive; vendor mtk_wdt.c reload protocol.
+  * Preserve mode/length/status. Only service a firmware-enabled watchdog.
+  * The diagnostic lease is finite: this does not replace watchdogd policy.
+  */
+ #include <arm64/dali_watchdog.h>
+ #if defined(SWEET)
+ #include <arm/machine_routines.h>
+ #include <pexpert/pexpert.h>
+ #include <pexpert/device_tree.h>
+ #include <stdint.h>
++#include <pexpert/protos.h>
++#include "DaliWatchdogPolicy.h"
+ 
+ #define DALI_WDT_PA 0x1c010000ULL
+ #define DALI_WDT_SIZE 0x1000ULL
+ #define DALI_WDT_RELOAD 0x1971u
+ #define DALI_WDT_BOOT_SECONDS 120u
+ static volatile uint32_t *dali_wdt;
+ static uint64_t dali_wdt_hz, dali_wdt_started;
+ static volatile uint64_t dali_wdt_last;
++static unsigned int dali_wdt_boot_seconds = DALI_WDT_BOOT_SECONDS;
+ 
+ void
+ dali_watchdog_poll(void)
+ {
+     if (dali_wdt == NULL || dali_wdt_hz == 0) {
+         return;
+     }
+     uint64_t cpu, now;
+     __asm__ volatile("mrs %0, mpidr_el1" : "=r"(cpu));
+     if (cpu & 0xff00ffffffULL) { /* validated Dali boot CPU MPIDR 0 only */
+         return;
+     }
+     __asm__ volatile("mrs %0, cntpct_el0" : "=r"(now));
+-    if (now - dali_wdt_started >= dali_wdt_hz * DALI_WDT_BOOT_SECONDS ||
+-        (dali_wdt_last != 0 && now - dali_wdt_last < dali_wdt_hz)) {
++    if (!dali_wdt_reload_due(dali_wdt_started, dali_wdt_last, now,
++        dali_wdt_hz, dali_wdt_boot_seconds)) {
+         return;
+     }
+     if (!(dali_wdt[0] & 1u)) { /* never arm a disabled watchdog */
+         return;
+     }
+     dali_wdt[2] = DALI_WDT_RELOAD; /* sole MMIO write: offset 0x08 */
+     __asm__ volatile("dsb sy" ::: "memory");
+     dali_wdt_last = now;
+ }
+ 
+ void
+ dali_watchdog_init(void)
+ {
+     DTEntry entry;
+     const uint64_t *reg;
+     const char *compatible;
+     unsigned int size;
+     if (dali_wdt != NULL ||
+         SecureDTFindEntry("name", "dali-watchdog", &entry) != kSuccess ||
+         SecureDTGetProperty(entry, "compatible", (const void **)&compatible, &size) != kSuccess ||
+         size < sizeof("mediatek,mt6991-wdt") ||
+         __builtin_memcmp(compatible, "mediatek,mt6991-wdt", sizeof("mediatek,mt6991-wdt")) ||
+         SecureDTGetProperty(entry, "reg", (const void **)&reg, &size) != kSuccess ||
+         size != 2 * sizeof(uint64_t) || reg[0] != DALI_WDT_PA || reg[1] != DALI_WDT_SIZE) {
+         return;
+     }
++    unsigned int requested = DALI_WDT_BOOT_SECONDS;
++    (void)PE_parse_boot_argn("daliwdtlease", &requested, sizeof(requested));
++    dali_wdt_boot_seconds = dali_wdt_select_lease(requested);
+     dali_wdt = (volatile uint32_t *)ml_io_map(reg[0], reg[1]);
+     if (dali_wdt == NULL) {
+         kprintf("DALI WDT: TOPRGU mapping failed\n");
+         return;
+     }
+     __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(dali_wdt_hz));
+     __asm__ volatile("mrs %0, cntpct_el0" : "=r"(dali_wdt_started));
+     dali_watchdog_poll();
+-    kprintf("DALI WDT: mode=0x%x length=0x%x boot lease=%us interval=1s\n",
+-        dali_wdt[0], dali_wdt[1], DALI_WDT_BOOT_SECONDS);
++    printf("DALI WDT: mode=0x%x length=0x%x boot lease=%us interval=1s\n",
++        dali_wdt[0], dali_wdt[1], dali_wdt_boot_seconds);
+ }
+ #endif
+diff --git a/pexpert/arm/DaliWatchdogPolicy.h b/pexpert/arm/DaliWatchdogPolicy.h
+new file mode 100644
+--- /dev/null
++++ b/pexpert/arm/DaliWatchdogPolicy.h
+@@ -0,0 +1,28 @@
++/* Finite boot keepalive policy; never disables or rearms a watchdog. */
++#ifndef DALI_WATCHDOG_POLICY_H
++#define DALI_WATCHDOG_POLICY_H
++
++#define DALI_WDT_DEFAULT_SECONDS 120u
++#define DALI_WDT_MAX_SECONDS 600u
++
++static inline unsigned int
++dali_wdt_select_lease(unsigned int requested)
++{
++    return requested >= DALI_WDT_DEFAULT_SECONDS && requested <= DALI_WDT_MAX_SECONDS ?
++           requested : DALI_WDT_DEFAULT_SECONDS;
++}
++
++static inline bool
++dali_wdt_reload_due(uint64_t started, uint64_t last, uint64_t now,
++    uint64_t hz, unsigned int seconds)
++{
++    if (hz == 0 || seconds < DALI_WDT_DEFAULT_SECONDS || seconds > DALI_WDT_MAX_SECONDS ||
++        hz > UINT64_MAX / seconds || now < started)
++        return false;
++    if (now - started >= hz * seconds)
++        return false;
++    if (last != 0 && (now < last || now - last < hz))
++        return false;
++    return true;
++}
++#endif
