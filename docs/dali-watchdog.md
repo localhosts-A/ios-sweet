@@ -91,7 +91,8 @@ human action; they are not precise fault/reset timestamps. No panic is observed
 in the recent retained windows. The UFS completion guard produced no rejection
 in the latest window, so it is not evidence of short IO in that trial.
 
-`daliwdtlease=N` now selects a finite native-kernel lease in120..600seconds;
+Patch0167 introduced `daliwdtlease=N` in120..600seconds; patch0170 extends the
+accepted ceiling to1200 while preserving the120-second default. For0167,
 missing,0,negative-as-unsigned,too-small or too-large values retain120. The
 shim's own120-second decompression lease is unchanged. The override does not
 modify the hardware's timeout or mode, enable a disabled watchdog, touch PMIC,
@@ -121,3 +122,50 @@ only MMIO/register-read assembly adapters: default/bounds/expiry,1Hz rate, clock
 overflow/backwards time, non-boot CPUs, disabled firmware and unchanged register
 sentinels. The actual native ARM64 object and zero-fuzz replay supplement these
 host tests; full new kernel link and runtime progression remain separate gates.
+
+
+## Late GUI: matched finite boot and input budgets (patch0170)
+
+The0169 trial has positive user-origin SpringBoard traps in boot
+`5A6B48B4-F264-4569-9377-31C54EC1CB9C`. Its valid spawn flags0x460c do not
+request START_SUSPENDED. The first backboardd exec completed its kernel stages
+only after sampler39 and `diagnostic swipe expired without a ready client`.
+That is an observed input-deadline mismatch: the one-shot gesture had permanently
+expired before the GUI service began. It is not proof of a deadlocked last page
+or of the reset cause, and no actual GUI frame/desktop has been verified.
+
+Patch0170 makes a narrow functional change rather than adding trace machinery:
+
+- Native watchdog default remains120seconds. An explicit `daliwdtlease=N` can
+  select120..1200; outside that range it falls back to120. The shim's120-second
+  loader lease and all firmware-enabled/boot-CPU/1Hz/overflow/expiry guards stay.
+- The existing Dali-only opt-in `sweethidswipe=1..300` can additionally select
+  `sweethidwait=600..1200`; absent/invalid wait values retain600. A wait argument
+  alone does not arm input, nor does it affect the Sweet/non-Dali path.
+- This is a total pre-injection readiness/delay/busy-finger budget, measured by
+  the existing one-second timer callbacks. Callback scheduling is not a strict
+  real-time clock. A real HID client AND a successfully refreshed real GUI frame
+  are still mandatory, followed by the configured delay. No occupied finger is
+  taken over. The Menu hint/one swipe sequence is unchanged and never re-arms.
+- Expiry stops the timer sequence rather than silently extending or retrying it.
+  Once the one gesture starts, only its existing bounded steps remain.
+- No additional trace hook/thread/proc walk, task-resume call, signing change or
+  launchd policy modification is introduced. Hardware watchdog timeout, mode,
+  status, software reset and PMIC registers remain untouched; reload+0x08 is
+  still the only watchdog register write. This is not watchdogd handoff.
+
+A proposed future candidate changes only `daliwdtlease=600` to1200 and adds
+`sweethidwait=1200` to0169's verified args (511 UTF-8 bytes). A new maximum1200-second
+host observation window, first-reset Fastboot return, exact images and complete
+capture/recovery must be separately authorized. This does NOT extend the already
+ended600-second0169 trial. Leave time within any approved window for the gesture
+and120-second desktop observation; a late lock screen alone is not completion.
+
+`python3 tools/test_dali_late_gui_budget.py` has five tests executing the actual C
+policy/poll and C++ HID startup/timer bodies. They cover defaults/invalid values,
+1Hz/clock/finite expiry, unchanged register sentinels and disabled watchdogs,
+wait-only not arming input, default600 expiry, a real-frame-ready signal at720
+plus delay/busy-finger protection, exactly one gesture, and explicit1200 expiry.
+These mocked callbacks are not physical-input or display verification. All56
+policy tests plus2 existing fbcon tests pass; three-source fuzz0 replay and real
+ARM64 watchdog/HID objects pass locally. New full link/runtime remain unverified.

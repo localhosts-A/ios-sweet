@@ -37,6 +37,7 @@ on:
       - "tools/test_dali_watchdog_lease.py"
       - "tools/test_dali_gui_exec.py"
       - "tools/test_dali_gui_user_entry.py"
+      - "tools/test_dali_late_gui_budget.py"
 
 concurrency:
   group: xnu-${{ github.ref }}
@@ -129,6 +130,7 @@ jobs:
           python3 tools/test_dali_watchdog_lease.py
           python3 tools/test_dali_gui_exec.py
           python3 tools/test_dali_gui_user_entry.py
+          python3 tools/test_dali_late_gui_budget.py
 
       - name: Build
         working-directory: dxb
@@ -413,7 +415,7 @@ jobs:
           if grep -Fq 'isb; mrs' xnu/iokit/Kernel/arm/DaliXHCI.cpp; then exit 1; fi
           grep -Fq '#define DALI_WDT_BOOT_SECONDS 120u' xnu/pexpert/arm/pe_dali_watchdog.c
           grep -Fq '"daliwdtlease"' xnu/pexpert/arm/pe_dali_watchdog.c
-          grep -Fq '#define DALI_WDT_MAX_SECONDS 600u' xnu/pexpert/arm/DaliWatchdogPolicy.h
+          grep -Fq '#define DALI_WDT_MAX_SECONDS 1200u' xnu/pexpert/arm/DaliWatchdogPolicy.h
           grep -Fq 'dali_wdt_boot_seconds = dali_wdt_select_lease(requested)' xnu/pexpert/arm/pe_dali_watchdog.c
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI WDT: mode=0x%x length=0x%x boot lease=%us interval=1s'
           grep -Fq 'dali_wdt[2] = DALI_WDT_RELOAD;' xnu/pexpert/arm/pe_dali_watchdog.c
@@ -435,6 +437,11 @@ jobs:
           grep -Fq '(unsigned int)(uint16_t)psa->psa_flags' xnu/bsd/kern/kern_exec.c
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UENTRY CONFIG: svc=%u fault=%u'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'spawnflags=0x%x spawnflags_valid=%u'
+          grep -Fq '#define SWEET_HID_WAIT_DEFAULT_SECONDS 600u' xnu/iokit/Kernel/arm/hid/SweetHIDWaitPolicy.h
+          grep -Fq '#define SWEET_HID_WAIT_MAX_SECONDS 1200u' xnu/iokit/Kernel/arm/hid/SweetHIDWaitPolicy.h
+          grep -Fq 'PE_parse_boot_argn("sweethidwait"' xnu/iokit/Kernel/arm/hid/SweetHID.cpp
+          grep -Fq '++self->fSwipeTicks >= self->fSwipeLimit' xnu/iokit/Kernel/arm/hid/SweetHID.cpp
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'client-delay=%u wait-limit=%u seconds'
           grep -Fq 'sweet_init_trace = sweet_init_call < 16;' xnu/bsd/dev/arm/systemcalls.c
           grep -Fq 'if (code == 494)' xnu/bsd/dev/arm/systemcalls.c
           grep -Fq 'SWEET PERSONA SYSCALL: enter' xnu/bsd/dev/arm/systemcalls.c
