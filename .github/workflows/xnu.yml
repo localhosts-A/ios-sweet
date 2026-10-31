@@ -47,6 +47,11 @@ on:
       - "tools/test_dali_backboard_ipc_context.py"
       - "tools/test_dali_gui_load_progress.py"
       - "tools/test_dali_ufs_startup.py"
+      - "tools/dali_uuidtext.py"
+      - "tools/test_dali_uuidtext.py"
+      - "tools/dali_recovery_adt.py"
+      - "tools/dali_unattended_return.py"
+      - "tools/test_dali_fastboot_return.py"
 
 concurrency:
   group: xnu-${{ github.ref }}
@@ -138,6 +143,8 @@ jobs:
           python3 tools/test_mkpayload_cmdline.py
           python3 tools/test_dali_hfs_diagnostics.py
           python3 tools/test_dali_root_capture.py
+          python3 -I "$GITHUB_WORKSPACE/tools/test_dali_uuidtext.py"
+          python3 -I "$GITHUB_WORKSPACE/tools/test_dali_fastboot_return.py"
           python3 tools/test_dali_boottrace.py
           python3 tools/test_dali_gui.py
           python3 tools/test_dali_hid_geometry.py
@@ -170,6 +177,7 @@ jobs:
         run: |
           python3 tools/test_dali_gui_load_progress.py
           python3 tools/test_dali_ufs_startup.py
+          python3 -I "$GITHUB_WORKSPACE/tools/test_dali_fastboot_return.py"
 
       - name: Compiler cache statistics
         if: always()
@@ -553,6 +561,14 @@ jobs:
           grep -Fq 'PE_parse_boot_argn("sweetheartbeat"' xnu/bsd/dev/sweet_sample.c
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET BOOTTASK: %s name=%s pid=%d'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET BOOTHEART: sample=%d'
+          grep -Fq 'PE_parse_boot_argn("dalifastboot"' xnu/pexpert/arm/pe_dali_watchdog.c
+          grep -Fq 'offset == DALI_FB_MARKER_OFFSET' xnu/pexpert/arm/pe_dali_watchdog.c
+          grep -Fq 'sweet_log_fastboot_drain(deadline)' xnu/pexpert/arm/pe_dali_watchdog.c
+          grep -Fq 'dali_fastboot_return_poll();' xnu/bsd/dev/sweet_sample.c
+          grep -Fq 'sweet_log_fastboot_publish(flushed);' xnu/bsd/dev/sweet_ufs.c
+          nm fakeroot/System/Library/Kernels/kernel.development.sweet | grep ' _dali_fastboot_return_poll$'
+          nm fakeroot/System/Library/Kernels/kernel.development.sweet | grep ' _sweet_log_fastboot_drain$'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET FASTBOOT: v=1 stage=%s run=%s'
           grep -Fq '"sweetfftrace"' xnu/bsd/dev/sweet_sample.c
           grep -Fq '#define SWEET_FF_RECORDS 64u' xnu/bsd/dev/SweetFeatureTrace.h
           grep -Fq '#define SWEET_FF_EVENT_LIMIT 65536u' xnu/bsd/dev/SweetFeatureTrace.h

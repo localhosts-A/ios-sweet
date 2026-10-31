@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Execute final0177 UFS functions, including real polling/blocking and DMA callers."""
+"""Execute final0178 UFS functions, including real polling/blocking and DMA callers."""
 from pathlib import Path
 import os
 import shutil
@@ -195,17 +195,44 @@ def fixture():
 
 
 class UFSStartupTest(unittest.TestCase):
-    def run_c(self, body):
+    def run_c(self, body, logger_publication=False):
         compiler = shutil.which('clang') or shutil.which('cc')
         self.assertIsNotNone(compiler)
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             body = body.replace('int main(void){', 'int main(void){(void)command;(void)unchanged_after_poison;')
-            c = root/'ufs.c'; c.write_text(fixture()+body.replace('puts("PASS");','check_counters();puts("PASS");'))
+            code = fixture()
+            if logger_publication:
+                begin = UFS.index('#if DEVELOPMENT\n/* Completed logger publications only:')
+                end = UFS.index('static void\nsweet_log_thread(', begin)
+                hooks = ('\n#undef DEVELOPMENT\n#define DEVELOPMENT 1\n'
+                         '#define os_atomic(x) x\n#define os_atomic_store(p,v,o) (*(p)=(v))\n'
+                         'static unsigned publish_wakes;\n'
+                         'static void wakeup(void *p){assert(!held && p);++publish_wakes;}\n')
+                logger_code = source.function(UFS, 'sweet_log_thread')
+                code = code.replace(logger_code, hooks + UFS[begin:end] + logger_code +
+                                    '\n#undef DEVELOPMENT\n#define DEVELOPMENT 0\n', 1)
+                body = body.replace('int main(void){', 'int main(void){(void)&sweet_log_fastboot_drain;')
+            c = root/'ufs.c'; c.write_text(code+body.replace('puts("PASS");','check_counters();puts("PASS");'))
             subprocess.run([compiler, '-std=gnu11', '-O2', '-Wall', '-Wextra', '-Werror', str(c), '-o', str(root/'ufs')], check=True)
             p = subprocess.run([str(root/'ufs')], capture_output=True, text=True, timeout=30)
             self.assertEqual(p.returncode, 0, p.stdout+p.stderr)
             self.assertEqual(p.stdout.strip(), 'PASS')
+
+    def test_development_logger_publishes_only_after_all_four_successful_stages(self):
+        self.run_c(r'''
+int main(void){
+ for(unsigned failed=0;failed<=4;++failed){
+  reset();fail_command=failed;sweet_log_fastboot_requested=1;sweet_log_fastboot_persisted=0;
+  sweet_log_fastboot_running=0;publish_wakes=0;logger(false);
+  assert(!held && unlocks==1);
+  if(failed){assert(!sweet_log_fastboot_running && !sweet_log_fastboot_persisted && !publish_wakes);}
+  else{assert(sweet_log_fastboot_running==1 && sweet_log_fastboot_persisted==4096 && publish_wakes==1 && commands==4);}
+ }
+ reset();sweet_log_fastboot_requested=0;sweet_log_fastboot_persisted=0;publish_wakes=0;logger(false);
+ assert(commands==4 && !sweet_log_fastboot_persisted && !publish_wakes);
+ puts("PASS");}
+''', logger_publication=True)
 
     def test_final_source_and_only_two_guards(self):
         if os.environ.get('SWEET_LOAD_SOURCE_DIR'):
@@ -218,7 +245,11 @@ class UFSStartupTest(unittest.TestCase):
         logger_guard = ('\t\t/* Do not overwrite DMA memory until hardware ownership is known. */\n'
                         '\t\tif (su.dali && su.command_poisoned) {\n\t\t\terror = ETIMEDOUT;\n\t\t}\n')
         self.assertEqual(UFS.count(strategy_guard),1); self.assertEqual(UFS.count(logger_guard),1)
-        normalized=UFS.replace(strategy_guard,'').replace(logger_guard,'').replace('done < count && !error;','done < count;')
+        normalized = source.without_fastboot_log_hooks(UFS)
+        begin = normalized.index('#if DEVELOPMENT\n/* Completed logger publications only:')
+        end = normalized.index('static void\nsweet_log_thread(', begin)
+        normalized = normalized[:begin] + normalized[end:]
+        normalized=normalized.replace(strategy_guard,'').replace(logger_guard,'').replace('done < count && !error;','done < count;')
         self.assertEqual(normalized,OLD)
 
     def test_old_overwrite_negative_and_new_poison_isolation(self):

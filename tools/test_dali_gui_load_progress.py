@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise final0177 functions; optional SWEET_LOAD_SOURCE_DIR verifies materialized sources."""
+"""Exercise final0178 functions; optional SWEET_LOAD_SOURCE_DIR verifies materialized sources."""
 from pathlib import Path
 import os
 import re
@@ -21,8 +21,9 @@ OVERLAY_PATHS = ('bsd/dev/sweet_ufs.c', 'osfmk/kern/lock_mtx.c', 'osfmk/kern/exc
                  'osfmk/kern/SweetLoadProgress.h', 'bsd/dev/SweetUFSLoadPolicy.h')
 # Changed files must exist in0176; unchanged files come from the explicit0175 base.
 SOURCE.update({p: fixture.fragment(p, PATCH) for p in OVERLAY_PATHS})
-CURRENT_PATCH = ROOT/'xnu/patches/0177-sweet-dali-poisoned-dma-guard.patch'
-SOURCE['bsd/dev/sweet_ufs.c'] = fixture.fragment('bsd/dev/sweet_ufs.c', CURRENT_PATCH)
+CURRENT_PATCH = ROOT/'xnu/patches/0178-sweet-dali-fastboot-return.patch'
+SOURCE.update({p: fixture.fragment(p, CURRENT_PATCH)
+               for p in ('bsd/dev/sweet_ufs.c', 'bsd/dev/sweet_sample.c')})
 LOCK = SOURCE['osfmk/kern/lock_mtx.c']
 SAMPLER, UFS, EXCEPTION, GUI_POLICY, IO_POLICY = (SOURCE[p] for p in PATHS)
 
@@ -41,6 +42,22 @@ def old_fragment(path, patch=BASE_PATCH):
     block = next(b for b in patch.read_text().split('diff --git ')[1:] if f'b/{path}\n' in b)
     return ''.join(l[1:] for l in block.splitlines(keepends=True)
                    if l.startswith(('-', ' ')) and not l.startswith('---'))
+
+
+def without_fastboot_log_hooks(text):
+    """仅移除0178中五个精确DEVELOPMENT发布钩子，保留全部UFS/poison逻辑。"""
+    blocks = (
+        '#if DEVELOPMENT\n\tos_atomic_store(&sweet_log_fastboot_running, 1, release);\n#endif\n',
+        '#if DEVELOPMENT\n\t\t\tsweet_log_fastboot_publish(flushed);\n#endif\n',
+        '#if DEVELOPMENT\n\t\t\t\t\tos_atomic_store(&sweet_log_fastboot_running, 0, release);\n#endif\n',
+        '#if DEVELOPMENT\n\t\t\tos_atomic_store(&sweet_log_fastboot_running, 0, release);\n#endif\n',
+        '#if DEVELOPMENT\n\t\tsweet_log_fastboot_publish(flushed);\n#endif\n',
+    )
+    for block in blocks:
+        if text.count(block) != 1:
+            raise AssertionError('缺少/重复精确0178 logger hook')
+        text = text.replace(block, '')
+    return text
 
 
 def parse_record(line):
@@ -388,10 +405,10 @@ int main(void){
         logger_guard = ('\t\t/* Do not overwrite DMA memory until hardware ownership is known. */\n'
                         '\t\tif (su.dali && su.command_poisoned) {\n'
                         '\t\t\terror = ETIMEDOUT;\n\t\t}\n')
-        logger = function(UFS,'sweet_log_thread')
+        logger = without_fastboot_log_hooks(function(UFS,'sweet_log_thread'))
         self.assertEqual(logger.count(logger_guard),1)
         self.assertEqual(logger.replace(logger_guard,''),function(old_fragment(PATHS[1]),'sweet_log_thread'))
-        self.assertEqual(CURRENT_PATCH.read_text().count('diff --git '),1)
+        self.assertEqual(CURRENT_PATCH.read_text().count('diff --git '),6)
         self.assertEqual(function(EXCEPTION,'sweet_sample_task'),function(old_fragment(PATHS[2]),'sweet_sample_task'))
         for word in ('proc_iterate','proc_find','vm_map_read_user','task_deallocate','thread_deallocate','printf','runq'):
             self.assertNotIn(word,function(EXCEPTION,'sweet_load_collect'))
@@ -595,7 +612,8 @@ typedef int wait_result_t;
 #define KERN_SUCCESS 0
 static char sweet_sample_names[128];static int hz=100;
 static unsigned sweet_ff_screen_enabled,sweet_ff_fault_enabled;static bool creation_fail;
-static unsigned iterations,sleeps,creates,deallocations,order[200],order_count;
+static unsigned iterations,sleeps,creates,deallocations,order[200],order_count,fastboot_polls;
+static void dali_fastboot_return_poll(void){++fastboot_polls;}
 static bool sweet_bbvm_is_configured(void){return false;}
 static bool sweet_bbipc_is_configured(void);
 static void sweet_bbpc_prepare(unsigned int n){(void)n;}
@@ -622,7 +640,7 @@ static void thread_deallocate(void *thread){assert(thread==&target_task);++deall
         body=r'''
 int main(void) {
  creation_fail=true;sweet_sample_start();assert(creates==1 && !sweet_load_control && !io_begins && !sleeps && !deallocations);
- creation_fail=false;sweet_sample_start();assert(creates==2 && sleeps==41 && deallocations==1 && !iterations);
+ creation_fail=false;sweet_sample_start();assert(creates==2 && sleeps==41 && deallocations==1 && !iterations && fastboot_polls==40);
  assert(sweet_load_dumped==40 && io_calls==40 && io_closes==1 && io_begins==1 && (sweet_load_control&SWEET_LOAD_CLOSED));
  assert(order_count==120);for(unsigned i=0;i<120;++i)assert(order[i]==i%3+1);
  puts("PASS");return 0;

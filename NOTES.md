@@ -1,3 +1,135 @@
+## 当前交接 — 0178离线索引/默认off返回主机验收完成，准备提交与一次CI（2026-11-01）
+
+获批playful-tickling-lemur计划实施：tools/dali_uuidtext.py只读正式工具在b4ee根前后fullSHA一致，生成101685978bytes/2710images/4301ranges，完整SHAea59524b50ec6987467a9ee2ce502aaa636b1c80334862f187b1b371a62e665a，与独立原型及两轮现场1MiB前缀相等；未植入根。
+0178默认off、精确FDT/ADT契约+dalifastboot1启用，复用HackIOS同板marker低4位3和PSCI cold；不改MODE/LENGTH或原喂狗。现有普通线程单次调用，先有界等待logger四阶段成功发布，未确认不发cold；返回SMC记失败/回滚，不换AEE/重试。参考自动Fastboot曾成功但旧ramoops丢失，当前新功能尚无设备验收，不保证所有故障无人值守。
+24suite/183本地cases、真实ARM64三对象0/3failed、36源独立零偏移/30旧源不变、原事务/旧poll字节保持；178patch/48Python/12shell、11bash-n通过。预期CI181pre+46post=227执行；还未提交/CI，不把本地编译当native link。证据fastboot-return-{host-verification,host-test-counts}.json及uuidtext-formal-real-root/manifest.json。
+精确批次11文件将按已授权提交推送/一次完整CI；两原用户dirty工具保持hash不纳入。设备原厂+b4ee、0177spent/四flagsfalse，无新设备动作。进入Fastboot/刷入前先确认精确候选和自动返回/取证恢复整轮；获准同轮可自动安全收尾，不自动追加。PortSend接收权属/运行接纳仍unknown，桌面未实现。
+
+---
+
+## 当前交接 — DSC离线预生成与无人值守Fastboot返回计划已批准，主机实施中（2026-11-01）
+
+用户已批准/home/baka/.claude/plans/playful-tickling-lemur.md：dali_uuidtext只读工具/完整CLI合成测试，复用HackIOS同板marker+PSCI cold默认off返回，安全协调器、精确提交推送/一次完整CI。必要非刷写设备检查允许；每轮进入Fastboot/刷入前确认候选/范围/自动返回/取证恢复，获准该轮后自动安全收尾，无需现场按键二次提问。不重置0177spent、不写已有根/现场、不重跑恢复，四设备flags仍false。
+离线新实证：两轮logd自身日志已证明main/check-in成功；两个ENOENT为返回路径非崩溃；helper harvest异步非主线程同步卡点。两轮DSC临时文件均1MiB/SHA10741ce6...。从b4ee clean cache独立生成完整DSC101685978bytes，metadata189960与现场相同，完整4301ranges/2710UUID/path逆向全等无洞；SHAea59524b50ec6987467a9ee2ce502aaa636b1c80334862f187b1b371a62e665a。无运行接纳/PortSend owner或桌面证明。
+HackIOS UEFI-Dali PlatformLib.c同板0x1c010000/+0x24/maskF/value3标记及回滚、UniXNU-Dali DaliPsci.h cold ABI可参考；cold/warm旧记录自动无按键Fastboot=true但ramoops丢失，AEE无自动返回。本项目MODE0x17d/LENGTH0xf000不可照搬先关再arm WDT。用户dirty mkadt.py/mkiosroot.sh两文件hash保持、不得提交；所有设备/Apple/raw/生成索引留本地不入git。当前HEADdece5b1/CI41226683607，设备原厂+b4ee闭合；下一步实现并测试只读DSC工具，暂无新提交/CI/设备动作，桌面未实现。
+
+---
+
+## 当前交接 — 0177整合试验取证恢复完全闭合，主机追查PortSend链（2026-11-01）
+
+提交dece5b1f72dc30948a2a24ea92bb051937e2cf70/完整CI41226683607：139本地cases、165实际CI执行、33source/IIG17/IORPC均验收；唯一整合ufswait1试验无桌面，次数耗尽，不重跑或追加诊断刷机。
+本boot39820240-8797-4368-9EB3-D73A7BC46E90，两日志同boot、398load/40samples/reject0/dup0、UFS40次q0；无GUI present/成功refresh。BB末PortSend，末seq363 mach_msg2入口无完成观测，incoming send-only112bytes/rawid11600/5desc/client-local3331，与firehose注册结构一致但runtime peer/接收权属未证。dyld/cache各自独立slide0xcc4000，不套旧轮。
+actual e842cfeee5030f3c73b140343e46ae4291e348c7cd6759fde404b7216b3b5cb7完整16GiB三hash及全部只读分析后fullhash相同，原始raw/sidecar/日志保留；51关键程序/cache每根3333419024bytes全部equal。fsck-n8为hardlink/orphaned/freecount差262，不套前轮2053underallocation。
+恢复闭合UTC2026-10-31T19:06:30.645864+00:00：实际全256diff后6块[0, 11, 13, 107, 119, 186]、402653184bytes已pinnedFD恢复，范围/完整b4ee根/原厂Android及完整物理启动对验收。root_restore_verified=true/pending=false，四权限false，无活动设备任务。任务通知exit-1未作结果依据，持久日志/state/progress/readback全部实证成功，未重复恢复。
+下一动作只在主机追查firehose注册/接收服务链，优先现有日志和源码，不猜peer、不关daemon、不伪IPC成功、不调整开关反复刷；有证据的下一功能修复与必要诊断继续整合并单独批准。
+原始e842/5a1d/7ad及所有旧场景不修复/替换/删除，/tmp不清理，日志/TMPDIR工作盘；原用户工具保持，无新commit/CI/设备权限，桌面未实现。
+证据poison-dma-{recovery-closure,frozen-root-readonly-verification,runtime-wait-summary,validated-addresses,comparison-with0176}.json。
+
+---
+
+## 当前交接 — 0177完整现场验收，b4ee恢复与只读分析运行中（2026-11-01）
+
+actual完整16GiB三hash通过：e842cfeee5030f3c73b140343e46ae4291e348c7cd6759fde404b7216b3b5cb7；原始raw/sidecar/日志保留未修复。betnuyid1 completed0，原厂Android与完整物理启动对先验收，stock/delta权限已消耗。
+后台b5awqre2o负责全256实际diff/pinned源FD b4ee恢复、范围/完整根/物理对验收；日志poison-dma-root-recovery.log，未真实成功前不宣称闭合/四权限全关。
+并行bzqqcd34j仅本地原件fsck-n/诊断读取/51字节对照/fullrawhash，日志poison-dma-frozen-root-readonly-analysis.log。不读活动输出、不重跑capture或恢复。
+本boot39820240…GUI0/成功refresh0，BB末PortSend，末seq363 send-only112/id11600/desc5/client-port3331不等peer；新slide0xcc4000独立验证，不套0176。
+唯一整合试验耗尽，无新试验批准，不追加纯诊断刷机；原始5a1d/7ad和全部旧现场保持，/tmp不删，日志/TMPDIR工作盘。桌面未实现。
+
+---
+
+## 当前交接 — 0177真人无桌面，原厂对写回，完整capture运行中（2026-11-01）
+
+真人画面仅日志色块或黑屏，已进入Fastboot；fresh核对后原厂init_boot_b/boot_b写回，已请求Android。
+旧b59i3ph6b在任何transport前因本地协调器错误路径失败；定点修正后当前后台betnuyid1负责Android完成/物理对回读、限定日志及首次完整actual16GiB三hash捕获，日志poison-dma-stock-verify-and-capture-v2.log。13绑定文件/6helper未改，无重复刷写/捕获。
+完整capture验收前根不恢复/修复，不重跑capture；仅可离线解析已完整发布且hash验证日志。之后本次已批准全256实际diff/pinnedFD b4ee恢复/范围及完整root/物理对验收关权限。
+本轮限定日志已哈希验证，同新boot39820240-8797-4368-9EB3-D73A7BC46E90，398load/40sample/reject0/dup0，两日志相等；无GUI present/成功refresh，UFS40次q0。BB末PortSend，末seq363 send-only112bytes/rawid11600/5desc与前轮结构一致，但本轮client-local remote name3331（非前轮7427），peer仍unknown。完整capture仍pending。
+CI41226683607/dece5b1、init_bootc8e84e93…/static13a71ee158…唯一整合试验1/1耗尽，无新试验授权、不追加纯诊断刷机。
+原始5a1d/7ad及全部旧现场不改，/tmp不删，日志/TMPDIR工作盘。暂无本轮runtime日志结论，桌面未实现。
+
+---
+
+## 当前交接 — 0177整合观察窗口到期，等待真人画面/Fastboot恢复（2026-11-01）
+
+后台bvqk2fl9e exit2，poison-dma-trial-observation.log明确OBSERVATION_LIMIT_REACHED；UTC2026-10-31T18:16:35.019965至18:36:35.019965，未延长/重启/重跑。
+该退出码仅为窗口上限，非死锁/reset/屏幕证据；真人画面与当前Fastboot待确认。
+CI41226683607/dece5b1、init_bootc8e84e93…/static13a71ee158…唯一整合试验1/1已耗尽，root_restore_pending=true，delta权限关闭，三恢复权限仅本次义务。
+下一动作真人Fastboot返回后核对目标恢复原厂init_boot_b/boot_b，验收Android及完整物理对；先新完整actual16GiB三hash捕获，再全256实际diff/pinned源FD b4ee恢复及范围/全root/物理对验收，关闭权限。
+不追加诊断刷机，无新试验权限。原始5a1d/7ad及全部旧场景保留未修复，/tmp不删，日志/TMPDIR工作盘；尚无0177runtime或桌面证据。
+
+---
+
+## 当前交接 — 0177单一整合候选已请求启动，固定1200秒观察（2026-11-01）
+
+boxsykil7 completed0：fresh恢复源/设备身份/槽b/原厂完整物理对/全b4ee/空间通过，seed9runs11blocks45056bytes及全07ba回读通过，init_boot_b/boot_b精确刷入请求一次启动。
+CI41226683607/dece5b1，init_bootc8e84e93…/static13a71ee158…，包含poison隔离+已有诊断+显式ufswait1（571bytes）。
+UTC 2026-10-31T18:16:35.019965+00:00 至 2026-10-31T18:36:35.019965+00:00；后台bvqk2fl9e，poison-dma-trial-observation.log。不延长/重启/重复执行，不读活动输出。
+approved_trials=trial_attempts=1已耗尽，root_delta_authorized=false，root_restore_pending=true，三恢复权限仅本次义务保留。
+完成通知后核对真实terminal/真人画面及Fastboot，再stock验收/完整新actual16GiB三hash/全256实际diff+pinnedFD b4ee恢复并关闭权限。
+pretrial严格BOOT UUID为旧0176 C01C071C…，不能当当前结果；暂无0177runtime或桌面证据。原始5a1d及全部旧场景不改，/tmp不删，日志/TMPDIR工作盘。
+
+---
+
+## 当前交接 — 0177唯一整合试验流程运行中，尚未确认启动（2026-11-01）
+
+后台boxsykil7：run-poison-dma-single-trial.py；工作盘poison-dma-single-trial-execution.log，TMPDIR工作盘。
+等待真实完成通知，不读活动输出、不重复执行；仅trial_rebooted/attempt1/全seed07ba通过才按实际rebootUTC启动固定1200s watcher，不延长/重启。
+真人批准仅本次CI41226683607/dece5b1、init_bootc8e84e93…/static13a71ee158…整合候选及完整actualcapture/stock+b4ee恢复。
+若失败先按实际写入保留完整现场再恢复；原始5a1d/7ad及所有旧场景不改，/tmp不删。暂无0177runtime或桌面证据。
+
+---
+
+## 当前交接 — 真人批准0177精确一次整合试验及完整恢复，fresh门禁待执行（2026-11-01）
+
+Actual AskUserQuestion：批准整合试验及恢复；候选trial-approval.json独立记录。
+CI41226683607/dece5b1，init_bootc8e84e934946dbe2059779e84e31e570d71f04a5cf98e7a42e334db5fbde4f49，static13a71ee158beeaac6f4c62bfa609d1124a406d7b4169081449701621bfddcc1bd7。
+approved1/attempt0，四权限仅本次fresh gates/seed/boot/完整actualcapture/stock+b4ee恢复，此刻尚未访问设备。
+下一动作恢复源完整16GiB重hash、fresh目标/槽b/原厂物理对/全b4ee/空间，成功才启动一次；任一不符停，不自动重试。
+单一功能整合候选，参数只加ufswait1，既有诊断不增额度，无HS/ufscache；≤1200s/不延长/不重跑，task2引用至重启/合成swipe非实体触摸取舍明示。
+完整actual三hash先于根恢复，全256实际比较、已验源FD贯穿恢复验收后四权限关闭；原始5a1d及全部旧场景不改，/tmp不删。桌面未实现。
+
+---
+
+## 当前交接 — 0177单一整合候选全面验收，待精确一次设备授权（2026-11-01）
+
+CI41226683607/dece5b1f72dc30948a2a24ea92bb051937e2cf70完整build/link/165实际CI执行/33source/17IIG/IORPC独立通过。
+候选shim/out-dali/ufs-41226683607/candidate-desktop-integrated-ufs-wait-20261101/：
+kernel bf01945ae90d8793cf9dda1dc5ae8e3d01db44e3b11937e3365291e385a20afe
+boot ddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39
+init_boot c8e84e934946dbe2059779e84e31e570d71f04a5cf98e7a42e334db5fbde4f49
+static13manifestSHA a71ee158beeaac6f4c62bfa609d1124a406d7b4169081449701621bfddcc1bd7
+verificationSHA a06a8119326197270afa0c0f3ba7849adb61a3b5c2f1f9945dc7d79ffab5d46c。
+功能poison隔离＋既有诊断，参数仅加ufswait1/571bytes；v4/LZ4/CPIO/payload/ADT/AVB及完整clean/virtualseed16GiB重放通过，9runs11blocks45056bytes不变。
+12adapter tests/7次futurehelper零transport通过，13文件/6helpers哈希复核，new0approved/0attempts/all4false；free=60819439616bytes，试验前仍fresh。
+下一步只对该单一整合候选另请一次≤1200秒及完整新actual16GiB三hash/原厂+b4ee恢复精确批准，不先刷纯诊断版本。保留2task引用至重启的取舍，合成swipe非实体触摸。
+PortSend结构与firehose register一致但runtime peer/接收权属未证，不关daemon/改IPC；poison未被0176实测触发，不称黑屏根因已修。
+原厂Android/物理对/完整b4ee仍已恢复验收，原始5a1d/7ad及旧场景未修复/替换/删除，无活动后台任务或设备权限，桌面未实现。
+/tmp不清理，日志/TMPDIR工作盘，发布和唯一CI已耗用，无新commit/CI权限。
+
+---
+
+## 当前交接 — 0177完整CI独立验收通过，单一整合候选验收中（2026-11-01）
+
+CI41226683607/dece5b1f72dc30948a2a24ea92bb051937e2cf70完整build/link与165实际CI执行/33source/6blobs/17IIG/IORPC独立验收通过，观察bua3ok8ti及验收br7m3z9hj均completed0。
+候选 shim/out-dali/ufs-41226683607/candidate-desktop-integrated-ufs-wait-20261101：kernelbf01945a…、bootddfbc184…、init_boot c8e84e934946dbe2059779e84e31e570d71f04a5cf98e7a42e334db5fbde4f49。
+功能隔离修复＋已有诊断，参数只加ufswait1，571bytes；12storageadapter tests通过，restorer不改，6futurehelperssyntax通过未执行。
+后台bfj3bdekf完整候选离线验收pending，工作盘poison-dma-candidate-independent-verification.log；完成通知后核对static13再另请精确一次实机/恢复批准。
+new0approved/0attempts/四权限false，无设备访问；原厂Android/物理对/完整b4ee保持，所有原始场景未改，桌面未实现。
+主机静态布局已与firehose_register结构一致但peer/接收权属未证，不能据此关logd或改IPC。HS/ufscache未纳入。
+/tmp未删，TMPDIR/日志工作盘，无额外提交/CI/设备批准。
+
+---
+
+## 当前交接 — 0177整合功能修复已发布，唯一完整CI运行中（2026-11-01）
+
+真人精确批准6文件清单46cbe9db…提交/推送及一次CI。提交dece5b1f72dc30948a2a24ea92bb051937e2cf70已推送fork/port/dali-mt6991，原用户工具保持未提交。
+CI41226683607：https://github.com/localhosts-A/ios-sweet/actions/runs/41226683607，唯一dispatch已耗用、completed success且两artifact已隔离下载；观察收集bua3ok8ti已完成0，poison-dma-ci-watch-and-download.log。
+独立verify-poison-dma-ci.py正后台br7m3z9hj运行，真实结果pending；核验实际165CI执行/33source/6blobs/kernel/17IIG/四字段IORPC，不预报成功、不自动rerun。
+主机139cases/真实UFS ARM64对象/独立33source已通过，不冒充full0177link。完整CI验收通过后只准备一个包含隔离修复+已有诊断+显式ufswait1的整合候选，再单独精确设备批准。
+设备维持已验收原厂Android/物理对/完整b4ee，四权限false，原始5a1d/7ad及全部旧现场保留未修复，PortSend peer/protocol仍unknown，桌面未实现。
+此头仅发布后本地交接，无额外commit/CI/设备权限；/tmp不删，日志/TMPDIR工作盘。
+
+---
+
 ## 当前交接 — 0177主机整合修复验收完成，发布/完整CI另批（2026-11-01）
 
 基线194bff64c92c877fbad66a3a1a69ac91e2414957／成功完整CI41214046789。0177只在原UFS mutex后隔离poisoned DMA：strategy跳过bounce循环、logger走已有error-stop；成功I/O体、SCSI/QUERY等待算法、sync等逐字节保持。
