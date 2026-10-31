@@ -44,6 +44,7 @@ on:
       - "tools/test_iig_legacy_rpc.py"
       - "tools/test_dali_backboard_interrupt_pc.py"
       - "tools/test_dali_backboard_vm_fault.py"
+      - "tools/test_dali_backboard_ipc_context.py"
 
 concurrency:
   group: xnu-${{ github.ref }}
@@ -150,6 +151,7 @@ jobs:
           python3 tools/test_iig_legacy_rpc.py
           python3 tools/test_dali_backboard_interrupt_pc.py
           python3 tools/test_dali_backboard_vm_fault.py
+          python3 tools/test_dali_backboard_ipc_context.py
 
       - name: Build
         working-directory: dxb
@@ -456,6 +458,16 @@ jobs:
           IIG_DIR="build/xnu.obj/${KERNEL_CONFIG}_ARM64_${MACHINE_CONFIG}/iokit/DriverKit"
           test "$(find "$IIG_DIR" -name '*.iig.cpp' -type f | wc -l | tr -d ' ')" = 17
           ! grep -l kernelContent "$IIG_DIR"/*.iig.cpp
+          grep -Fq '#define SWEET_BBIPC_RECORDS 64u' xnu/bsd/dev/SweetBackboardIPCPolicy.h
+          grep -Fq '#define SWEET_BBIPC_SELECTED 4u' xnu/bsd/dev/SweetBackboardIPCPolicy.h
+          grep -Fq 'bounded BBIPC state and snapshot' xnu/bsd/dev/sweet_sample.c
+          grep -Fq 'context.words[i] = get_saved_state_reg(state, i + 1)' xnu/bsd/dev/sweet_sample.c
+          grep -Fq 'bool accepted = sweet_ff_record(&sweet_ff_events, &event)' xnu/bsd/dev/sweet_sample.c
+          grep -Fq '#define SWEET_BBVM_LINE_BYTES 256u' xnu/bsd/dev/SweetBackboardVMPolicy.h
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET BBIPC CONFIG: v=1 source=incoming-machmsg2 selected=4 snapshots=40'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET BBIPC: v=1 s=%u n=%u'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET BBVM: v=2 t=%u k=E'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET BBVM: v=2 t=%u k=R'
           grep -Fq '#define SWEET_BBVM_LIMIT 40u' xnu/bsd/dev/SweetBackboardVMPolicy.h
           grep -Fq '#define SWEET_BBVM_INTERVAL_NS (30ULL * 1000000000ULL)' xnu/bsd/dev/SweetBackboardVMPolicy.h
           grep -Fq 'sweet_bbvm_token = sweet_bbvm_enter(state, esr, fault_addr,' xnu/osfmk/arm64/sleh.c

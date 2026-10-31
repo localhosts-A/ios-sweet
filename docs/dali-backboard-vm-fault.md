@@ -70,8 +70,15 @@ printed batch order is not time ordering.
 
 Hard bounds: persistent recorder+snapshot storage≤32KiB (compile-time asserted),
 40slots,80transition exports,1config+40summary/busy+80data≤121newlines.
-Each line including newline≤512bytes: at most61,952new log bytes. Scalar-only
-formats are worst-value tested. No repeated per-slot pending messages.
+0174 compact v2 entry/return lines, including newline, are at most255bytes:
+at most30,855 VM log bytes. The earlier512-byte formatter bound did not cover
+the real console's255-byte limit; two0173 return tails were clipped. The original
+partial records remain incomplete; never infer their missing flags. Compact
+entries carry register/ESR/FAR/effective-address/start context; returns carry only
+token/PID/TID/start/end/result/duration/validity and are joined by explicit identity.
+The pure policy and producer/consumer state machine remain unchanged. Worst-value
+formats now run through the real console_printbuf_putc/clear path without
+SYNCDRAIN; the old long format is a negative control. No repeated pending prints.
 
 Old SVC/PC/screen layouts, old4096fault recorder and fault3-off semantics, IRQ
 routing/prologue/timer/EOI, scheduling, WDT and GUI/HID behavior are unchanged.
@@ -79,14 +86,15 @@ routing/prologue/timer/EOI, scheduling, WDT and GUI/HID behavior are unchanged.
 
 ## Validation and deployment boundary
 
-Tests execute final0173 C policy/producers/consumer and the actual VM branch:
+Tests execute final0174 C policy/producers/consumer and the actual VM branch:
 default filters, register/argument/result transparency, actual-call versus fast
 success, blocked mock VM entry export, rate/quota/clock bounds, wrong tokens,
 late/out-of-order completion, concurrent admission/consumer, final overlap/busy
 cutoff, finite startup/creation-failure handling, and line/memory/export limits.
 Mocks use real acquire/release CAS, thread-local ownership and deterministic
 barriers; they do not prove a kernel fault or runtime fix. Keep warnings as errors
-and Darwin macro isolation. Exact base is successfulCI41174432129/cf8372a.
+and Darwin macro isolation. 0174 format base is successfulCI41181923386/8081a41; the unchanged VM-call
+observation began in0173. See dali-backboard-ipc-context.md for the new IPC scope.
 Local replay/objects/full regression and remote build/link must be reported
 separately; no host test is desktop acceptance.
 

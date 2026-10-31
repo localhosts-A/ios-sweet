@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Execute final0173 VM policy, producers, finite consumer and real call branch."""
+"""Execute final0174 VM policy, producers, finite consumer and real call branch."""
 from pathlib import Path
 import re
 import unittest
 import test_dali_gui_user_entry as fixture
 
 ROOT = Path(__file__).resolve().parents[1]
-PATCH = ROOT/'xnu/patches/0173-sweet-bounded-backboard-vm-fault.patch'
+PATCH = ROOT/'xnu/patches/0174-sweet-bounded-backboard-ipc-context.patch'
 POLICY = fixture.fragment('bsd/dev/SweetBackboardVMPolicy.h', PATCH)
 SOURCE = fixture.fragment('bsd/dev/sweet_sample.c', PATCH)
-SLEH = fixture.fragment('osfmk/arm64/sleh.c', PATCH)
+SLEH = fixture.fragment('osfmk/arm64/sleh.c', ROOT/'xnu/patches/0173-sweet-bounded-backboard-vm-fault.patch')
 LEGACY = fixture.fragment('bsd/dev/SweetFeatureTrace.h', ROOT/'xnu/patches/0171-sweet-bounded-backboard-user-entry.patch')
-HELPER = SOURCE[SOURCE.index('static volatile UInt32 sweet_bbvm_configured,'):SOURCE.index('\nvoid sweet_ff_trace(')]
+HELPER = SOURCE[SOURCE.index('static volatile UInt32 sweet_bbvm_configured,'):SOURCE.index('#include "SweetBackboardIPCPolicy.h"')]
 
 
 def function(source, name):
@@ -69,7 +69,7 @@ TAIL = r'''
 #undef printf
 static int capture(const char *fmt,...) {
  assert(!owns_guard);char line[1024];va_list ap;va_start(ap,fmt);
- int n=vsnprintf(line,sizeof(line),fmt,ap);va_end(ap);assert(n>0 && n<512);
+ int n=vsnprintf(line,sizeof(line),fmt,ap);va_end(ap);assert(n>0 && n<=255);
  assert(captured_size+(size_t)n<sizeof(captured));memcpy(captured+captured_size,line,(size_t)n+1);captured_size+=(size_t)n;++outputs;
  for(int i=0;i<n;++i)if(line[i]=='\n')++lines_seen;
  return n;
@@ -137,7 +137,7 @@ int main(void) {
  assert(sweet_bbvm_snapshot(&b,out)==4);
  memset(&e,255,sizeof(e));e.version=2;e.pid=INT32_MIN;e.result=INT32_MIN;e.duration_valid=true;
  char line[513];memset(line,'Z',sizeof(line));int n=sweet_bbvm_format(line,512,&e);
- assert(n>0 && n<512 && line[512]=='Z');assert(!sweet_bbvm_format(line,1,&e));
+ assert(n>0 && n<=255 && line[512]=='Z');assert(!sweet_bbvm_format(line,1,&e));
  assert(sizeof(b)+sizeof(out)+32<=32768);puts("PASS");return 0;
 }
 ''')
@@ -158,11 +158,11 @@ int main(void) {
  struct process pbefore=process;uint32_t t=enter();assert(t==1 && !memcmp(&regs,&before,sizeof(regs)) && !memcmp(&process,&pbefore,sizeof(process)));
  struct sweet_bbvm_event *e=&sweet_bbvm_events.slots[0].event;
  assert(e->pc==regs.pc && e->lr==regs.lr && e->sp==regs.sp && e->tid==315 && e->far==0xab001000 && e->address==0x1000 && e->prot==1 && e->esr==0x96000007);
- sweet_bbvm_dump(0);assert(strstr(captured,"kind=entry") && !strstr(captured,"kind=return"));
+ sweet_bbvm_dump(0);assert(strstr(captured,"k=E") && !strstr(captured,"k=R"));
  tid=999;sweet_bbvm_leave(t,0);assert(!sweet_bbvm_events.completed && e->version==1);
  tid=315;strcpy(process.p_comm,"changed_after_call");unsigned calls=current_calls;now=15;sweet_bbvm_leave(t,14);
  assert(current_calls==calls && e->result==14 && e->duration==15 && e->duration_valid);
- sweet_bbvm_dump(39);assert(strstr(captured,"kind=return") && !sweet_bbvm_open && !sweet_bbvm_admit);
+ sweet_bbvm_dump(39);assert(strstr(captured,"k=R") && !sweet_bbvm_open && !sweet_bbvm_admit);
  assert(sweet_ff_mode(3)==0 && sweet_ff_svc_mode(3)==3);
  puts("PASS");return 0;
 }
@@ -175,7 +175,7 @@ int main(void) {
  assert(!enter() && sweet_bbvm_begin_busy && !sweet_bbvm_events.total && !sweet_bbvm_events.has_last);
  sweet_bbvm_guard=0;uint32_t t=enter();sweet_bbvm_guard=1;now=10;sweet_bbvm_leave(t,0);
  assert(sweet_bbvm_end_busy && !sweet_bbvm_events.completed);sweet_bbvm_guard=0;
- sweet_bbvm_dump(0);assert(strstr(captured,"end_busy=1") && !strstr(captured,"kind=return"));
+ sweet_bbvm_dump(0);assert(strstr(captured,"end_busy=1") && !strstr(captured,"k=R"));
  sweet_bbvm_guard=1;sweet_bbvm_dump(39);assert(!sweet_bbvm_open && !sweet_bbvm_admit && strstr(captured,"snapshot incomplete"));
  sweet_bbvm_guard=0;sweet_bbvm_leave(t,0);assert(!sweet_bbvm_events.completed && !enter());
  reset();sweet_bbvm_prepare(1);sweet_bbvm_begin();
@@ -305,10 +305,10 @@ int main(void) {
  sweet_bbvm_prepare(1);sweet_bbvm_begin();pthread_t thread;assert(!pthread_create(&thread,NULL,worker,NULL));
  assert(!pthread_mutex_lock(&mutex));while(!blocked)assert(!pthread_cond_wait(&condition,&mutex));
  assert(sweet_bbvm_events.total==1 && !sweet_bbvm_events.completed);
- sweet_bbvm_dump(0);assert(strstr(captured,"kind=entry") && !strstr(captured,"kind=return"));
+ sweet_bbvm_dump(0);assert(strstr(captured,"k=E") && !strstr(captured,"k=R"));
  released=true;assert(!pthread_cond_signal(&condition));assert(!pthread_mutex_unlock(&mutex));assert(!pthread_join(thread,NULL));
  assert(sweet_bbvm_events.completed==1 && sweet_bbvm_events.slots[0].event.tid==7 && sweet_bbvm_events.slots[0].event.duration==77);
- now=77;sweet_bbvm_dump(39);assert(strstr(captured,"kind=return") && !sweet_bbvm_open);
+ now=77;sweet_bbvm_dump(39);assert(strstr(captured,"k=R") && !sweet_bbvm_open);
  puts("PASS");return 0;
 }
 """,extra)
@@ -371,12 +371,15 @@ static int PE_parse_boot_argn(const char *key,void *out,unsigned size) {
  else if(!strcmp(key,"sweetbbvm"))v=requested;
  else if(!strcmp(key,"sweetsampledelay"))v=5;
  else if(!strcmp(key,"sweetsampleinterval"))v=30;
- else assert(!strcmp(key,"sweetffpc") || !strcmp(key,"sweetheartbeat") || !strcmp(key,"sweetfffault") || !strcmp(key,"sweetffscreen"));
+ else assert(!strcmp(key,"sweetffpc") || !strcmp(key,"sweetbbipc") || !strcmp(key,"sweetheartbeat") || !strcmp(key,"sweetfffault") || !strcmp(key,"sweetffscreen"));
  *(unsigned *)out=v;return 1;
 }
 static int kernel_thread_start(void (*fn)(void *,int),void *arg,thread_t *out) {assert(!arg);++starts;callback=fn;*out=&process;return fail_thread?1:0;}
 static void thread_deallocate(thread_t t) {assert(t==&process);++deallocated;}
 static void sweet_bbpc_prepare(unsigned requested) {assert(!requested);}
+static void sweet_bbipc_prepare(unsigned requested) {assert(!requested);}
+static bool sweet_bbipc_is_configured(void) {return false;}
+static void sweet_bbipc_begin(void) { }
 static bool sweet_bbpc_is_configured(void) {return false;}
 static void sweet_bbpc_begin(void) { }
 static void sweet_bbpc_dump(unsigned sample) {assert(sample<40);}
@@ -439,7 +442,7 @@ int main(void) {
         patch=PATCH.read_text();self.assertEqual(patch.count('diff --git '),3)
         self.assertEqual(SLEH.count('sweet_bbvm_enter(state,'),1)
         self.assertEqual(SLEH.count('sweet_bbvm_leave(sweet_bbvm_token, result);'),1)
-        for name in ('sweet_ff_trace','sweet_ff_fault_trace','sweet_bbpc_trace'):
+        for name in ('sweet_ff_fault_trace','sweet_bbpc_trace'):
             old=fixture.fragment('bsd/dev/sweet_sample.c',ROOT/'xnu/patches/0172-sweet-bounded-backboard-interrupt-pc.patch')
             self.assertEqual(function(SOURCE,name),function(old,name))
         for name in ('sweet_bbvm_enter','sweet_bbvm_leave'):
