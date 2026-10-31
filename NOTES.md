@@ -1,3 +1,26 @@
+## 当前交接 — 0175 CI测试夹具失败，strlcpy隔离修正待回归／另批（2026-10-31）
+
+CI41200952769／4224f07 terminal failure：新consumer夹具strlcpy宏与Darwin secure/_string.h fortified定义冲突，-Werror宏重定义。
+Build及final-source/linked验证skipped；不是内核编译失败。alwayspackage/upload因无buildtree继发失败。
+仅主机test修正ifdef/undef，加入原错误强制fortified负控＋正常/fortified双正控，不关-Werror，13项实际测试PASS。
+patch六source／workflow／doc未改。全套21suite124实际测试通过，32份最终sourcehash保持不变；修正发布/一次新CI尚未授权。
+设备仍原厂+b4ee、四写权限false，原始77eb现场保留；没有运行新试验，桌面未实现。
+
+---
+
+## 当前交接 — 0175已获批发布，完整CI运行中（2026-10-31）
+
+真人批准精确五文件manifest c53c5957b088bf4d991daa21bceaec54bca9d0792e7c07fa52ae650ee0fec85a。
+已提交并推送4224f07a976318f8c17ed497f68ac93e56835df4至fork/port/dali-mt6991。
+唯一CI41200952769：https://github.com/localhosts-A/ios-sweet/actions/runs/41200952769。
+后台bphiy3rs4监看terminal并下载隔离目录，私有TMPDIR在工作盘；不轮询、不重跑。
+本地124测试/3ARM64objects/32源码重放已通过；尚未得到本次nativeCI结果。
+完成后必须独立验证32sources、122policy＋13postbuild测试、kernel/17IIG/IORPC，非仅绿色。
+无新设备授权，设备仍原厂+b4ee、四写权限false；桌面未实现。
+本段为发布后的本地交接，不属于新的提交授权。
+
+---
+
 ## 当前交接 — 0175主机实现验收完成，精确发布／CI待批准（2026-10-31）
 
 基线ee4ff351／CI41191237900。新0175仅默认off sweetload观察，不是GUI功能修复：

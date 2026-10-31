@@ -211,21 +211,27 @@ static void load_common(void) {
 
 
 class LoadProgressTest(unittest.TestCase):
-    def compile_run(self, body, *, prefix=PREFIX, expect='PASS'):
+    def compile_run(self, body, *, prefix=PREFIX, expect='PASS', compiler_error=None):
         compiler = shutil.which('clang') or shutil.which('cc'); self.assertIsNotNone(compiler)
         with tempfile.TemporaryDirectory() as temp:
             p=Path(temp); (p/'test.c').write_text(prefix+body)
-            subprocess.run([compiler, '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', '-pthread',
-                            str(p/'test.c'), '-o', str(p/'test')], check=True)
+            command=[compiler, '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', '-pthread',
+                     str(p/'test.c'), '-o', str(p/'test')]
+            if compiler_error is not None:
+                failed=subprocess.run(command,capture_output=True,text=True)
+                self.assertNotEqual(failed.returncode,0)
+                self.assertIn(compiler_error,failed.stderr)
+                return ''
+            subprocess.run(command,check=True)
             r=subprocess.run([str(p/'test')], capture_output=True, text=True, timeout=30)
             self.assertEqual(r.returncode, 0, r.stderr)
             if expect is not None: self.assertEqual(r.stdout.strip(), expect)
             return r.stdout
 
-    def gui(self, body, extra=''):
+    def gui(self, body, extra='', compiler_error=None):
         # Every exercised producer/dump comes from0175; old helpers are byte-checked below.
         code=ipc.LEGACY+ipc.POLICY+GUI_POLICY+GUI_MOCK+IPC_HELPERS+GUI_HELPERS+function(SAMPLER,'sweet_ff_trace')+function(SAMPLER,'sweet_ff_dump')+GUI_TAIL+extra+body
-        return self.compile_run(code.replace('int main(void) {','int main(void) { load_common();'))
+        return self.compile_run(code.replace('int main(void) {','int main(void) { load_common();'),compiler_error=compiler_error)
 
     def test_registration_modes_filters_and_first_generation(self):
         self.gui(r'''
@@ -520,6 +526,9 @@ int main(void) {
 #define ARM64_BOARD_CONFIG_SWEET 1
 typedef void *thread_t;
 static size_t fixture_strlcpy(char *d,const char *s,size_t n){size_t len=strlen(s);if(n){size_t take=len<n-1?len:n-1;memcpy(d,s,take);d[take]=0;}return len;}
+#ifdef strlcpy
+#undef strlcpy
+#endif
 #define strlcpy fixture_strlcpy
 typedef int wait_result_t;
 #define PZERO 0
@@ -551,7 +560,7 @@ static void thread_deallocate(void *thread){assert(thread==&target_task);++deall
 '''+function(SAMPLER,'sweet_sample_thread')+function(SAMPLER,'sweet_sample_start')+r'''
 #undef printf
 '''
-        self.gui(r'''
+        body=r'''
 int main(void) {
  creation_fail=true;sweet_sample_start();assert(creates==1 && !sweet_load_control && !io_begins && !sleeps && !deallocations);
  creation_fail=false;sweet_sample_start();assert(creates==2 && sleeps==41 && deallocations==1 && !iterations);
@@ -559,7 +568,12 @@ int main(void) {
  assert(order_count==120);for(unsigned i=0;i<120;++i)assert(order[i]==i%3+1);
  puts("PASS");return 0;
 }
-''',extra)
+'''
+        guard='#ifdef strlcpy\n#undef strlcpy\n#endif\n#define strlcpy fixture_strlcpy'
+        fortified='#ifdef strlcpy\n#undef strlcpy\n#endif\n#define strlcpy(dest, ...) __builtin___strlcpy_chk(dest,__VA_ARGS__,__builtin_object_size(dest,0))'
+        self.gui(body,extra.replace(guard,fortified+'\n#define strlcpy fixture_strlcpy'),compiler_error="'strlcpy' macro redefined")
+        self.gui(body,extra)
+        self.gui(body,extra.replace(guard,fortified+'\n'+guard))
 
     def test_boot_parser_keeps_gaps_duplicates_and_separate_sessions(self):
         a='AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA'; b='BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB'
