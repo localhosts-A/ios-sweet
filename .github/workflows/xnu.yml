@@ -46,6 +46,7 @@ on:
       - "tools/test_dali_backboard_vm_fault.py"
       - "tools/test_dali_backboard_ipc_context.py"
       - "tools/test_dali_gui_load_progress.py"
+      - "tools/test_dali_ufs_startup.py"
 
 concurrency:
   group: xnu-${{ github.ref }}
@@ -154,6 +155,7 @@ jobs:
           python3 tools/test_dali_backboard_vm_fault.py
           python3 tools/test_dali_backboard_ipc_context.py
           python3 tools/test_dali_gui_load_progress.py
+          python3 tools/test_dali_ufs_startup.py
 
       - name: Build
         working-directory: dxb
@@ -165,7 +167,9 @@ jobs:
       - name: Verify final GUI load sources
         env:
           SWEET_LOAD_SOURCE_DIR: ${{ github.workspace }}/dxb/xnu
-        run: python3 tools/test_dali_gui_load_progress.py
+        run: |
+          python3 tools/test_dali_gui_load_progress.py
+          python3 tools/test_dali_ufs_startup.py
 
       - name: Compiler cache statistics
         if: always()
@@ -482,6 +486,9 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET LOADT: v=2'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET LOADIO STATUS: v=2'
           nm fakeroot/System/Library/Kernels/kernel.development.sweet | grep ' _sweet_load_ufs_wait_class$'
+          grep -Fq 'A poisoned command may still own DMA; do not touch its bounce buffer.' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'Do not overwrite DMA memory until hardware ownership is known.' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'done < count && !error' xnu/bsd/dev/sweet_ufs.c
           grep -Fq '#define SWEET_BBIPC_RECORDS 64u' xnu/bsd/dev/SweetBackboardIPCPolicy.h
           grep -Fq '#define SWEET_BBIPC_SELECTED 4u' xnu/bsd/dev/SweetBackboardIPCPolicy.h
           grep -Fq 'bounded BBIPC state and snapshot' xnu/bsd/dev/sweet_sample.c

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise final0176 functions; optional SWEET_LOAD_SOURCE_DIR verifies materialized sources."""
+"""Exercise final0177 functions; optional SWEET_LOAD_SOURCE_DIR verifies materialized sources."""
 from pathlib import Path
 import os
 import re
@@ -21,6 +21,8 @@ OVERLAY_PATHS = ('bsd/dev/sweet_ufs.c', 'osfmk/kern/lock_mtx.c', 'osfmk/kern/exc
                  'osfmk/kern/SweetLoadProgress.h', 'bsd/dev/SweetUFSLoadPolicy.h')
 # Changed files must exist in0176; unchanged files come from the explicit0175 base.
 SOURCE.update({p: fixture.fragment(p, PATCH) for p in OVERLAY_PATHS})
+CURRENT_PATCH = ROOT/'xnu/patches/0177-sweet-dali-poisoned-dma-guard.patch'
+SOURCE['bsd/dev/sweet_ufs.c'] = fixture.fragment('bsd/dev/sweet_ufs.c', CURRENT_PATCH)
 LOCK = SOURCE['osfmk/kern/lock_mtx.c']
 SAMPLER, UFS, EXCEPTION, GUI_POLICY, IO_POLICY = (SOURCE[p] for p in PATHS)
 
@@ -381,8 +383,15 @@ int main(void){
         for name in ('sweet_bbpc_trace','sweet_bbvm_enter','sweet_bbvm_leave','sweet_ff_fault_trace','sweet_ff_screen_dump','sweet_ff_dump'):
             self.assertEqual(function(SAMPLER,name),function(old,name),name)
         self.assertEqual(function(SAMPLER,'sweet_ff_trace').replace('    sweet_load_register(phase, state);\n',''),function(old,'sweet_ff_trace'))
-        for name in ('ufs_scsi_on_lun_timeout','ufs_sync_cache','sweet_log_thread'):
+        for name in ('ufs_scsi_on_lun_timeout','ufs_sync_cache'):
             self.assertEqual(function(UFS,name),function(old_fragment(PATHS[1]),name),name)
+        logger_guard = ('\t\t/* Do not overwrite DMA memory until hardware ownership is known. */\n'
+                        '\t\tif (su.dali && su.command_poisoned) {\n'
+                        '\t\t\terror = ETIMEDOUT;\n\t\t}\n')
+        logger = function(UFS,'sweet_log_thread')
+        self.assertEqual(logger.count(logger_guard),1)
+        self.assertEqual(logger.replace(logger_guard,''),function(old_fragment(PATHS[1]),'sweet_log_thread'))
+        self.assertEqual(CURRENT_PATCH.read_text().count('diff --git '),1)
         self.assertEqual(function(EXCEPTION,'sweet_sample_task'),function(old_fragment(PATHS[2]),'sweet_sample_task'))
         for word in ('proc_iterate','proc_find','vm_map_read_user','task_deallocate','thread_deallocate','printf','runq'):
             self.assertNotIn(word,function(EXCEPTION,'sweet_load_collect'))
@@ -459,13 +468,14 @@ int main(void){
 #define EROFS 30
 #define EINVAL 22
 #define EIO 5
+#define ETIMEDOUT 60
 #define UFS_BLOCK 4096u
 #define BOUNCE_SIZE 8192u
 #define CMD_TIMEOUT_NS 5000u
 #define MIN(a,b) ((a)<(b)?(a):(b))
 typedef char *caddr_t;
 struct buffer {uint64_t block;uint32_t count,resid;int flags,error,mapfail;char data[32768];};typedef struct buffer *buf_t;
-static char bounce[BOUNCE_SIZE];static struct {bool dali,ready,writable;uint64_t nblocks,first_block;uint32_t secsize;uintptr_t dma;uint8_t lun;} su={true,true,true,1024,500,512,(uintptr_t)bounce,2};
+static char bounce[BOUNCE_SIZE];static struct {bool dali,ready,writable;uint64_t nblocks,first_block;uint32_t secsize;uintptr_t dma;uint8_t lun;bool command_poisoned;} su={true,true,true,1024,500,512,(uintptr_t)bounce,2,false};
 #define DMA_BOUNCE 0
 typedef int lck_mtx_t;static lck_mtx_t sweet_ufs_lock;static bool held,snapshot_busy;static unsigned tries,clocks,lines,commands;static uint64_t now;
 static int error_code;static unsigned trace[1024],trace_count;static void (*command_hook)(void);static void (*io_route)(const char *);
