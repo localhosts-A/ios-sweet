@@ -42,6 +42,7 @@ on:
       - "tools/test_xnu_macos15_runner.py"
       - "tools/iig_legacy_rpc.py"
       - "tools/test_iig_legacy_rpc.py"
+      - "tools/test_dali_backboard_interrupt_pc.py"
 
 concurrency:
   group: xnu-${{ github.ref }}
@@ -146,6 +147,7 @@ jobs:
           python3 tools/test_dali_backboard_user_entry.py
           python3 tools/test_xnu_macos15_runner.py
           python3 tools/test_iig_legacy_rpc.py
+          python3 tools/test_dali_backboard_interrupt_pc.py
 
       - name: Build
         working-directory: dxb
@@ -452,6 +454,14 @@ jobs:
           IIG_DIR="build/xnu.obj/${KERNEL_CONFIG}_ARM64_${MACHINE_CONFIG}/iokit/DriverKit"
           test "$(find "$IIG_DIR" -name '*.iig.cpp' -type f | wc -l | tr -d ' ')" = 17
           ! grep -l kernelContent "$IIG_DIR"/*.iig.cpp
+          grep -Fq '#define SWEET_BBPC_LIMIT 40u' xnu/bsd/dev/SweetBackboardPCPolicy.h
+          grep -Fq '#define SWEET_BBPC_INTERVAL_NS (30ULL * 1000000000ULL)' xnu/bsd/dev/SweetBackboardPCPolicy.h
+          grep -Fq 'state != published' xnu/bsd/dev/sweet_sample.c
+          grep -Fq 'PSR64_IS_USER64(get_saved_state_cpsr(state))' xnu/bsd/dev/sweet_sample.c
+          grep -Fq 'sweet_bbpc_trace(state, cdp->cpu_int_state, (unsigned int)cdp->cpu_number);' xnu/osfmk/arm64/sleh.c
+          nm fakeroot/System/Library/Kernels/kernel.development.sweet | grep ' _sweet_bbpc_trace$'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET BBPC CONFIG: source=gic-vtimer-el0 interval=30s limit=40'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET BBPC: svc-progress sample=%u selected_svc_total=%u'
           grep -Fq 'sweet_ff_enabled = sweet_ff_svc_mode(enabled)' xnu/bsd/dev/sweet_sample.c
           grep -Fq 'sweet_ff_fault_enabled = sweet_ff_mode(enabled)' xnu/bsd/dev/sweet_sample.c
           grep -Fq 'return requested == 3 ? requested : sweet_ff_mode(requested);' xnu/bsd/dev/SweetFeatureTrace.h

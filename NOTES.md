@@ -1,3 +1,190 @@
+## Current handoff — 0172 host checks passed; publication pending (2026-10-31)
+
+**Desktop is not achieved.** HEAD remains `90f71b27d5705f3cae29a91771d6422af6d84412`;
+last successful full CI is41159220926 (0171 kernel799905ef…). No0172 commit,
+push, full kernel link, remote CI, candidate boot or runtime success is claimed.
+
+Host-only approved implementation:
+- New patch `xnu/patches/0172-sweet-bounded-backboard-interrupt-pc.patch` changes
+  only sampler, existing GIC timer observation call, and new pure-C policy header.
+  Explicit `sweetffpc=1` plus `sweetfftrace=3`; true published AArch64 EL0 IRQ
+  frame only, exact backboardd, independent40-event boot quota/30-second limit.
+  IRQ never outputs/waits/reads user memory. Default off; final consumer closes
+  admission. SVC format/ring, IORPC ABI, timer programming, GUI/HID/WDT unchanged.
+- All86 actual local unittest cases plus repo/ramoops ADT checks PASS. New10
+  tests exercise final code, clock/quota/source/lifecycle/concurrency/isolation.
+  ExactCI baseline replay has zero fuzz/offset; actual ARM64 sampler+sleh objects
+  compile (0 of2 failed). Workflow now adds test/source/linked-marker gates;
+  macOS15Arm64/Xcode16.4/strict legacy iig adapter retained. Full link still needed.
+- Diagnostic contract: `docs/dali-backboard-interrupt-pc.md`. Evidence and local
+  manifests live under `.tmp/desktop-diagnostics-20261030/` with prefix
+  `backboard-interrupt-pc-`. Keep all local/Apple/device assets out of Git.
+
+Storage authority and unchanged device state:
+- Last verified device: stock Android + physical original boot/init_boot pair,
+  full NEW16GiB root SHA256
+  `b4ee77882c02dc0074da4dba0a229e682f2ab437cdd23b7f02c6012ebd8683bd`.
+  All four write flags false; no active trial/recovery or new device approval.
+- Complete independent recovery copy retained outside Git/.tmp:
+  workspace `backup/dali-ios-baseline-20261031-b4ee/root-clean.img`, full hash
+  and read-only fsck0 verified. Hold verified recovery FD through any later write.
+- Fresh private seed `.tmp/desktop-diagnostics-20261030/b4ee-persona-seed-20261031/`:
+  target `07ba90d78e3255b768d014f0836298c04dca291a77186be0772069d35c591a4e`;
+  sparse SHA256 `3c522fd51d3cc06945f44522b7c85701936c702a522dd9444e5c1bfcd9201b18`.
+  Independent full16GiB clean/seeded/virtual-replay hashes match; fsck0; only the
+  prior two logical persona edits, permissions/other file forks unchanged.
+  New9RAW runs/11blocks/45056bytes were fully rederived, not copied old offsets.
+- Latest full actual0adb… scene remains original/unrepaired/unreplaced; no COW
+  replacement approval. Old098 source was deleted with no backup and is NOT a
+  recovery target. Some historical scene directories no longer exist.
+
+Final manifests: `backboard-interrupt-pc-local-validation.json` and
+`backboard-interrupt-pc-source-batch.json`; all five publication files (patch,
+test, docs, workflow, NOTES) are hash-bound. Workflow source gates execute and
+shell blocks pass syntax checks after Actions indentation removal; no YAML
+schema parser was available and remote workflow is still unrun.
+Next gate: separate commit/push/full-CI approval. Preserve and
+exclude existing user edits `tools/mkadt.py` / `tools/mkiosroot.sh`. Only after
+full CI and independent artifact/source checks may a new candidate be staged;
+all root applier/restore contracts must bind NEWb4ee/07ba/new RAW runs, not old098.
+A single ≤1200-second device trial/full capture/recovery needs separate exact
+approval; no old trial permission carries forward. PC/no-PC/repeated-PC is not
+by itself deadlock evidence; last getentropy succeeded, still no GUI submission.
+
+---
+
+## Historical handoffs (superseded by the current state above)
+
+## CURRENT RECOVERY COMPLETE — approved NEW clean baseline b4ee; no desktop (2026-10-31)
+
+b7u9ftc5eCOMPLETE0:7approvedchunks[0,11,13,107,119,186,187]/448MiBreadbackPASS; full16GiB`b4ee77882c02dc0074da4dba0a229e682f2ab437cdd23b7f02c6012ebd8683bd` +originalAndroid/fullphysicalbootpairPASS. All4flagsfalse/restoreapprovalconsumed/noactivebackgroundtask/newdevicepermission. NEWbaselinepath `.tmp/desktop-diagnostics-20261030/clean-baseline-rebuild-20261031/root-clean-new.img`, fsck0/independentoriginalfile-data+permissions/forks/manifest-only21files verified. This is specificallyUSER-approvedNEWtarget, NOTold098baseline (humanconfirmedcleaned/no backup). DoNOTretryoldfailedrecovery.
+
+IMPORTANT: old098root-base/contracts/seededdelta9runs/stagers areHISTORICAL/STALE; futurecandidateMUSTregenerateandfullhashverifydeltaagainstb4ee, updateeverybinding/guard, no silentoldtargetreuse. Priorrawscene directoriesremoved; onlylatestfull0adb...16GiB/3hashes/sidecar/rawlogsconfirmedretainedunrepaired/unreplaced/noCOWapproval. DoNOTclaimolderrawsintactor098restored.
+
+LasttrialCI41159220926kernel799905ef.../SVC3BB57actualuserentryproved,lastgetentropyreturned0/cache0x2b050000; noGUIclient/frame/refresh/humannoGUI. No deadlock/RNGfailureinference. NextHOSTONLYminimumdefaultoffboundedBBinterruptedPCproposal at existingtimer regs, no tasklock/userstack/newtimer/genericframework. NOTimplemented/no0172/newpublication/trialauthorization. Originaluser mkadt/mkiosroot edits preserved; desktopNOTachieved.
+
+---
+
+## CURRENT APPROVED NEW BASELINE RECOVERY — running; no iOS boot (2026-10-31)
+
+HUMANexplicitlyapprovedNEWcleanb4ee77882c02dc0074da4dba0a229e682f2ab437cdd23b7f02c6012ebd8683bd target (NOTlost098),7actualchunks[0,11,13,107,119,186,187]/448MiB, no boot/bootpairwrite. Restoreb7u9ftc5e RUNNING: sourceFDheldfromplanhashthroughallwrites, freshidentity/slot/originalphysicalpair/unmounted/current0adbfullhash, perrangereadback/finalfullnewhash+stockAndroidchecks/closeflags. Waitcompletionbeforeclaimrecovered. Onlyrootrestore+devicewriteflagsgranted; delta+stockflagsfalse/no newtrial.
+
+Newbaselineindependentcatalog/originalfileallocatedblocks/UIDGIDmodesFinderforks/firmwareonly21files/fsck0/fullhashPASS; missingNEWauthgate+3pinnedsource testsPASS. Oldcleanuserconfirmedcleaned/nobackup; doNOTclaim098restored. Latestfull0adbscene/sidecar/rawlogsremainunrepaired/unmodified. Finalstate/newbaselineauthoritymustbeupdatedafterjob. DesktopNOTachieved.
+
+---
+
+## CURRENT NEW BASELINE VERIFIED — local device-diff plan running; no write approval (2026-10-31)
+
+NEWbaseline b4ee77882c02dc0074da4dba0a229e682f2ab437cdd23b7f02c6012ebd8683bd independentfullhash/fsck0PASS. Alloriginalfiles UID/GID/modes/Finder/forks/allocateddatablocks unchanged; ONLYmanifestfirmwaresubtreeadded/21files4522225bytes checksumequal. Notold098baseline/nohashequivalence. Humanoldbasecleaned/no backup. All4deviceflagsfalse.
+
+Local0adbactual->newb4eeall256planbsbd1t479 RUNNING, notdevicewrite. Waitexactranges/hashthenFRESHspecificnewtargetapproval. NewhelperretainsverifiedsourceFDthroughwrites; 3sourceunlink/replace/lengthtests+missingNEWauthzerotransportgatePASS; nooldapprovalreuse. PhoneoriginalAndroid/physicalpair+backupsverified/iOSrootSTILLposttrial/latest0adbfullsceneuntouched. DesktopNOTachieved.
+
+---
+
+## CURRENT NEW BASELINE BUILT — independent verification running; no write approval (2026-10-31)
+
+Offlinebuildbg69cnn4fCOMPLETE0: new16GiBcleanbaseline b4ee77882c02dc0074da4dba0a229e682f2ab437cdd23b7f02c6012ebd8683bd readonlyfsck0/sourceea6fe954...unchanged/firmwarealiaschecksumverified22files. NEWmetadata/hashnotlost098; nooriginalhashequivalenceclaim/no deviceaccess. Independentcatalog/alloldfileallocatedblocks/forks/permissions/fullhashverifybhge9j6um RUNNING; waitbeforeproposingtarget. Futurewriteplanmustscanall256actual0adb->NEWbaseline/retainverifiedsourceFD (3unlink/pathreplace/size testsPASS), thenFRESHspecifictargetapproval.
+
+PhoneoriginalAndroid/physicalpair+backupsverified/all4writeflagsfalse/iOSrootSTILLposttrial; latest0adbfullsceneunrepaired/unchanged. Oldbaselinehumanconfirmedcleaned/no backup. No rootrestorecompletion/newtrial/scene-replacementclaim. DesktopNOTachieved.
+
+---
+
+## CURRENT NEW BASELINE OFFLINE BUILD — old source deleted/no backup confirmed (2026-10-31)
+
+HUMANconfirmed"已清理且没有备份"forold098...cleanbase. All4devicewriteflagsCLOSED; stateoriginal_android_verified_root_restore_blocked_new_baseline_unapproved/root_restore_pendingtrue. OriginalAndroid/physicalbootpair+backupsverified/full0adbactualsceneintact. iOSrootSTILLposttrial, no rootrestorewritesperformed; no repeatedboot.
+
+Read-onlyresearchroot ea6fe954...nonjournaledHFSX/fsck0 healthy; journaledb102...fsck8EXCLUDED. NEWprivatehostreflinkbaselinebuildbg69cnn4f RUNNING, onlydocumentedPrebootfirmwarealiascopy, no persona/trialseed, nodev/nosuid/noexecmount thenunmount/fsck/fullhash/sourceimmutabilitychecks. NEWmetadata/hash notold098; no oldhashequivalenceclaim/no deviceaccess. Waitbuild+independentoldfilecontent/catalog/all256diffcheck, thenfresh exactnewtargetwriteapprovalBEFOREanyphonewrites. Latest0adbsceneunrepaired/unreplaced. DesktopNOTachieved.
+
+---
+
+## CURRENT BLOCKED — exact clean baseline unavailable; no root write performed (2026-10-31)
+
+Recoverybqa08sjwg failedBEFOREfirstrootrestorewrite whenpreviouslyverifiedcleanfiledisappearedbefore source reopen; verified_chunks=[]/no ddwrites. OriginalAndroid/physicalstock+backuphashesPASS, latestfull0adbscene/sidecar/rawlogsretained. DeviceiOSrootSTILLposttrial; NOTclean. State=root_restore_blocked_exact_clean_source_missing; no activebackgroundtask/bootretryauthorization.
+
+Onlyother16GiBfiles researchroot hash ea6fe954.../journaled b102dce1...NEITHERrequired0984638.... Only7chunkmatches13/119/187, not0/11/107/186; cannotreconstructexactcleanusingthosealone. Missingexactbase/openFD/standardtrash/original17run4665780bytesparsedelta notfound. Olderfullscenepathsabsentnow/causeUNKNOWN. Needhumanmoved/backupfilepath; NEVERsubstituteotherhash/relaxgate. Details recovery-alternate-baseline-hashes.json, alternate-clean-chunk-check, backboard-root-restore-blocked-review.json. No newdevelopment/trialbeforefinishrecoveryoruserrevisedbaselineplan. DesktopNOTachieved.
+
+---
+
+## CURRENT ROOT RECOVERY BLOCKED BEFORE WRITE — clean source missing (2026-10-31)
+
+Rootrestorebqa08sjwgFAILED: actual256plan/fullcleanhash+freshphysicalAndroid/currentactualhashhadpassed, thenopeningconfiguredcleanimageforwritesourceraisedFileNotFoundError. FailureBEFOREfirstdd; verified_chunks=[]; no rootrestorerangeswritten. DeviceisoriginalAndroid/physicalstockverified butiOSrootSTILLactual0adbscene, NOTclean. Recoverypermissionsremainonlyforalreadyapprovedrollback; no bootretry.
+
+Configuredufs40879313976cleanfile+directoryabsent. Currentworkspace16GiBfileinventoryONLYresearchroot.img/researchjournaled.img/current0adbraw; olderfullscenepathsnotpresentnow/causeUNKNOWN, doNOTstateallolderintactorattributechange. OriginalphysicalbootbackupfileshashPASS/currentfull0adbraw+sidecarretained/recoveryscriptstatic13hashunchanged. Readonlyalternatefullhashesbrru664j8RUNNING; recoverONLYfromverifiedEXACT0984638...cleanbytes, notjournaled/guessbase. No scene repair/deletion. Needlocate/reconstructexactcleanbeforeanywrite. Details backboard-root-restore-blocked-review.json; desktopNOTachieved.
+
+---
+
+## CURRENT BB TRIAL ROOT RECOVERY — actual diff restoring; no desktop (2026-10-31)
+
+Fulloriginal0adb0bd2...16GiB/3equalhashes/rawlogs/sidecar preservedunrepaired. All256scan+readonlyfsckcomplete, actualchunks[0, 11, 13, 107, 119, 186, 187]/bytes469762048. Authorizedshell-v2actualdiffrollback bqa08sjwg RUNNING; finalfullclean/physicalstock/allflagsclosureNOTyetconfirmed. OriginalAndroid/physicalstockpairalreadyverified. No newtrial/retry.
+
+SameUUIDC33A157A...BB57userSVCconfirmed,320accepted192dumped, sample30..39nonew/quotanotexhausted. Lastgetentropyreturned0, exactPC/LR/corecryptocallersuccesspathchecked, notdeadlock/RNGfailure. NoGUIclient/frame/refresh/humannoGUI. Existingstacksampler unsafeoptionfortargetednextstep(tasklock+userframeread); readonlytimerpathauditshowsexistingcpu_int_stateuserregs couldsupportdefaultoffboundedBBPCfutureproposal, NOTimplemented/currentoption/notauthorizednewtrial. Firstfinishrecovery. Allolderfullscenesintact/no latest0adbCOWpermission.
+
+---
+
+## CURRENT FULL BB SCENE SAVED — readonly scan active; root recovery pending (2026-10-31)
+
+Fullactual`0adb0bd2e9db2e76afadc8484fdeede187f9bb7334e180b1751f1010d860294f`16GiB/3hashes saved atnewCI41159220926candidate trial/attempt1/posttrial-root/root.raw+sidecar. OriginalAndroid/fullphysicalstockpairVERIFIED. Localall256diff/readonlyfsckbaltqdnif RUNNING; actualiOSrootNOTrestored. Waitcompleteplan -> authorizedactualdiffshell-v2rollback/readback/fullclean+physicalstock -> closeflags; neverhistoricalfixedranges.
+
+SameUUIDC33A157A...BB57/TID312actualuserSVC320accepted192dumped/40samples, last29then30..39nonew/drop0/exhaust0. Lastgetentropy500returned0/noBSDerror; exactaligneddyld+cache0x2b050000/LRlibcorecryptoredacted+52. Notblockedentropyproof. Frozenlaunchd123431bytes/1121lines BBxpcproxy->INIT~530.8s, lastflushpowerd20:58:25, noselectedpersistedcrash; noneprovesmain/checkin/liveness. NoGUIclient/frame/refresh/HIDexpires/humannoGUI. Needpost-lastSVCactualPC evidencebeforefunctionalpatch, notRNG/signing/resume/displayguess. No newtrial/COWapprovalforlatest0adbscene; allolderfullscenesretained.
+
+---
+
+## CURRENT BB USERSPACE CONFIRMED — noGUI; full actual capture running (2026-10-31)
+
+OriginalAndroid/fullphysicalstockpairVERIFIED. PostSWEET88672/seq40+pstore88716 saved,SAMEUUIDC33A157A-325D-4322-B429-F6D252DE9CCB. RuntimeSVC3/fault0 actualBB57/TID312 usertrapexecution,320accepted/192dumped/40samples; lastnonempty29,30..39nonewaccepted/drop0/exhaust0 (ringoverwrite notincludedindrop). Lastgetentropy500entry319/return320 x0=0/noBSDcarryerror, LRlibcorecrypto<redacted>+52; independentlydyld/cacheMachstubslidesboth0x2b050000. NOTblockedentropyproof/notmain/liveness/GUIproof. Onlyproviders/noGUIclient/frame/refresh,HIDexpires,humannoGUI.
+
+Fullnewactualcapturebdu124hnyRUNNING BEFORErootcleanup; private0700creationwrappercorrect. ActualiOSrootNOTrestored; wait3hashes -> readonlyall256scan/fsck/frozenfiles -> authorizedactualdiffshell-v2rollback/readback/fullclean+physicalpair -> closeflags. No retry/newdeviceapproval. Allolderfe1COWbytesretained. Reports backboard-user-entry-runtime-evidence.json / validated-addresses.json.
+
+---
+
+## ACTIVE BB-SVC SINGLE TRIAL — started; full recovery pending (2026-10-31)
+
+Startupbp62rju4cCOMPLETE0: freshidentity/slot_b/rootunmounted/physicalstock/fullclean/static13/capacity/prelogsPASS;9RAW11blocks+entireseededrootreadbackverified. ExactCI41159220926init_boot6ff392dc.../bootddfbc184...flashedonceOKAY/rebootUTC 2026-10-31T03:38:30.968977+00:00; harddeadline 2026-10-31T03:58:30.968977+00:00. Attempt1consumed/rootdeltaauthorizedfalse; watcher<=1200s/firsttransportreturn, NO retry/extension. NewSVC3BB/fault0/interval30, no runtimeGUIresultyet.
+
+Originalstockpair/cleanroot NOTrestorednow. AfterrealFastboot: newpairrecover -> originalAndroid/physicalhashverify -> exactpostlogs -> capture-backboard-user-entry-root.py --capture (newprivate0700dir/full16GiB/3hashes) -> readonlyall256scan/fsck/frozenfiles -> authorizedshell-v2actualdiffcleanrollback/readback/fullclean+physicalstock -> closeflags. Allolderfullscenesinclfe1COWretained. No desktopclaim.
+
+---
+
+## CURRENT AUTHORIZED BB-SVC STARTUP — preflight/deployment running (2026-10-31)
+
+HUMANapprovedexactCI41159220926bootddfbc184.../init_boot6ff392dc.../kernel799905ef...ONCEmax1200s+fullcapture/stock+rootrecovery. Startupbp62rju4cRUNNING; doNOTassumealreadyrebooted. Realidentity/slot/physicalstock/unmounted/fullclean/static13/capacity/prelogs BEFOREdelta/readback/fullseededhash/onceboot. Onsuccessstate trial_rebooted/attempt1 launchboundedwatchusingrecordedrebootUTC; no retry/extension. Onfailureinspectwritestate, preserveactualbeforecleanup. Actualroot/bootmaychangeduringtask; donotassumepriorclean/stockstillactive.
+
+Latestolderfe1fullCOWpreservationCOMPLETE/allolderfullscenesintact. No currentruntimeGUIproof; SVC3BB/fault0/interval30 onlyboundeddiagnosis, notdesktop.
+
+---
+
+## CURRENT BB-SVC CANDIDATE READY — fresh single trial approval required (2026-10-31)
+
+FullnativeCI41159220926/90f71b2+independentkernel25sources/17generatedlegacyRPC/hashmarkersPASS. Newcandidate `shim/out-dali/ufs-41159220926/candidate-desktop-backboard-user-entry-20261031/`: bootddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39; init_boot6ff392dcce8732fd2232979a43e01a8aca298638f4d367be0144a81d01d17010; kernel799905ef04d52e42971f111a10a9887f57553a6d02d7d700a706b867a1a46883. Fullv4LZ4CPIO512argsADTpayloadAVB/wholeclean+seededroot/backups/static13/mockmissingauth+wrongrootgatesPASS. ArgsONLYSVC3+interval30 vsreduced, fault0/serial0/log30/GUIHIDWDT1200unchanged. Notdesktopproof.
+
+Latestfe1approvedCOWreplacementCOMPLETE/fullhash/path/permissions/sidecar/rawlogsretained; capturefree~25.3GBpasses16GiB+2GiB. All4candidateflagsfalse/approved0/attempt0/no deviceaccess/no activebackgroundtask. Needfresh exactONCEmax1200s+fullcapture/stock+rootrecoveryapproval, thenfreshrealpreflight. Phonefullyrestored/allpriorfullscenesintact; no source/CI/COWapprovalimpliestrial.
+
+---
+
+## CURRENT APPROVED fe1 COW REPLACEMENT — full CI PASS, candidate next (2026-10-31)
+
+FullnativeCI41159220926/90f71b2+independentkernel799905ef.../25sources/17generatedfiles/4fieldIORPC+marker/toolchain PASS. HUMANapprovedONLYexactfe1full16GiB equivalentCOWreplacement; taskbxvmthrus RUNNING afterfullcopyverification. Waitposthash/path/permissions/sidecar/rawlogs+freshcapacity BEFOREstagingcandidate. ApprovaldoesNOTincludeanotherdeviceboot. No copyreplacementoutcomeassumed.
+
+Newhelpersbindsuccessful41159220926; proposedSVC3+interval30/fault0/serial0/log30/GUIHID1200. CandidateNOTcreatedyet/capacitygateunchanged. Phonefullyrestored/allflagsfalse; allolderfullscenesretained, desktopNOTachieved.
+
+---
+
+## CURRENT macOS15 ARM64 FULL CI PASS — candidate capacity pending (2026-10-31)
+
+FullCI41159220926 exact90f71b27d5705f3cae29a91771d6422af6d84412 SUCCESS inclnativebuild/link/76tests/source+linkedgates/upload. Independentverification COMPLETE: kernel799905ef04d52e42971f111a10a9887f57553a6d02d7d700a706b867a1a46883,25keysources exactlocalmatch,17generatedinlineRPC/headernokernelContent, actualadapter/Xcode16.4/macOS15label/newBB-SVCmarker. This resolvesbuildmigration, NOTGUI/runtime. No activebackgroundtask.
+
+Newcandidatehelpers reboundtoactualsuccessfulrun41159220926/90f71b2 (notoldcancelled41120231736). Args512bytes ONLYSVC3+interval30 vsreducedtrial, fault0/serial0/log30/GUI/HID1200unchanged. NOTstagedbecause~8.2GB insufficientforfull16GiB+2GiB. Latestfe1original16GiB retainedunrepaired/unreplaced; exactequivalentCOWcopyverified7119changed4KiBblocks, no replacementapproval. NeednewexactsceneCOWpermissionifusingit, thenfreshcapacity/stage/verify/static13/mockgates andseparateexactonce-trialapproval. Phonefullyrestored/allflagsfalse; no desktop.
+
+---
+
+## CURRENT LEGACY IIG NATIVE CI — approved adapter pushed, build pending (2026-10-31)
+
+Approvedexact5filecommit90f71b27d5705f3cae29a91771d6422af6d84412 pushedforkbranch. NEWCI41159220926 dispatched13.5/DEVELOPMENT/SWEET/macOS15Arm64/Xcode16.4 withstrictlegacyinlineRPCadapter. Local76tests/17realadaptedARM64+17referenceobjects/symbolsetsPASS; noIORPCfield/kernelpolicychange. Fullnativebuild/linkNOTyetverified. Watchrunthen independentkernelSHA/25sources/17generatedfiles/header/linkedmarkers+actualadapterlog gates; no staging/devicebeforeverification.
+
+Originaluser mkadt.py/mkiosroot.sh edits intact/excluded. PhoneoriginalAndroid/physicalpair/fullcleanverified/allflagsclosed; latestfe1fullscene+COWcopy retained/originaluntouched/no replacementapproval. No newdeviceauthorization, no desktop.
+
+---
+
 ## CURRENT LEGACY IIG ADAPTER LOCAL PASS — full native CI pending approval (2026-10-31)
 
 NativeCI41128102930/c21de8d allpolicytestsPASS then132generatedDriverKitkernelContenterrors; no linkedkernel. StrictBUILDONLYadapter usesfreshXcode16iigoutputs butselectsknowninline-With-Content branches, checksactual4fieldIORPCheaderbeforetool, removesextraunionpointer/knowninitializer+assignment/newreplynonnulloptimizationhints, keepsoldruntimechecks/ABI. Version427.100.5/knownpatterns/counts only, unknownsFAILCLOSED; nofieldadded/no xnu sourcechange/no oldAppleasset/executable reuse. WorkflowIIGoverrideusesexistingMakeIncgate, hashincachekey, validates17generatedcpp/headernokernelContent.

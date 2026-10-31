@@ -1,0 +1,511 @@
+diff --git a/bsd/dev/sweet_sample.c b/bsd/dev/sweet_sample.c
+--- a/bsd/dev/sweet_sample.c
++++ b/bsd/dev/sweet_sample.c
+@@ -1,266 +1,385 @@
+ /*
+  * SWEET process sampler: where is a daemon stuck?
+  *
+  * The phone has no debugger and daemons log nowhere readable. Every
+  * interval a kernel thread prints, for each process named in boot-arg
+  * sweetsample (comma separated, default "SpringBoard,backboardd"; "-" = off)
+  * and for each of its threads, the user pc/lr/sp and a frame-pointer
+  * backtrace as "SMP name[pid] tN pc ... lr ... bt ..." (header line with the
+  * shared region slide and the main binary's mach header, to symbolicate
+  * with tools/sweet-crash.py). A thread blocked in a syscall shows the
+  * syscall stub in pc and its caller in lr/bt.
+  *
+  * Sampling delay and period are configurable in seconds (1..3600) for a bounded
+  * user stack trace when a selected service stops making progress.
+  */
+ #include <sys/param.h>
+ #include <sys/systm.h>
+ #include <sys/proc.h>
+ #include <sys/proc_internal.h>
+ #include <kern/task.h>
+ #include <kern/thread.h>
+ #include <pexpert/pexpert.h>
+ 
+ 
+ #if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
+ #include <arm64/proc_reg.h>
+ #include <libkern/OSAtomic.h>
+ #include "SweetFeatureTrace.h"
+ 
+ static unsigned int sweet_ff_enabled;
+ static volatile UInt32 sweet_ff_guard, sweet_ff_dropped;
+ static struct sweet_ff_ring sweet_ff_events;
+ 
++#include <kern/clock.h>
++#include "SweetBackboardPCPolicy.h"
++
++static volatile UInt32 sweet_bbpc_configured, sweet_bbpc_active;
++static volatile UInt32 sweet_bbpc_guard, sweet_bbpc_dropped;
++static uint64_t sweet_bbpc_interval;
++static struct sweet_bbpc_buffer sweet_bbpc_events;
++
++void sweet_bbpc_trace(struct arm_saved_state *, struct arm_saved_state *, unsigned int);
++
++/* Single CAS loads use the public OSAtomic acquire/release contract, not volatile. */
++static bool
++sweet_bbpc_is_configured(void)
++{
++    return OSCompareAndSwap(1, 1, &sweet_bbpc_configured);
++}
++
++/* Called only in normal startup; IRQ admission remains off until the consumer starts. */
++static void
++sweet_bbpc_prepare(unsigned int requested)
++{
++    if (requested != 1 || sweet_ff_enabled != 3)
++        return;
++    uint64_t ticks = 0, ns = 0;
++    nanoseconds_to_absolutetime(SWEET_BBPC_INTERVAL_NS, &ticks);
++    absolutetime_to_nanoseconds(ticks, &ns);
++    ticks = sweet_bbpc_ceil_ticks(ticks, ns);
++    if (ticks == 0)
++        return;
++    absolutetime_to_nanoseconds(ticks, &ns);
++    if (ns < SWEET_BBPC_INTERVAL_NS)
++        return;
++    sweet_bbpc_interval = ticks;
++    (void)OSCompareAndSwap(0, 1, &sweet_bbpc_configured);
++}
++
++static void
++sweet_bbpc_begin(void)
++{
++    if (sweet_bbpc_is_configured()) {
++        (void)OSCompareAndSwap(0, 1, &sweet_bbpc_active);
++        printf("SWEET BBPC CONFIG: source=gic-vtimer-el0 interval=30s limit=40 interval_abs=0x%llx\n",
++            (unsigned long long)sweet_bbpc_interval);
++    }
++}
++
++/* Only the proven SWEET GIC timer branch supplies this IRQ's published frame. */
++void
++sweet_bbpc_trace(struct arm_saved_state *state, struct arm_saved_state *published,
++    unsigned int cpu)
++{
++    if (!OSCompareAndSwap(1, 1, &sweet_bbpc_active) || state == NULL ||
++        state != published || !is_saved_state64(state) ||
++        !PSR64_IS_USER64(get_saved_state_cpsr(state)))
++        return;
++    proc_t p = current_proc();
++    if (p == PROC_NULL || !sweet_ff_target(3, p->p_comm))
++        return;
++    if (!OSCompareAndSwap(0, 1, &sweet_bbpc_guard)) {
++        (void)OSCompareAndSwap(0, 1, &sweet_bbpc_dropped);
++        return;
++    }
++    if (OSCompareAndSwap(1, 1, &sweet_bbpc_active)) {
++        struct sweet_bbpc_event event = {
++            .cpu = cpu, .cpsr = get_saved_state_cpsr(state), .pid = proc_pid(p),
++            .tid = thread_tid(current_thread()), .pc = get_saved_state_pc(state),
++            .lr = get_saved_state_lr(state), .sp = get_saved_state_sp(state),
++            .abstime = mach_absolute_time(),
++        };
++        (void)sweet_bbpc_record(&sweet_bbpc_events, sweet_bbpc_interval, &event);
++        if (sweet_bbpc_events.clock_stopped || sweet_bbpc_events.total >= SWEET_BBPC_LIMIT)
++            (void)OSCompareAndSwap(1, 0, &sweet_bbpc_active);
++    }
++    (void)OSCompareAndSwap(1, 0, &sweet_bbpc_guard);
++}
++
++/* No IRQ output. The existing normal consumer owns this static snapshot. */
++static void
++sweet_bbpc_dump(unsigned int sample)
++{
++    static struct sweet_bbpc_event snapshot[SWEET_BBPC_LIMIT];
++    if (!sweet_bbpc_is_configured())
++        return;
++    if (sample == 39)
++        (void)OSCompareAndSwap(1, 0, &sweet_bbpc_active);
++    if (!OSCompareAndSwap(0, 1, &sweet_bbpc_guard)) {
++        printf("SWEET BBPC: sample=%u busy=1 final=%u; snapshot incomplete\n", sample, sample == 39);
++        return;
++    }
++    uint32_t count = sweet_bbpc_snapshot(&sweet_bbpc_events, snapshot);
++    uint32_t total = sweet_bbpc_events.total;
++    bool stopped = sweet_bbpc_events.clock_stopped;
++    bool dropped = OSCompareAndSwap(1, 0, &sweet_bbpc_dropped);
++    (void)OSCompareAndSwap(1, 0, &sweet_bbpc_guard);
++    printf("SWEET BBPC: sample=%u count=%u accepted=%u busy_drop=%u clock_stop=%u final=%u\n",
++        sample, count, total, dropped, stopped, sample == 39);
++    for (uint32_t i = 0; i < count; ++i) {
++        const struct sweet_bbpc_event *e = &snapshot[i];
++        printf("SWEET BBPC: n=%u source=gic-vtimer-el0 pid=%d tid=%llu cpu=%u "
++            "abs=0x%llx pc=0x%llx lr=0x%llx sp=0x%llx cpsr=0x%x\n",
++            e->seq, e->pid, (unsigned long long)e->tid, e->cpu,
++            (unsigned long long)e->abstime, (unsigned long long)e->pc,
++            (unsigned long long)e->lr, (unsigned long long)e->sp, e->cpsr);
++    }
++}
++
++
+ void sweet_ff_trace(unsigned int, int, struct arm_saved_state *);
+ 
+ /* Current-thread state only: no user-memory reads or process iteration. */
+ void
+ sweet_ff_trace(unsigned int phase, int call, struct arm_saved_state *state)
+ {
+     if (!sweet_ff_svc_mode(sweet_ff_enabled))
+         return;
+     proc_t p = current_proc();
+     if (p == PROC_NULL || !sweet_ff_target(sweet_ff_enabled, p->p_comm) ||
+         !is_saved_state64(state))
+         return;
+     if (!OSCompareAndSwap(0, 1, &sweet_ff_guard)) {
+         (void)OSCompareAndSwap(0, 1, &sweet_ff_dropped);
+         return;
+     }
+     struct sweet_ff_event event = {
+         .phase = phase, .pid = proc_pid(p), .call = call,
+         .tid = thread_tid(current_thread()),
+         .pc = get_saved_state_pc(state), .lr = get_saved_state_lr(state),
+         .sp = get_saved_state_sp(state), .x0 = get_saved_state_reg(state, 0),
+         .cpsr = get_saved_state_cpsr(state),
+     };
+     (void)sweet_ff_record(&sweet_ff_events, &event);
+     (void)OSCompareAndSwap(1, 0, &sweet_ff_guard);
+ }
+ 
+ 
+ #include "SweetFeatureFault.h"
+ 
+ static unsigned int sweet_ff_screen_enabled, sweet_ff_fault_enabled;
+ static volatile UInt32 sweet_ff_fault_dropped;
+ static struct sweet_ff_fault_event sweet_ff_last_fault;
+ extern int sweet_console_muted;
+ extern void sweet_ramoops_append(const char *, int);
+ void sweet_ff_fault_trace(unsigned int, struct arm_saved_state *, uint32_t, uint64_t, int);
+ 
+ /* Pure retained-RAM breadcrumb: no printf, framebuffer, UFS or user copyin. */
+ void
+ sweet_ff_fault_trace(unsigned int phase, struct arm_saved_state *state,
+     uint32_t esr, uint64_t far, int result)
+ {
+     if (!sweet_ff_mode(sweet_ff_fault_enabled))
+         return;
+     proc_t p = current_proc();
+     if (p == PROC_NULL || !sweet_ff_target(sweet_ff_fault_enabled, p->p_comm) ||
+         !is_saved_state64(state))
+         return;
+     if (!OSCompareAndSwap(0, 1, &sweet_ff_guard)) {
+         (void)OSCompareAndSwap(0, 1, &sweet_ff_fault_dropped);
+         return;
+     }
+     struct sweet_ff_fault_event event = {
+         .phase = phase, .esr = esr, .pid = proc_pid(p), .result = result,
+         .tid = thread_tid(current_thread()), .pc = get_saved_state_pc(state),
+         .lr = get_saved_state_lr(state), .sp = get_saved_state_sp(state), .far = far,
+     };
+     bool accepted = sweet_ff_fault_record(&sweet_ff_last_fault, &event);
+     event.seq = sweet_ff_last_fault.seq;
+     (void)OSCompareAndSwap(1, 0, &sweet_ff_guard);
+     if (!accepted)
+         return;
+     char line[256];
+     int size = sweet_ff_fault_format(line, sizeof(line), &event);
+     if (size != 0)
+         sweet_ramoops_append(line, size);
+ }
+ 
+ /* Called only from the normal sampler thread, after releasing producer locks. */
+ static void
+ sweet_ff_screen_dump(unsigned int sample)
+ {
+     if (sweet_ff_screen_enabled != 1)
+         return;
+     sweet_console_muted = 0;
+     if (!OSCompareAndSwap(0, 1, &sweet_ff_guard)) {
+         printf("SWEET SCREEN: tick=%u observer-busy; diagnostic, not desktop\n", sample);
+         return;
+     }
+     uint32_t calls = sweet_ff_events.total;
+     struct sweet_ff_event last_svc = {0};
+     if (calls != 0)
+         last_svc = sweet_ff_events.events[(calls - 1) % SWEET_FF_RECORDS];
+     struct sweet_ff_fault_event fault = sweet_ff_last_fault;
+     bool dropped = OSCompareAndSwap(1, 0, &sweet_ff_fault_dropped);
+     (void)OSCompareAndSwap(1, 0, &sweet_ff_guard);
+     printf("SWEET SCREEN: tick=%u calls=%u faults=%u lost=%u full=%u\n",
+         sample, calls, fault.seq, dropped ? 1u : 0u,
+         fault.seq == SWEET_FF_FAULT_LIMIT ? 1u : 0u);
+     printf("SWEET SCREEN: last-call=%d phase=%u pc=0x%llx\n",
+         last_svc.call, last_svc.phase, (unsigned long long)last_svc.pc);
+     printf("SWEET SCREEN: last-fault phase=%u pc=0x%llx esr=0x%x result=%d\n",
+         fault.phase, (unsigned long long)fault.pc, fault.esr, fault.result);
+ }
+ 
+ /* Only the existing sampler thread calls this; no console output under guard. */
+ static void
+ sweet_ff_dump(unsigned int sample)
+ {
+     static struct sweet_ff_event snapshot[SWEET_FF_RECORDS];
+     if (!sweet_ff_svc_mode(sweet_ff_enabled))
+         return;
+     if (!OSCompareAndSwap(0, 1, &sweet_ff_guard)) {
+         printf("SWEET FFSVC: sample=%u busy=1\n", sample);
+         return;
+     }
+     uint32_t count = sweet_ff_snapshot(&sweet_ff_events, snapshot);
+     uint32_t total = sweet_ff_events.total;
++    bool pc_progress = sweet_bbpc_is_configured();
++    uint64_t snapshot_abs = pc_progress ? mach_absolute_time() : 0;
+     bool dropped = OSCompareAndSwap(1, 0, &sweet_ff_dropped);
+     (void)OSCompareAndSwap(1, 0, &sweet_ff_guard);
+     printf("SWEET FFSVC: sample=%u count=%u total=%u dropped=%u exhausted=%u\n",
+         sample, count, total, dropped ? 1u : 0u,
+         total == SWEET_FF_EVENT_LIMIT ? 1u : 0u);
++    if (pc_progress)
++        printf("SWEET BBPC: svc-progress sample=%u selected_svc_total=%u snapshot_abs=0x%llx\n",
++            sample, total, (unsigned long long)snapshot_abs);
+     for (uint32_t i = 0; i < count; ++i) {
+         const struct sweet_ff_event *e = &snapshot[i];
+         printf("SWEET FFSVC: n=%u phase=%u pid=%d tid=%llu call=%d "
+             "pc=0x%llx lr=0x%llx sp=0x%llx x0=0x%llx cpsr=0x%x\n",
+             e->seq, e->phase, e->pid, (unsigned long long)e->tid, e->call,
+             (unsigned long long)e->pc, (unsigned long long)e->lr,
+             (unsigned long long)e->sp, (unsigned long long)e->x0, e->cpsr);
+     }
+ }
+ #endif
+ 
+ extern task_t proc_task(proc_t);
+ extern int hz;
+ extern void sweet_sample_start(void);
+ 
+ static char sweet_sample_names[128];
+ 
+ static bool
+ sweet_sample_wanted(const char *name)
+ {
+ 	size_t n = strlen(name);
+ 	for (const char *t = sweet_sample_names; *t;) {
+ 		const char *end = strchr(t, ',');
+ 		size_t tl = end ? (size_t)(end - t) : strlen(t);
+ 		if (tl == n && n > 0 && strncmp(t, name, n) == 0) {
+ 			return true;
+ 		}
+ 		if (!end) {
+ 			break;
+ 		}
+ 		t = end + 1;
+ 	}
+ 	return false;
+ }
+ 
+ extern void sweet_sample_task(const char *name, int pid, task_t task);  /* osfmk/kern/exception.c */
+ 
+ static int
+ sweet_sample_proc(proc_t p, __unused void *arg)
+ {
+ 	char name[32];
+ 	proc_name(proc_pid(p), name, sizeof(name));
+ 	if (sweet_sample_wanted(name)) {
+ 		task_t task = proc_task(p);
+ 		if (task != TASK_NULL) {
+ 			sweet_sample_task(name, proc_pid(p), task);
+ 		}
+ 	}
+ 	return PROC_RETURNED;
+ }
+ 
+ static void
+ sweet_sample_thread(__unused void *arg, __unused wait_result_t wr)
+ {
+ 	static int chan;
+ 	unsigned int delay_seconds = 90;
+ 	unsigned int interval_seconds = 120;
+ 	unsigned int heartbeat = 0;
+ 	(void)PE_parse_boot_argn("sweetheartbeat", &heartbeat, sizeof(heartbeat));
+ 	if (!PE_parse_boot_argn("sweetsample", sweet_sample_names, sizeof(sweet_sample_names))) {
+ 		strlcpy(sweet_sample_names, "SpringBoard,backboardd", sizeof(sweet_sample_names));
+ 	}
+ 	if (sweet_sample_names[0] == '-' && heartbeat != 1
+ #if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
+-        && sweet_ff_enabled == 0 && sweet_ff_screen_enabled != 1
++        && sweet_ff_enabled == 0 && sweet_ff_screen_enabled != 1 && !sweet_bbpc_is_configured()
+ #endif
+         ) {
+ 		return;
+ 	}
+ 	if (!PE_parse_boot_argn("sweetsampledelay", &delay_seconds, sizeof(delay_seconds)) ||
+ 	    delay_seconds < 1 || delay_seconds > 3600) {
+ 		delay_seconds = 90;
+ 	}
+ 	if (!PE_parse_boot_argn("sweetsampleinterval", &interval_seconds, sizeof(interval_seconds)) ||
+ 	    interval_seconds < 1 || interval_seconds > 3600) {
+ 		interval_seconds = 120;
+ 	}
+ 	printf("SMP config: delay=%u interval=%u samples=40 names=%s\n",
+ 	    delay_seconds, interval_seconds, sweet_sample_names);
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++    sweet_bbpc_begin();
++#endif
+ 	(void)tsleep(&chan, PZERO, "sweetsmp", delay_seconds * hz);
+ 	for (int i = 0; i < 40; i++) {
+ #if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
+         sweet_ff_dump((unsigned int)i);
++        sweet_bbpc_dump((unsigned int)i);
+ #endif
+ 		if (heartbeat == 1)
+ 			printf("SWEET BOOTHEART: sample=%d\n", i);
+ #if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
+         sweet_ff_screen_dump((unsigned int)i);
+ #endif
+ 		if (sweet_sample_names[0] != '-') {
+ 			printf("SMP --- sample %d\n", i);
+ 			proc_iterate(PROC_ALLPROCLIST, sweet_sample_proc, NULL, NULL, NULL);
+ 		}
+ 		(void)tsleep(&chan, PZERO, "sweetsmp", interval_seconds * hz);
+ 	}
+ }
+ 
+ void
+ sweet_sample_start(void)
+ {
+ #if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
+     unsigned int enabled = 0;
+     (void)PE_parse_boot_argn("sweetfftrace", &enabled, sizeof(enabled));
+     /* Initialized before userland starts; immutable after publication. */
+     sweet_ff_enabled = sweet_ff_svc_mode(enabled);
+     enabled = 0;
+     (void)PE_parse_boot_argn("sweetffscreen", &enabled, sizeof(enabled));
+     sweet_ff_screen_enabled = enabled == 1 ? 1u : 0u;
+     enabled = 0;
+     (void)PE_parse_boot_argn("sweetfffault", &enabled, sizeof(enabled));
+     sweet_ff_fault_enabled = sweet_ff_mode(enabled);
++    enabled = 0;
++    (void)PE_parse_boot_argn("sweetffpc", &enabled, sizeof(enabled));
++    sweet_bbpc_prepare(enabled);
+     if (sweet_ff_enabled != 0 || sweet_ff_fault_enabled != 0)
+         printf("SWEET UENTRY CONFIG: svc=%u fault=%u (0=off 1=FeatureFlags 2=SpringBoard svc3=backboardd fault3=off)\n",
+             sweet_ff_enabled, sweet_ff_fault_enabled);
+ #endif
+ 	thread_t thread;
+ 	if (kernel_thread_start(sweet_sample_thread, NULL, &thread) == KERN_SUCCESS) {
+ 		thread_deallocate(thread);
+ 	}
+ }
+diff --git a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -165,24 +165,25 @@
+ typedef void (*abort_inspector_t)(uint32_t, fault_status_t *, vm_prot_t *);
+ static void inspect_instruction_abort(uint32_t, fault_status_t *, vm_prot_t *);
+ static void inspect_data_abort(uint32_t, fault_status_t *, vm_prot_t *);
+ 
+ static int is_vm_fault(fault_status_t);
+ static int is_translation_fault(fault_status_t);
+ static int is_alignment_fault(fault_status_t);
+ 
+ typedef void (*abort_handler_t)(arm_saved_state_t *, uint32_t, vm_offset_t, fault_status_t, vm_prot_t, expected_fault_handler_t);
+ static void handle_user_abort(arm_saved_state_t *, uint32_t, vm_offset_t, fault_status_t, vm_prot_t, expected_fault_handler_t);
+ #if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
+ extern void sweet_ff_fault_trace(unsigned int, struct arm_saved_state *, uint32_t, uint64_t, int);
++extern void sweet_bbpc_trace(struct arm_saved_state *, struct arm_saved_state *, unsigned int);
+ #endif
+ static void handle_kernel_abort(arm_saved_state_t *, uint32_t, vm_offset_t, fault_status_t, vm_prot_t, expected_fault_handler_t);
+ 
+ static void handle_pc_align(arm_saved_state_t *ss) __dead2;
+ static void handle_sp_align(arm_saved_state_t *ss) __dead2;
+ static void handle_sw_step_debug(arm_saved_state_t *ss) __dead2;
+ static void handle_wf_trap(arm_saved_state_t *ss) __dead2;
+ static void handle_fp_trap(arm_saved_state_t *ss, uint32_t esr) __dead2;
+ 
+ static void handle_watchpoint(vm_offset_t fault_addr) __dead2;
+ 
+ static void handle_abort(arm_saved_state_t *, uint32_t, vm_offset_t, abort_inspector_t, abort_handler_t, expected_fault_handler_t);
+@@ -1885,24 +1886,27 @@
+ 	/*
+ 	 * sweet: TrustZone owns GIC Group 0, so the timer and IPIs that other
+ 	 * ARM64 targets take as FIQs arrive here as Group 1 IRQs.
+ 	 */
+ 	uint64_t iar = __builtin_arm_rsr64("ICC_IAR1_EL1");
+ 	uint32_t intid = (uint32_t)(iar & 0xFFFFFF);
+ 
+ 	if (intid >= 1020 && intid <= 1023) {
+ 		return; /* spurious */
+ 	}
+ 	if (intid == sweet_vtimer_intid) {
+ 		sleh_interrupt_handler_prologue(state, DBG_INTR_TYPE_TIMER);
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++        sweet_bbpc_trace(state, cdp->cpu_int_state, (unsigned int)cdp->cpu_number);
++#endif
+ 		cdp->cpu_decrementer = -1; /* Large */
+ 		INTERRUPT_MASKED_DEBUG_START(rtclock_intr, DBG_INTR_TYPE_TIMER);
+ 		rtclock_intr(TRUE);
+ 		INTERRUPT_MASKED_DEBUG_END();
+ 		__builtin_arm_wsr64("ICC_EOIR1_EL1", iar);
+ 	} else if (intid < 16) {
+ 		sleh_interrupt_handler_prologue(state, DBG_INTR_TYPE_IPI);
+ 		/* Ack before handling so an IPI raised meanwhile is not lost */
+ 		__builtin_arm_wsr64("ICC_EOIR1_EL1", iar);
+ 		__builtin_arm_isb(ISB_SY);
+ 		cpu_signal_handler();
+ 	} else {
+diff --git a/bsd/dev/SweetBackboardPCPolicy.h b/bsd/dev/SweetBackboardPCPolicy.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/SweetBackboardPCPolicy.h
+@@ -0,0 +1,59 @@
++/* Independent fixed boot-lifetime budget for actual timer-IRQ user PCs. */
++#ifndef SWEET_BACKBOARD_PC_POLICY_H
++#define SWEET_BACKBOARD_PC_POLICY_H
++
++#define SWEET_BBPC_LIMIT 40u
++#define SWEET_BBPC_INTERVAL_NS (30ULL * 1000000000ULL)
++struct sweet_bbpc_event {
++    uint32_t seq, cpu, cpsr;
++    int32_t pid;
++    uint64_t tid, pc, lr, sp, abstime;
++};
++struct sweet_bbpc_buffer {
++    uint32_t total, dumped;
++    bool has_last, clock_stopped;
++    uint64_t last;
++    struct sweet_bbpc_event events[SWEET_BBPC_LIMIT];
++};
++
++static inline uint64_t
++sweet_bbpc_ceil_ticks(uint64_t ticks, uint64_t ns)
++{
++    if (ticks == 0 || ticks == UINT64_MAX)
++        return 0;
++    return ns < SWEET_BBPC_INTERVAL_NS ? ticks + 1 : ticks;
++}
++
++/* Caller holds its independent nonblocking guard; failed admission costs no quota. */
++static inline bool
++sweet_bbpc_record(struct sweet_bbpc_buffer *buffer, uint64_t interval,
++    const struct sweet_bbpc_event *event)
++{
++    if (interval == 0 || buffer->clock_stopped || buffer->total >= SWEET_BBPC_LIMIT)
++        return false;
++    if (buffer->has_last) {
++        if (event->abstime < buffer->last) {
++            buffer->clock_stopped = true;
++            return false;
++        }
++        if (event->abstime - buffer->last < interval)
++            return false;
++    }
++    buffer->events[buffer->total] = *event;
++    buffer->events[buffer->total].seq = buffer->total + 1;
++    ++buffer->total;
++    buffer->last = event->abstime;
++    buffer->has_last = true;
++    return true;
++}
++
++static inline uint32_t
++sweet_bbpc_snapshot(struct sweet_bbpc_buffer *buffer, struct sweet_bbpc_event *out)
++{
++    uint32_t count = buffer->total - buffer->dumped;
++    for (uint32_t i = 0; i < count; ++i)
++        out[i] = buffer->events[buffer->dumped + i];
++    buffer->dumped = buffer->total;
++    return count;
++}
++#endif
