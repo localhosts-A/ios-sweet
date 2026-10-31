@@ -1,6 +1,6 @@
 # Bounded Dali GUI load progress
 
-Patch 0175 adds a development-only, default-off observer (`sweetload=1`).
+Patches 0175–0176 provide a development-only, default-off observer (`sweetload=1`).
 It does not repair scheduling, IPC, VM, HFS, or UFS. A successful build or
 observation is not proof that SpringBoard has rendered a desktop.
 
@@ -17,6 +17,14 @@ The missing evidence is whether the GUI tasks accumulate CPU time, what states
 a bounded subset of their threads occupy at sample time, and how much elapsed
 time returned global UFS operations consumed. None of these observations alone
 identifies a causal desktop blocker.
+
+## 0176: specific wait identity and observable counters
+
+The 0175 trial identified sampled kernel-mutex waits in backboardd and later
+port-receive waits in SpringBoard. All 40 UFS snapshot attempts lost the I/O mutex,
+so no cumulative counts were observed. The persisted logger reached flush 40:
+this is not evidence of one continuously owned mutex or deadlock. Patch 0176
+repairs only these visibility gaps; the prior trial and its recovery are closed.
 
 ## Admission and ownership
 
@@ -89,6 +97,19 @@ brackets make a derived delta unknown, never negative execution.
 A block hint describes a primitive category, not a peer or storage cause. Do not
 subtract CPU from wall time or `runnable_timer` to invent exact runnable delay.
 
+The v2 thread record adds `uw`: 0 unknown, 1 not applicable, 2 another kernel
+mutex, 3 the known UFS mutex. A successful stable WAIT without RUN/WAKING and
+with KernelMutex hint permits a scalar event comparison while holding the same
+scheduler lock. Other transient/unknown combinations remain unknown. No event is
+dereferenced or reverse-converted, and no event/mutex address or owner is logged.
+
+The UFS mutex remains static. A typed internal accessor returns only that known
+boot-lifetime object. A guarded diagnostic helper beside `LCK_MTX_EVENT` in
+`lock_mtx.c` uses the canonical event expression; it is not the mutex base address.
+Existing mutex primitives are unchanged. A match identifies the registered wait
+at that snapshot, not its owner, duration, or cause. A mismatch excludes only that
+specific event at that instant, not all UFS-related waits.
+
 ## Global UFS aggregates
 
 The existing `sweet_ufs_lock` serializes all post-ready normal SCSI wrapper calls.
@@ -117,14 +138,36 @@ an apparently precise average.
 Only starts admitted in the open window can be recorded. Completion rechecks the
 gate before and after the end-clock read, while holding the existing mutex. A
 completion already admitted immediately before closure may finish updating its
-scalars while still owning the mutex. The final snapshot either copies consistent
-counters after unlock or reports busy; it never waits. Operations starting before
+scalars and mirror while still owning the mutex. Operations starting before
 opening or completing after admission closes are not retroactively recorded.
 
-Each consumer round makes one UFS try-lock attempt, copies fixed scalars, releases
-the lock, then prints. Busy emits status only, not stale counters. Even a successful
-final copy has `pending=unknown`: returned-only aggregation cannot establish that
-no outstanding request remains.
+0176 keeps those plain counters protected by the original mutex but publishes an
+independent atomic mirror. The serialized publisher SC-loads the generation,
+SC-stores an odd generation, the changed group's nine fields, global saturation,
+the existing source end timestamp, and the next even generation. Other groups
+retain their most recent values. This is 14 mirror atomic operations per ordinary
+publication (one load, thirteen stores), with no additional clock or producer lock.
+It adds memory-ordering overhead; it is not a zero-perturbation performance fix.
+
+The reader makes one bounded pass: SC-load generation, 45 group scalars and two
+metadata scalars, then SC-load generation again (49 loads maximum). All concurrent
+mirror accesses are atomic. It accepts only an equal, nonzero, even generation.
+A single SC order and absence of ABA exclude an intervening publication bracket;
+the result is a coherent cumulative state, not five equally fresh measurements.
+No retry loop, mutex acquisition, plain concurrent memcpy, `_wide` atomic helper,
+or new worker is used. Output consumes only a private accepted snapshot.
+
+Generation zero means unpublished, not measured zero I/O. UINT64_MAX is terminal
+exhaustion: after the last valid even generation, the next publisher latches that
+terminal odd value before touching payload or performing overflowing arithmetic.
+Further mirror publication stops, but true I/O and original counters continue.
+Never clear/reuse the mirror or rearm the observer while readers can exist.
+
+The source timestamp is the existing end-clock reading, not the publication
+instant. Final closure still precedes one read; a pre-close admitted publication
+may complete afterward without catch-up output. Even a successful final copy has
+`pending=unknown`: it is last-published returned-only data, not evidence that no
+outstanding request remains. Invalid clocks prevent invented freshness estimates.
 
 WRITE includes root and logger operations; SYNC includes ioctl and both logger
 payload/header syncs. Partial writes may perform READ then WRITE. Wrapper time is
@@ -140,18 +183,23 @@ I/O. All elapsed values include software and possible preemption.
 - `SWEET LOADP`: g target, p/id/iv identity, rg registration timestamp, q status.
   q=0 also includes n total threads, c inspected, b/z accounting bracket, u/k
   raw recorded user/system ticks. q=1 means task busy; q=2 means inactive.
-- `SWEET LOADT`: g target, j subset index, th stable thread ID, q status. q=0 also
-  includes st raw state, h block hint, pr/bp priorities, wr wait result, b/z/u/k.
-  q=1 omits unavailable state/accounting rather than emitting measured zeros.
-- `SWEET LOADIO CONFIG/STATUS`: scope, units, actual snapshot bracket, q result,
-  ov saturation, final and pending=unknown. Busy status omits counters.
+- `SWEET LOADT`: v2 adds uw wait classification to successful records, retaining
+  g target, j subset index, th identity, raw st/h, pr/bp, wr and b/z/u/k. Busy q=1
+  still omits unavailable measurements. Legacy v1 does not contain uw; never
+  synthesize it from a hint alone.
+- `SWEET LOADIO CONFIG/STATUS`: v2 status q=0 last-published, 1 unpublished,
+  2 writer-active, 3 crossed-write, 4 exhausted. All carry gn observed generation;
+  q=0 additionally carries z read end, src existing source end and ov saturation.
+  at precedes the mirror read. Only q=0 emits groups; pending=unknown always.
+  Legacy v1 busy remains busy, with no invented generation or source timestamp.
 - `SWEET LOADIO`: one of the five aggregates above.
 
 All lines, including newline, must be at most 255 bytes. Truncation is not accepted
 as a complete record. At most 40 rounds produce 761 GUI lines plus 241 UFS lines:
 **1,002 lines / 255,510 bytes**. Explicit GUI control/records/formatter scratch are
 bounded at 8 KiB and UFS at 2 KiB. Per round there are at most two task try-locks,
-16 thread try-locks, two task and 16 thread recount calls, and one UFS try-lock.
+16 thread try-locks, two task and 16 thread recount calls, and one bounded UFS
+mirror read with no I/O-mutex try-lock.
 These are count/storage/output bounds, not a hard wall-clock deadline. Additional
 output can change log-ring retention and scheduling overhead.
 
@@ -167,15 +215,22 @@ startup and consumer bodies. Differential tests preserve the old SVC/ring/IPC an
 UFS behavior. Concurrent registration, final pending publication, failed startup,
 40-round closure, lock busy/inactive/truncation, arithmetic boundaries, strict
 parsing and real console255 negative/positive paths are covered. Darwin fortified
-bzero controls retain `-Werror`.
+bzero and strlcpy negative/guarded dual-positive controls retain `-Werror`.
+Tests now integrate the real canonical comparator with the real collector and use
+a deliberately nonzero mutex-data offset and nondereferenceable sentinel events.
+Serialized concurrent publishers and deterministic odd/crossed/wrap interleavings
+exercise the actual mirror helpers with faithful seq_cst host atomics. A held-I/O-
+lock negative control reproduces the old busy copy while the new reader succeeds.
 
 Set `SWEET_LOAD_SOURCE_DIR` to a materialized XNU source root to require byte-for-byte
-identity for all six affected files. CI performs policy tests before Build and a
+identity for all seven final files (explicit0175 base plus the five-file0176
+overlay, including lock_mtx.c; the existing Makefile remains unchanged). CI performs policy tests before Build and a
 separate final-source invocation after Build. The shared header is explicitly
 listed in `osfmk/kern/Makefile` XNU_ONLY_EXPORTS; local success must not depend on
 an extra include flag missing from native CI.
 
-Local objects are not full-link proof. Publication/full native CI and a new exact
+Four real affected objects include lock_mtx.c and the sampler using the changed
+shared formatter header. Local objects are not full-link proof. Publication/full native CI and a new exact
 hardware candidate each require separate approval. Preserve the clean b4ee root,
 original boot pair, complete raw scenes, logs, unbacked tail and existing partition
 layout. Never use these diagnostics as permission to prolong a trial or bypass

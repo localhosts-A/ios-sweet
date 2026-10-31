@@ -1,3 +1,165 @@
+## 当前交接 — 0176主机可见性修复验收完成，发布/完整CI待单独批准（2026-10-31）
+
+基线6e24a7cb2dc95386fc932d0be18abd9380a17398／完整CI41201356092。新0176只补已证实观察缺口：
+1) collector在已有scheduler锁保护内比较WAIT/KernelMutex事件与可信static UFS锁的canonical事件；
+   lock_mtx.c仅追加DEVELOPMENT/SWEET helper，原lock/unlock/try/wait源码逐字节保持，无owner/未知地址解引用或输出。
+2) 原UFSmutex内发布seq_cst原子mirror，consumer不争抢I/O锁、只读一次，同非零偶数才采纳。
+   0未发布/odd正在写/crossed/UINT64_MAX耗尽明确unknown；全局returned-only、pendingunknown及sourceend非publication时刻边界保留。
+   每次正常publication14原子操作、reader最多49原子load，无新clock/producerlock/retry/worker；无wrap/reset，真实I/O与原counter不因mirror耗尽停止。
+
+21suite130实际unittest PASS（新suite19；未来CI policy128＋postbuild19另计）；4真实ARM64对象0/4failed。
+独立33finalsources零fuzz/offset、28源不变、原mutexprimitive不变，10sourcegates/10bash-n、console精确字节通过。
+ARM64实际LDAR/STLR/STLUR核验、无atomic运行库助手；strict v1/v2、集成canonical/collector、旧trybusy负控、SC并发/odd/cross/wrap和真实console255最大字段通过。
+validate-repo176patch/42Python/12shell及ramoopsADT通过（可选d22product缺失警告）；未运行YAML schema校验。
+预计仅5文件发布：0176patch、既有test/doc/workflow、NOTES。无提交/推送/完整0176CI权限，原用户mkadt/mkiosroot不动。
+
+0175试验已完整闭合：原厂Android/物理启动对/完整b4ee、四权限false；原始7ad67930fb1df93dc6cc1fe1167ac710f025c2f14651af23ad50f03838c9bab0及旧现场保留未修复。
+/tmp满未删除，Bash heredoc曾静默变空，相关旧13PASS未当0176验收；真实代码重写/重放/测试后已通过。
+后续工作盘持久脚本和直接argv执行，日志工作盘。无后台任务、新设备批准或真实0176runtime，桌面未实现。
+证据ufs-wait-visibility-host-verification.json／ufs-wait-atomic-instruction-check.json；下一关单独精确源码发布及一次CI。
+
+---
+
+## 当前交接 — 0175试验与完整恢复闭合，定位具体等待缺口（2026-10-31）
+
+CI41201356092/6e24a7c的唯一1200秒试验已耗尽，真人仅日志色块/黑屏，无GUI提交或成功刷新。
+新boot3DCB6A2D-108E-473E-88E2-8DB9C0DDA7E3：BB57/TID311在15样本14次KernelMutex+WAIT|UNINT，CPU32..39平坦；SB27主TID220早期18次RUN/CPU增长，后15次PortReceive，CPU25..39平坦，次TID321为ParkedWorkQueue。
+UFS40次snapshot全busy，无累计行，计数unknown不是0IO；日志flush40有进展但未识别BB具体锁/owner。
+SVC138accepted/112exported，末尾550=map_with_linking_np和6=close均返回0；4完整VM对、IPC0，dyld独立slide0x43fa4000，cache slide未证实。
+actual7ad67930fb1df93dc6cc1fe1167ac710f025c2f14651af23ad50f03838c9bab0完整16GiB三hash及分析后fullhash通过，原件未修复。
+只读fsck8为hardlink/18orphan/freecount，不是旧2053underallocation；51关键程序/cache完整字节与clean一致。
+launchd125752bytes/1146lines，BB xpcproxy→INIT文件内549.363700s，5所选路径无persistedcrash，不等checkin或GUI。
+全256actualdiff后7chunks448MiB已pinnedFD恢复、范围/全b4ee根及原厂Android/物理对验收，闭合2026-10-31T13:44:03.017118+00:00。
+四权限false、root_restore_pending=false，无后台任务或新发布/CI/设备批准。旧现场均保留，/tmp不删，工作盘日志/TMPDIR。
+下一步仅主机只读核对已知mutex等待标识和避免统计try全busy的一致快照，再给最小方案；桌面未实现。
+
+---
+
+## 当前交接 — 0175完整现场验收，b4ee根恢复运行中（2026-10-31）
+
+actual根完整16GiB三SHA一致：7ad67930fb1df93dc6cc1fe1167ac710f025c2f14651af23ad50f03838c9bab0，raw/sidecar/日志保留未修复。
+原厂Android/物理启动对已验收，stock/delta权限已消耗；精确13文件/6helper一致。
+后台bf7t6gs1j执行全256actualdiff/pinned已校验源FD b4ee恢复及范围/完整root/原厂对验收。
+工作盘gui-load-progress-root-recovery.log；等待完成通知，不轮询或重复恢复。四权限尚未宣告关闭、root恢复pending。
+只读分析冻结raw可并行；新boot3DCB6A2D…等待状态证据见runtime-wait-summary.json，UFS40次busy仍unknown。
+唯一试验已耗尽、无新增设备试验，桌面未实现。/tmp不删，临时文件/日志在工作盘。
+
+---
+
+## 当前交接 — 0175日志已解析，完整原始根捕获仍运行（2026-10-31）
+
+后台bau1jze17负责唯一完整16GiB三hash捕获；限定日志已保存，原厂Android/物理启动对已先验收，stock_restore权限已消耗。
+新boot 3DCB6A2D-108E-473E-88E2-8DB9C0DDA7E3，SWEET116698bytes/seq40＋pstore116742bytes同boot一致，191条load记录、40轮、无malformed/duplicate。
+BB57/TID311 sample25..39：14次TH_WAIT|TH_UNINT+KernelMutex，一次WAIT/none，CPU末段32..39未增长；SB27主TID220早期18次RUN并有累计CPU增长，后15次PortReceive等待且CPU25..39平坦，次TID321为ParkedWorkQueue。
+UFS40次snapshot全部busy，无aggregate行，累计IO未知，不能当0IO或死锁。SWEETflush40证明日志持久化路径进展，但不能识别BB等待锁/owner。
+SVC accepted138/exported112，末尾135/136是map_with_linking_np(550)返回0，137/138close返回0；4对VM完整返回，IPC数据0；无GUI提交/成功刷新，真人无桌面。
+原始根capture尚未完成，不能恢复/修复根或重复capture；完成后按获批全256diff/pinnedFD b4ee恢复验收并关闭权限。
+/tmp不删，日志与临时文件工作盘；本轮试验已耗尽，桌面未实现。
+
+---
+
+## 当前交接 — 0175未见桌面，原厂对写回，完整capture流程运行中（2026-10-31）
+
+真人画面“仅日志色块或黑屏”、Fastboot“已进入Fastboot”。目标核对后原厂init_boot_b/boot_b写回成功，已请求Android启动。
+后台bau1jze17负责Android完成/物理启动对verify、限定日志、一次完整actual16GiB三hash捕获；工作盘gui-load-progress-stock-verify-and-capture.log。
+完整现场验收前不恢复/修复根，不重复capture。之后执行已批准全256actualdiff/pinned恢复源FD b4ee恢复及全root/原厂对验收，关闭四权限。
+试验尝试1/批准1已耗尽，无新试机授权；root_restore_pending=true，桌面未实现。/tmp不删，日志及TMPDIR工作盘。
+
+---
+
+## 当前交接 — 0175窗口到期，等待真人Fastboot恢复（2026-10-31）
+
+唯一试验UTC12:54:31.691997至13:14:31.691997已到期；bnc0aw5u5 exit2为设计的时间上限，工作盘日志明确OBSERVATION_LIMIT_REACHED。
+窗口内未观察到ADB/Fastboot返回，不能推断reset原因/内核死锁。真人实际屏幕与Fastboot待确认。
+尝试1/批准1，不延长或重启候选。root_delta权限false，剩余三权限只限本次恢复，root_restore_pending=true。
+下一步真人返回Fastboot，核对身份/槽b后原厂对恢复验收→完整actual16GiB三hash→全256diff/pinnedFD b4ee恢复并关闭权限。
+/tmp不清理，日志与临时文件工作盘；尚无0175桌面结论。
+
+---
+
+## 当前交接 — 0175唯一候选已启动，固定1200秒观察（2026-10-31）
+
+精确CI41201356092/6e24a7c，initboot36a9048d…，static13b14c9004…。全部fresh恢复源/设备/物理原厂对/cleanroot/容量门禁通过。
+9runs11blocks45056bytesseed逐段及完整07ba哈希通过，精确init_boot_b/boot_b写入并启动一次。
+UTC2026-10-31T12:54:31.691997+00:00至2026-10-31T13:14:31.691997+00:00，watcher bnc0aw5u5；stdout工作盘gui-load-progress-trial-observation.log。
+trial_attempts=approved_trials=1，delta权限false，其余三权限仅本次恢复；root_restore_pending=true。
+下一步通知后核验terminal及真人画面/Fastboot，原厂对恢复验收→完整actual16GiB三hash→全256actualdiff/pinnedFD b4ee恢复。
+/tmp未清理，所有日志/TMPDIR工作盘；pretrial EAB8154D…为旧0174，不拿来冒充新结果。
+不延长/重跑/追加试验；尚无0175运行或桌面结论。
+
+---
+
+## 当前交接 — 0175获批流程运行中，未确认候选已启动（2026-10-31）
+
+后台buuxulqgy，完成通知后检查state及工作盘gui-load-progress-single-trial-execution.log；不轮询或重复执行。
+
+批准时间2026-10-31T12:49:54.040932+00:00，Actual AskUserQuestion“批准一次试验及恢复”。
+精确CI41201356092/6e24a7c，initboot36a9048d…，static13b14c900490f04100bbdd5bafc3596f2b600ce6a0df038a3956b38db9e9fbf0e7。
+批准1/尝试0，四权限仅限本次seed差分/启动及原厂+b4ee恢复，条件同trial-approval.json。
+下一步fresh恢复源完整hash、设备身份/槽b/物理原厂对/完整clean根/容量，失败停止不重试。
+完整actual16GiB三hash先于根恢复；全256actualdiff、pinned源FD、范围/全root/原厂对验收后关闭权限。
+/tmp不删，临时文件/日志工作盘；含最多2task引用直到重启的诊断取舍。桌面未实现。
+
+---
+
+## 当前交接 — 0175精确主机候选已全面验收，待新设备授权（2026-10-31）
+
+CI41201356092／6e24a7cb2dc95386fc932d0be18abd9380a17398，完整build/link/32source/135CI执行/17IIG/IORPC独立验收通过。
+候选shim/out-dali/ufs-41201356092/candidate-desktop-gui-load-progress-20261031/：
+kernel a3dbceda85a4e128596270ed0d910d81b8a850c7ddadce22cd9a2dc851cecb70
+boot ddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39
+init_boot 36a9048d1e3982c9bca1385f890b6860b819ed76d490fdd197d2d7da24cc1044
+static13manifestSHA b14c900490f04100bbdd5bafc3596f2b600ce6a0df038a3956b38db9e9fbf0e7
+verificationSHA cbbc95d8f98e24916158f6b41196c1085812d978c545c0186b6082d71e2aa494。
+完整561byte参数、v4/LZ4/CPIO/ADT/rebuiltpayload/AVB、完整16GiBclean及virtualseed重放通过。
+只加sweetload1；根b4ee→07ba仍9runs11blocks45056bytes。新adapter12tests及futurecapture默认zeroaccess通过。
+候选0approved/0attempts/四权限false，无后台任务。工作盘约89.6GiB，trial前仍fresh；/tmp满未删除，日志/TMPDIR均工作盘。
+下一关仅另行精确一次≤1200s/fullactualcapture+原厂及b4ee恢复授权，不复用CI批准。
+最多两个task引用到重启的观察取舍、CPU/状态/全局returnedIO解释边界保留；无真实0175runtime，桌面未实现。
+设备仍原厂Android/物理对/完整b4ee，最新77eb及旧6015/760a/0adb现场保留未修复。
+本地交接更新无新提交权限，不改变原用户工具。
+
+---
+
+## 当前交接 — 0175主机候选生成，完整离线验收中（2026-10-31）
+
+完整CI41201356092／6e24a7c及独立32source/135测试执行/kernel/17IIG/IORPC验收已通过。
+主机候选shim/out-dali/ufs-41201356092/candidate-desktop-gui-load-progress-20261031/：
+kernel a3dbceda85a4e128596270ed0d910d81b8a850c7ddadce22cd9a2dc851cecb70
+boot ddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39
+init_boot 36a9048d1e3982c9bca1385f890b6860b819ed76d490fdd197d2d7da24cc1044
+只加sweetload1；保留PC/VM/IPC、GUI/HID/WDT、正常日志及b4ee→07ba差分。
+新storageadapter12项测试PASS，六futurewrapper已语法核对未执行；candidate approved_trials=attempts0、四权限false。
+最终独立candidate verifier bl5hhcf53运行中：完成后读取JSON/13staticmanifest再申请新精确设备授权。
+/tmp tmpfs已满，未删除文件；工作盘约90GiB，日志及专用TMPDIR已放工作盘。
+设备仍0174闭合后的原厂Android/物理对/完整b4ee，77eb和旧现场保留，桌面未实现。
+
+---
+
+## 当前交接 — 0175完整CI及独立验收通过，主机候选待准备（2026-10-31）
+
+精确CI41201356092／6e24a7cb2dc95386fc932d0be18abd9380a17398完整build/link通过，
+135实际CI测试执行（122policy＋13finalsource）、32源码、console字节、TEXT_EXEC符号/标记、
+17份IIG逐字节不变及四字段IORPC独立验收通过。
+kernelSHA a3dbceda85a4e128596270ed0d910d81b8a850c7ddadce22cd9a2dc851cecb70。
+证据gui-load-strlcpy-ci-source-check/source-verification.json，未声明runtime/桌面成功。
+本机/tmp tmpfs7.8G已满，一次输出丢失；工作盘约90GiB，已告知用户、只读检查、未删除文件，后续专用TMPDIR与输出放工作盘。
+下一步只做主机候选/adapter测试/完整离线验收；设备仍原厂+b4ee、四权限false，无新试机权限。
+最新77eb与旧6015/760a/0adb完整现场保留；不修复或替换。发布批准已执行完毕，无新提交/CI授权。
+
+---
+
+## 当前交接 — strlcpy修正已发布，第二个获批CI运行中（2026-10-31）
+
+真人另批精确test＋NOTES两文件；提交6e24a7cb2dc95386fc932d0be18abd9380a17398已推送。
+新CI41201356092：https://github.com/localhosts-A/ios-sweet/actions/runs/41201356092；后台b73376i4a观察收集。
+旧CI41200952769因Darwin strlcpy测试宏冲突Build skipped，证据保留；本次不是未授权rerun。
+124项本地实际测试（含强制原冲突负控／正常及fortified双正控）通过，32内核源码未变。
+新CI结果pending，完成后独立verify-gui-load-strlcpy-ci.py核验32source/135case执行/kernel/17IIG/IORPC。
+四设备权限false，无新试验授权，桌面未实现。此发布后交接未另获提交授权。
+
+---
+
 ## 当前交接 — 0175 CI测试夹具失败，strlcpy隔离修正待回归／另批（2026-10-31）
 
 CI41200952769／4224f07 terminal failure：新consumer夹具strlcpy宏与Darwin secure/_string.h fortified定义冲突，-Werror宏重定义。

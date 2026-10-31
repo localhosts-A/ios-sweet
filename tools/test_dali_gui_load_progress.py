@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise final0175 functions; optional SWEET_LOAD_SOURCE_DIR verifies materialized sources."""
+"""Exercise final0176 functions; optional SWEET_LOAD_SOURCE_DIR verifies materialized sources."""
 from pathlib import Path
 import os
 import re
@@ -12,10 +12,16 @@ import test_dali_backboard_ipc_context as ipc
 import test_dali_backboard_vm_fault as vm
 
 ROOT = Path(__file__).resolve().parents[1]
-PATCH = ROOT/'xnu/patches/0175-sweet-bounded-gui-load-progress.patch'
+BASE_PATCH = ROOT/'xnu/patches/0175-sweet-bounded-gui-load-progress.patch'
+PATCH = ROOT/'xnu/patches/0176-sweet-bounded-ufs-wait-visibility.patch'
 PATHS = ('bsd/dev/sweet_sample.c', 'bsd/dev/sweet_ufs.c', 'osfmk/kern/exception.c',
          'osfmk/kern/SweetLoadProgress.h', 'bsd/dev/SweetUFSLoadPolicy.h')
-SOURCE = {p: fixture.fragment(p, PATCH) for p in PATHS}
+SOURCE = {p: fixture.fragment(p, BASE_PATCH) for p in PATHS}
+OVERLAY_PATHS = ('bsd/dev/sweet_ufs.c', 'osfmk/kern/lock_mtx.c', 'osfmk/kern/exception.c',
+                 'osfmk/kern/SweetLoadProgress.h', 'bsd/dev/SweetUFSLoadPolicy.h')
+# Changed files must exist in0176; unchanged files come from the explicit0175 base.
+SOURCE.update({p: fixture.fragment(p, PATCH) for p in OVERLAY_PATHS})
+LOCK = SOURCE['osfmk/kern/lock_mtx.c']
 SAMPLER, UFS, EXCEPTION, GUI_POLICY, IO_POLICY = (SOURCE[p] for p in PATHS)
 
 
@@ -29,8 +35,8 @@ def function(source, name):
     return source[match.start():end]+'\n'
 
 
-def old_fragment(path):
-    block = next(b for b in PATCH.read_text().split('diff --git ')[1:] if f'b/{path}\n' in b)
+def old_fragment(path, patch=BASE_PATCH):
+    block = next(b for b in patch.read_text().split('diff --git ')[1:] if f'b/{path}\n' in b)
     return ''.join(l[1:] for l in block.splitlines(keepends=True)
                    if l.startswith(('-', ' ')) and not l.startswith('---'))
 
@@ -60,7 +66,8 @@ def parse_record(line):
         values = {k: (v if k == 'pending' else int(v, 0)) for k, v in raw.items()}
     except ValueError as error:
         raise ValueError('invalid number') from error
-    if values.get('v') != 1 or not 0 <= values.get('s', -1) < 40:
+    versions = (1, 2) if prefix in ('SWEET LOADT', 'SWEET LOADIO STATUS') else (1,)
+    if values.get('v') not in versions or not 0 <= values.get('s', -1) < 40:
         raise ValueError('version/sample')
     q = values.get('q')
     if prefix == 'SWEET LOADP':
@@ -69,9 +76,19 @@ def parse_record(line):
     elif prefix == 'SWEET LOADT':
         if q not in (0, 1): raise ValueError('thread status')
         if q == 0: expected |= set('st h pr bp wr b z u k'.split())
+        if q == 0 and values['v'] == 2: expected.add('uw')
+        if 'uw' in values and values['uw'] not in (0, 1, 2, 3): raise ValueError('wait class')
     elif prefix == 'SWEET LOADIO STATUS':
-        if q not in (0, 1) or values.get('pending') != 'unknown': raise ValueError('IO status')
+        if q not in ((0, 1) if values['v']==1 else (0, 1, 2, 3, 4)) or values.get('pending') != 'unknown': raise ValueError('IO status')
         if q == 0: expected |= {'z', 'ov'}
+        if values['v']==2:
+            expected.add('gn')
+            if q==0: expected.add('src')
+            generation=values.get('gn',-1)
+            if q==0 and (generation<=0 or generation&1): raise ValueError('published generation')
+            if q==1 and generation!=0: raise ValueError('unpublished generation')
+            if q==2 and (not generation&1 or generation==(1<<64)-1): raise ValueError('writer generation')
+            if q==4 and generation!=(1<<64)-1: raise ValueError('exhausted generation')
     elif prefix == 'SWEET LOADIO':
         if not 0 <= values.get('g', -1) < 5: raise ValueError('IO group')
         expected |= {'b', 'e'} if values['g'] < 3 else {'w', 'wm'}
@@ -163,17 +180,26 @@ PREFIX = r'''
 #undef bzero
 #endif
 #define bzero(p,n) memset(p,0,n)
-#define os_atomic_load(p,o) __atomic_load_n((p),__ATOMIC_ACQUIRE)
-#define os_atomic_store(p,v,o) __atomic_store_n((p),(v),__ATOMIC_RELEASE)
-#define os_atomic_or(p,v,o) ((void)__atomic_fetch_or((p),(v),__ATOMIC_ACQ_REL))
+/* Host atomics faithfully implement each supplied order, including seq_cst. */
+#define os_atomic(t) t
+#define MEMORY_relaxed __ATOMIC_RELAXED
+#define MEMORY_acquire __ATOMIC_ACQUIRE
+#define MEMORY_release __ATOMIC_RELEASE
+#define MEMORY_acq_rel __ATOMIC_ACQ_REL
+#define MEMORY_seq_cst __ATOMIC_SEQ_CST
+static void (*atomic_load_hook)(const void *);
+static void (*atomic_store_hook)(const void *);
+#define os_atomic_load(p,o) ({ __auto_type value=__atomic_load_n((p),MEMORY_##o); if(atomic_load_hook)atomic_load_hook((const void *)(p)); value; })
+#define os_atomic_store(p,v,o) do { __atomic_store_n((p),(v),MEMORY_##o); if(atomic_store_hook)atomic_store_hook((const void *)(p)); } while(0)
+#define os_atomic_or(p,v,o) ((void)__atomic_fetch_or((p),(v),MEMORY_##o))
 static void (*atomic_hook)(uint32_t *,bool);
 static void (*atomic_before)(uint32_t *);
-static bool atomic_cas(uint32_t *p,uint32_t old,uint32_t value) {
+static bool atomic_cas(uint32_t *p,uint32_t old,uint32_t value,int order) {
  if(atomic_before)atomic_before(p);
- bool ok=__atomic_compare_exchange_n(p,&old,value,false,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE);
+ bool ok=__atomic_compare_exchange_n(p,&old,value,false,order,order==__ATOMIC_RELAXED?__ATOMIC_RELAXED:__ATOMIC_ACQUIRE);
  if(atomic_hook)atomic_hook(p,ok);return ok;
 }
-#define os_atomic_cmpxchg(p,o,n,m) atomic_cas((p),(o),(n))
+#define os_atomic_cmpxchg(p,o,n,m) atomic_cas((p),(o),(n),MEMORY_##m)
 '''
 GUI_HELPERS = SAMPLER[SAMPLER.index('static bool sweet_load_configured;'):SAMPLER.index('\nvoid sweet_ff_trace(')]
 GUI_MOCK = ipc.MOCK.replace('static struct process process=', 'static _Thread_local struct process process=')
@@ -200,7 +226,7 @@ GUI_TAIL = ipc.TAIL + r'''
 static void load_reset(void) {
  reset();sweet_load_configured=false;sweet_load_control=sweet_load_ready=sweet_load_missed=0;sweet_load_dumped=0;
  bzero(sweet_load_slots,sizeof(sweet_load_slots));bzero(&target_task,sizeof(target_task));
- task_lookups=ident_reads=collector_calls=io_calls=io_closes=io_begins=0;eligible=true;atomic_hook=NULL;atomic_before=NULL;
+ task_lookups=ident_reads=collector_calls=io_calls=io_closes=io_begins=0;eligible=true;atomic_hook=NULL;atomic_before=NULL;atomic_load_hook=atomic_store_hook=NULL;
 }
 static void load_common(void) {
  common();load_reset();sweet_load_prepare(0);sweet_load_begin();sweet_load_register(0,&regs);sweet_load_dump(0);
@@ -297,7 +323,7 @@ int main(void) {
 
     def test_policy_arithmetic_and_full_width_console_roundtrip(self):
         # Reuse the real console functions from the established255-byte regression fixture.
-        prefix=PREFIX[:PREFIX.index('#define os_atomic_load')]+r'''
+        prefix=(PREFIX[:PREFIX.index('/* Host atomics')]+'\n#define os_atomic(t) t\n')+r'''
 #define SERIALMODE_SYNCDRAIN 1
 static int serialmode;static char delivered[4096];static size_t delivered_size;
 static void console_write(char *s,int n){assert(n>=0 && delivered_size+(size_t)n<sizeof(delivered));memcpy(delivered+delivered_size,s,(size_t)n);delivered_size+=(size_t)n;delivered[delivered_size]=0;}
@@ -314,7 +340,7 @@ int main(void){
  char line[1024];memset(line,'x',300);line[300]='\n';line[301]=0;route(line);assert(delivered_size==255 && !strchr(delivered,'\n'));delivered_size=0;
  struct sweet_load_snapshot p;memset(&p,255,sizeof(p));p.status=0;p.captured=8;
  int n=sweet_load_process_format(line,256,39,1,INT32_MIN,UINT64_MAX,UINT32_MAX,UINT64_MAX,&p);assert(n>0);route(line);assert(delivered_size==(size_t)n);fputs(delivered,stdout);delivered_size=0;
- struct sweet_load_thread t;memset(&t,255,sizeof(t));t.status=0;t.priority=t.base_priority=t.wait_result=INT32_MIN;
+ struct sweet_load_thread t;memset(&t,255,sizeof(t));t.status=0;t.ufs_wait=3;t.priority=t.base_priority=t.wait_result=INT32_MIN;
  n=sweet_load_thread_format(line,256,39,1,7,&t);assert(n>0);route(line);assert(delivered_size==(size_t)n);fputs(delivered,stdout);delivered_size=0;
  struct sweet_ufs_load_group g;memset(&g,255,sizeof(g));
  for(unsigned i=0;i<5;++i){n=sweet_ufs_load_format(line,256,39,i,&g);assert(n>0);route(line);assert(delivered_size==(size_t)n);fputs(delivered,stdout);delivered_size=0;}
@@ -338,7 +364,7 @@ int main(void){
     def test_parser_rejects_missing_duplicate_and_cross_generation_deltas(self):
         line='SWEET LOADT: v=1 s=39 g=1 j=0 th=0x1 q=1\n'
         self.assertNotIn('u',parse_record(line)['values'])
-        for invalid in (line[:-1],line.replace('v=1','v=2'),line.replace('q=1','q=1 u=0'),line.replace('g=1','g=2'),line.replace('th=0x1','th=0x1 th=0x1')):
+        for invalid in (line[:-1],line.replace('v=1','v=3'),line.replace('q=1','q=1 u=0'),line.replace('g=1','g=2'),line.replace('th=0x1','th=0x1 th=0x1')):
             with self.assertRaises(ValueError): parse_record(invalid)
         a=dict(boot='a',g=0,id=1,iv=1,th=2,u=10,k=20,b=1,z=2);b=dict(a,u=15,k=22,b=3,z=4)
         self.assertEqual(accounting_delta(a,b),7)
@@ -350,7 +376,7 @@ int main(void){
         if os.environ.get('SWEET_LOAD_SOURCE_DIR'):
             directory=Path(os.environ['SWEET_LOAD_SOURCE_DIR'])
             for path,text in SOURCE.items(): self.assertEqual((directory/path).read_text(encoding='latin-1'),text,path)
-            self.assertEqual((directory/'osfmk/kern/Makefile').read_text(),fixture.fragment('osfmk/kern/Makefile',PATCH))
+            self.assertEqual((directory/'osfmk/kern/Makefile').read_text(),fixture.fragment('osfmk/kern/Makefile',BASE_PATCH))
         old=old_fragment(PATHS[0])
         for name in ('sweet_bbpc_trace','sweet_bbvm_enter','sweet_bbvm_leave','sweet_ff_fault_trace','sweet_ff_screen_dump','sweet_ff_dump'):
             self.assertEqual(function(SAMPLER,name),function(old,name),name)
@@ -358,18 +384,31 @@ int main(void){
         for name in ('ufs_scsi_on_lun_timeout','ufs_sync_cache','sweet_log_thread'):
             self.assertEqual(function(UFS,name),function(old_fragment(PATHS[1]),name),name)
         self.assertEqual(function(EXCEPTION,'sweet_sample_task'),function(old_fragment(PATHS[2]),'sweet_sample_task'))
-        for word in ('proc_iterate','proc_find','vm_map_read_user','task_deallocate','thread_deallocate','printf','wait_event','runq'):
+        for word in ('proc_iterate','proc_find','vm_map_read_user','task_deallocate','thread_deallocate','printf','runq'):
             self.assertNotIn(word,function(EXCEPTION,'sweet_load_collect'))
         self.assertNotIn('task_deallocate',GUI_HELPERS)
-        self.assertEqual(PATCH.read_text().count('diff --git '),6)
-        self.assertIn('SweetLoadProgress.h',fixture.fragment('osfmk/kern/Makefile',PATCH))
+        self.assertEqual(PATCH.read_text().count('diff --git '),5)
+        self.assertEqual(function(LOCK,'sweet_load_ufs_wait_class').count('LCK_MTX_EVENT(known)'),1)
+        self.assertNotIn('LCK_EVENT_TO_MUTEX',function(LOCK,'sweet_load_ufs_wait_class'))
+        self.assertEqual(function(EXCEPTION,'sweet_load_collect').count('thread->wait_event'),1)
+        self.assertIn('SweetLoadProgress.h',fixture.fragment('osfmk/kern/Makefile',BASE_PATCH))
 
     def test_actual_collector_bounded_locks_lifetimes_and_unknowns(self):
         mock=r'''
 #define DEVELOPMENT 1
 struct recount_times_mach {uint64_t rtm_user,rtm_system;};
-struct thread {struct thread *next;uint64_t tid;int sched_lock;uint32_t state,block_hint;int sched_pri,base_pri,wait_result;};
+struct thread {struct thread *next;uint64_t tid;int sched_lock;uint32_t state,block_hint;uint64_t wait_event;int sched_pri,base_pri,wait_result;};
 typedef struct thread *thread_t;
+#define TH_WAIT 1u
+#define TH_RUN 4u
+#define TH_WAKING 256u
+#define kThreadWaitNone 0u
+#define kThreadWaitKernelMutex 1u
+typedef struct {uint64_t prefix[2];struct {uint32_t data;} lck_mtx;} lck_mtx_t;
+static lck_mtx_t known_mutex;static bool known_available=true;
+static lck_mtx_t *sweet_ufs_load_mutex(void){return known_available?&known_mutex:NULL;}
+#define CAST_EVENT64_T(p) ((uint64_t)(uintptr_t)(p))
+#define LCK_MTX_EVENT(lck)      CAST_EVENT64_T(&(lck)->lck_mtx.data)
 struct task {bool active;uint32_t thread_count;struct thread *threads;};typedef struct task *task_t;
 static bool task_held,spl_held,thread_held,busy;static unsigned tries,tasktries,reads,clocks;static int thread_lck_grp;
 typedef int spl_t;
@@ -385,7 +424,7 @@ static struct recount_times_mach recount_task_times(task_t t){assert(t && task_h
 static struct recount_times_mach recount_thread_times(thread_t t){assert(t && task_held && spl_held && thread_held);++reads;return (struct recount_times_mach){t->tid,t->tid+1};}
 #define queue_iterate(head,item,type,field) for((item)=*(head);(item);(item)=(item)->next)
 '''
-        self.compile_run(GUI_POLICY+mock+function(EXCEPTION,'sweet_load_collect')+r'''
+        self.compile_run(GUI_POLICY+mock+function(LOCK,'sweet_load_ufs_wait_class')+function(EXCEPTION,'sweet_load_collect')+r'''
 int main(void){
  struct task task={.active=true,.thread_count=12};struct thread threads[12]={0};task.threads=threads;
  for(unsigned i=0;i<12;++i){threads[i].next=i==11?NULL:&threads[i+1];threads[i].tid=i+1;threads[i].state=3;threads[i].block_hint=5;}
@@ -399,11 +438,20 @@ int main(void){
  char line[256];assert(sweet_load_kind("backboardd")==0 && sweet_load_admitting(SWEET_LOAD_OPEN));
  assert(sweet_load_process_format(line,sizeof(line),0,0,1,2,3,4,&out)>0);
  assert(sweet_load_thread_format(line,sizeof(line),0,0,0,&out.threads[0])>0);
+ threads[0].state=TH_WAIT|8;threads[0].block_hint=kThreadWaitKernelMutex;threads[0].wait_event=LCK_MTX_EVENT(&known_mutex);
+ sweet_load_collect(&task,&out);assert(out.threads[0].ufs_wait==3);
+ threads[0].wait_event=UINT64_MAX;sweet_load_collect(&task,&out);assert(out.threads[0].ufs_wait==2);
+ known_available=false;sweet_load_collect(&task,&out);assert(out.threads[0].ufs_wait==0);known_available=true;
+ threads[0].state=TH_WAIT|TH_WAKING;sweet_load_collect(&task,&out);assert(out.threads[0].ufs_wait==0);
+ threads[0].state=TH_WAIT|TH_RUN;sweet_load_collect(&task,&out);assert(out.threads[0].ufs_wait==0);
+ threads[0].state=TH_WAIT;threads[0].block_hint=2;sweet_load_collect(&task,&out);assert(out.threads[0].ufs_wait==1);
+ threads[0].block_hint=0;sweet_load_collect(&task,&out);assert(out.threads[0].ufs_wait==0);
+ threads[0].state=TH_RUN;sweet_load_collect(&task,&out);assert(out.threads[0].ufs_wait==1);
  puts("PASS");return 0;
 }
-''',prefix=PREFIX[:PREFIX.index('#define os_atomic_load')])
+''',prefix=(PREFIX[:PREFIX.index('/* Host atomics')]+'\n#define os_atomic(t) t\n'))
 
-    def ufs(self, body, extra=''):
+    def ufs(self, body, extra='', expect='PASS'):
         helpers=UFS[UFS.index('static uint32_t sweet_ufs_load_state;'):UFS.index('\n#endif\n\nstatic inline uint32_t\nufs_rd')]
         mock=r'''
 #define DEVELOPMENT 1
@@ -419,14 +467,14 @@ typedef char *caddr_t;
 struct buffer {uint64_t block;uint32_t count,resid;int flags,error,mapfail;char data[32768];};typedef struct buffer *buf_t;
 static char bounce[BOUNCE_SIZE];static struct {bool dali,ready,writable;uint64_t nblocks,first_block;uint32_t secsize;uintptr_t dma;uint8_t lun;} su={true,true,true,1024,500,512,(uintptr_t)bounce,2};
 #define DMA_BOUNCE 0
-static int sweet_ufs_lock;static bool held,snapshot_busy;static unsigned tries,clocks,lines,commands;static uint64_t now;
-static int error_code;static unsigned trace[1024],trace_count;static void (*command_hook)(void);
+typedef int lck_mtx_t;static lck_mtx_t sweet_ufs_lock;static bool held,snapshot_busy;static unsigned tries,clocks,lines,commands;static uint64_t now;
+static int error_code;static unsigned trace[1024],trace_count;static void (*command_hook)(void);static void (*io_route)(const char *);
 static void event(unsigned value){assert(trace_count<1024);trace[trace_count++]=value;}
 static void lck_mtx_lock(int *p){assert(p==&sweet_ufs_lock && !held);event(1);held=true;now+=5;}
 static void lck_mtx_unlock(int *p){assert(p==&sweet_ufs_lock && held);held=false;event(2);}
-static bool lck_mtx_try_lock(int *p){assert(p==&sweet_ufs_lock);++tries;if(snapshot_busy || held)return false;held=true;return true;}
+static __attribute__((unused)) bool lck_mtx_try_lock(int *p){assert(p==&sweet_ufs_lock);++tries;if(snapshot_busy || held)return false;held=true;return true;}
 static uint64_t mach_absolute_time(void){++clocks;return now;}
-static int output(const char *fmt,...){assert(!held);char text[512];va_list a;va_start(a,fmt);int n=vsnprintf(text,sizeof(text),fmt,a);va_end(a);assert(n>0 && n<=255);++lines;return n;}
+static int output(const char *fmt,...){assert(!held);char text[512];va_list a;va_start(a,fmt);int n=vsnprintf(text,sizeof(text),fmt,a);va_end(a);assert(n>0 && n<=255);if(io_route)io_route(text);++lines;return n;}
 #define printf output
 static int ufs_scsi_on_lun_timeout(uint8_t lun,const uint8_t *cdb,unsigned size,uint32_t length,bool write,uint64_t timeout){assert(held && lun==2 && size==10 && timeout==CMD_TIMEOUT_NS);event(cdb[0]);event(length);event(write);++commands;now+=10;if(command_hook)command_hook();return error_code;}
 static uint64_t buf_blkno(buf_t b){return b->block;}
@@ -447,10 +495,11 @@ static int ufs_write_blocks(uint64_t lba,uint32_t count){assert(lba>=su.first_bl
 #undef printf
 static void reset_io(void){
  sweet_ufs_load_state=0;sweet_ufs_load_dumped=0;bzero(&sweet_ufs_load_counts,sizeof(sweet_ufs_load_counts));held=snapshot_busy=false;
- trace_count=tries=clocks=lines=commands=0;now=0;error_code=0;command_hook=NULL;atomic_hook=NULL;atomic_before=NULL;su.dali=su.ready=su.writable=true;
+ bzero(&sweet_ufs_load_published,sizeof(sweet_ufs_load_published));atomic_load_hook=atomic_store_hook=NULL;
+ trace_count=tries=clocks=lines=commands=0;now=0;error_code=0;command_hook=NULL;atomic_hook=NULL;atomic_before=NULL;io_route=NULL;su.dali=su.ready=su.writable=true;
 }
 '''
-        self.compile_run(IO_POLICY+mock+helpers+function(UFS,'ufs_scsi')+io+function(UFS,'sweet_ufs_strategy')+old+tail+extra+body)
+        return self.compile_run(IO_POLICY+mock+helpers+function(UFS,'ufs_scsi')+io+function(UFS,'sweet_ufs_strategy')+old+tail+extra+body,expect=expect)
 
     def test_actual_ufs_strategy_behavior_differential(self):
         self.ufs(r'''
@@ -484,11 +533,11 @@ int main(void){
  command_hook=close_in_command;sweet_ufs_strategy(&b);assert(!sweet_ufs_load_counts.groups[0].count && !sweet_ufs_load_counts.groups[3].count);
  reset_io();sweet_ufs_load_begin();sweet_ufs_load_begin();sweet_ufs_strategy(&b);assert(sweet_ufs_load_counts.groups[0].elapsed==10 && sweet_ufs_load_counts.groups[3].wait==5);
  for(unsigned i=0;i<40;++i){snapshot_busy=i==39;sweet_ufs_load_dump(i);sweet_ufs_load_dump(i);}
- assert(tries==40 && sweet_ufs_load_state==2 && sweet_ufs_load_dumped==40 && lines==236);
+ assert(tries==0 && sweet_ufs_load_state==2 && sweet_ufs_load_dumped==40 && lines==241);
  unsigned c=clocks;uint64_t count=sweet_ufs_load_counts.groups[0].count;sweet_ufs_strategy(&b);assert(clocks==c && sweet_ufs_load_counts.groups[0].count==count);
- sweet_ufs_load_begin();sweet_ufs_load_dump(40);assert(tries==40);
+ sweet_ufs_load_begin();sweet_ufs_load_dump(40);assert(tries==0);
  reset_io();sweet_ufs_load_begin();for(unsigned i=0;i<40;++i)sweet_ufs_load_dump(i);
- assert(tries==40 && lines==241 && clocks==80);puts("PASS");return 0;
+ assert(tries==0 && lines==41 && clocks==40); /* no returned calls published */puts("PASS");return 0;
 }
 ''')
 
@@ -603,7 +652,143 @@ int main(void){
  assert(sweet_ufs_load_kind(0x35)==2 && !sweet_ufs_load_format(line,1,0,0,&c.groups[0]));puts("PASS");return 0;
 }
 '''
-        self.compile_run(code,prefix=PREFIX[:PREFIX.index('#define os_atomic_load')])
+        self.compile_run(code,prefix=(PREFIX[:PREFIX.index('/* Host atomics')]+'\n#define os_atomic(t) t\n'))
+
+    def test_actual_mirror_reads_while_old_try_snapshot_is_busy(self):
+        old=function(old_fragment('bsd/dev/sweet_ufs.c',PATCH),'sweet_ufs_load_dump').replace('sweet_ufs_load_dump(', 'old_dump(')
+        old='#define printf output\n'+old+'\n#undef printf\n'
+        self.ufs(r'''
+int main(void){
+ reset_io();struct buffer b={.count=4096,.flags=B_READ};old_strategy(&b);reset_io();sweet_ufs_load_begin();sweet_ufs_strategy(&b);
+ struct sweet_ufs_load_counters copy;uint64_t generation=0,stamp=0;
+ assert(sweet_ufs_load_read(&copy,&generation,&stamp)==0 && generation==4 && stamp==now);
+ assert(copy.groups[0].count==1 && copy.groups[3].count==1);
+ held=true;assert(sweet_ufs_load_read(&copy,&generation,&stamp)==0);held=false;
+ snapshot_busy=true;unsigned n=lines;old_dump(0);assert(tries==1 && lines==n+1);
+ sweet_ufs_load_dump(1);assert(tries==1 && lines==n+7); /* five groups despite oldmutexbusy */
+ assert(sweet_ufs_load_mutex()==&sweet_ufs_lock);su.dali=false;assert(!sweet_ufs_load_mutex());su.dali=true;
+ assert(sizeof(sweet_ufs_load_counts)+sizeof(sweet_ufs_load_copy)+sizeof(sweet_ufs_load_published)+8+32+256<=2048);
+ puts("PASS");return 0;
+}
+''',old)
+
+    def test_actual_publication_overlap_and_terminal_generation(self):
+        self.ufs(r'''
+static unsigned cross_reads,odd_reads;
+static void publish_across_read(const void *p){
+ if(p==&sweet_ufs_load_published.groups[0].bytes){atomic_load_hook=NULL;sweet_ufs_load_counts.groups[0].count+=1;sweet_ufs_load_publish(0,999);++cross_reads;}
+}
+static void inspect_odd(const void *p){
+ if(p==&sweet_ufs_load_published.generation){atomic_store_hook=NULL;struct sweet_ufs_load_counters c;uint64_t g=0,t=77;assert(sweet_ufs_load_read(&c,&g,&t)==2 && (g&1) && t==77);++odd_reads;}
+}
+int main(void){
+ reset_io();struct buffer b={.count=4096,.flags=B_READ};old_strategy(&b);reset_io();sweet_ufs_load_begin();
+ struct sweet_ufs_load_counters c;uint64_t g=42,t=77;assert(sweet_ufs_load_read(&c,&g,&t)==1 && g==0 && t==77);
+ atomic_store_hook=inspect_odd;sweet_ufs_strategy(&b);assert(odd_reads==1);
+ atomic_load_hook=publish_across_read;assert(sweet_ufs_load_read(&c,&g,&t)==3 && cross_reads==1 && t==77);
+ assert(sweet_ufs_load_read(&c,&g,&t)==0 && c.groups[0].count==2 && t==999);
+ os_atomic_store(&sweet_ufs_load_published.generation,UINT64_MAX-3,seq_cst);
+ sweet_ufs_load_publish(0,123);assert(sweet_ufs_load_read(&c,&g,&t)==0 && g==UINT64_MAX-1 && t==123);
+ sweet_ufs_load_publish(0,124);assert(sweet_ufs_load_read(&c,&g,&t)==4 && g==UINT64_MAX);
+ sweet_ufs_load_publish(0,125);assert(os_atomic_load(&sweet_ufs_load_published.generation,seq_cst)==UINT64_MAX);
+ /* Counter updates and real strategy continue after visibility is exhausted. */
+ uint64_t count=sweet_ufs_load_counts.groups[0].count;sweet_ufs_strategy(&b);assert(sweet_ufs_load_counts.groups[0].count==count+1 && !held);
+ puts("PASS");return 0;
+}
+''')
+
+    def test_atomic_mirror_parallel_serialized_writers_never_accept_torn_copy(self):
+        self.ufs(r'''
+static pthread_mutex_t publication_lock=PTHREAD_MUTEX_INITIALIZER;static unsigned done;
+static void *publish_many(void *arg){
+ unsigned kind=(unsigned)(uintptr_t)arg;
+ for(unsigned i=0;i<20000;++i){
+  assert(!pthread_mutex_lock(&publication_lock));struct sweet_ufs_load_group *g=&sweet_ufs_load_counts.groups[kind];
+  uint64_t n=g->count+1;*g=(struct sweet_ufs_load_group){.count=n,.bytes=n*4096,.errors=n*2,.valid=n*3,.elapsed=n*4,.maximum=n*5,.bad_clock=n*6,.wait=n*7,.wait_maximum=n*8};
+  sweet_ufs_load_publish(kind,n);assert(!pthread_mutex_unlock(&publication_lock));
+ }
+ __atomic_add_fetch(&done,1,__ATOMIC_SEQ_CST);return NULL;
+}
+int main(void){
+ reset_io();struct buffer b={.count=4096,.flags=B_READ};old_strategy(&b);reset_io();sweet_ufs_load_begin();sweet_ufs_strategy(&b);reset_io();
+ pthread_t a,bthread;assert(!pthread_create(&a,NULL,publish_many,(void *)(uintptr_t)0) && !pthread_create(&bthread,NULL,publish_many,(void *)(uintptr_t)1));
+ unsigned accepted=0;
+ for(unsigned i=0;i<200000 && __atomic_load_n(&done,__ATOMIC_SEQ_CST)<2;++i){
+  struct sweet_ufs_load_counters copy;uint64_t generation=0,stamp=0;uint32_t q=sweet_ufs_load_read(&copy,&generation,&stamp);
+  assert(q<=3);if(q)continue;++accepted;
+  for(unsigned j=0;j<2;++j){struct sweet_ufs_load_group *g=&copy.groups[j];uint64_t n=g->count;assert(g->bytes==n*4096 && g->errors==n*2 && g->valid==n*3 && g->elapsed==n*4 && g->maximum==n*5 && g->bad_clock==n*6 && g->wait==n*7 && g->wait_maximum==n*8);}
+  assert(generation/2==copy.groups[0].count+copy.groups[1].count);
+ }
+ pthread_join(a,NULL);pthread_join(bthread,NULL);struct sweet_ufs_load_counters copy;uint64_t generation=0,stamp=0;
+ assert(sweet_ufs_load_read(&copy,&generation,&stamp)==0 && generation==80000 && copy.groups[0].count==20000 && copy.groups[1].count==20000);
+ assert(done==2);(void)accepted;puts("PASS");return 0;
+}
+''')
+
+    def test_canonical_known_mutex_comparison_without_event_dereference(self):
+        # A nonzero offset catches the tempting but incorrect event==mutex-base test.
+        declaration=r'''
+typedef struct {uint64_t prefix[2];struct {uint32_t data;} lck_mtx;} lck_mtx_t;
+static lck_mtx_t known;static bool available=true;
+static lck_mtx_t *sweet_ufs_load_mutex(void){return available?&known:NULL;}
+#define CAST_EVENT64_T(p) ((uint64_t)(uintptr_t)(p))
+'''
+        macro=next(line for line in LOCK.splitlines() if line.startswith('#define LCK_MTX_EVENT('))
+        self.compile_run(GUI_POLICY+declaration+macro+'\n'+function(LOCK,'sweet_load_ufs_wait_class')+r'''
+int main(void){
+ assert((uintptr_t)&known!=(uintptr_t)&known.lck_mtx.data);
+ assert(sweet_load_ufs_wait_class(LCK_MTX_EVENT(&known))==3);
+ assert(sweet_load_ufs_wait_class((uint64_t)(uintptr_t)&known)==2);
+ assert(sweet_load_ufs_wait_class(UINT64_MAX)==2 && sweet_load_ufs_wait_class(1)==2);
+ assert(sweet_load_ufs_wait_class(0)==0);available=false;assert(sweet_load_ufs_wait_class(1)==0);
+ char line[256];struct sweet_load_snapshot p={0};struct sweet_load_thread t={0};
+ assert(sweet_load_kind("backboardd")==0 && sweet_load_admitting(SWEET_LOAD_OPEN));
+ assert(sweet_load_process_format(line,sizeof(line),0,0,1,2,3,4,&p)>0 && sweet_load_thread_format(line,sizeof(line),0,0,0,&t)>0);
+ puts("PASS");return 0;
+}
+''',prefix=(PREFIX[:PREFIX.index('/* Host atomics')]+'\n#define os_atomic(t) t\n'))
+
+    def test_versioned_wait_and_publication_status_preserve_old_missing_fields(self):
+        old='SWEET LOADT: v=1 s=39 g=0 j=0 th=0x137 q=0 st=9 h=1 pr=46 bp=31 wr=-1 b=1 z=2 u=3 k=4\n'
+        self.assertNotIn('uw',parse_record(old)['values'])
+        new=old.replace('v=1','v=2').replace('h=1','h=1 uw=3')
+        self.assertEqual(parse_record(new)['values']['uw'],3)
+        for bad in (new.replace('uw=3','uw=4'),old.replace('v=1','v=2'),new.replace('uw=3','uw=3 uw=3'),new[:-1]):
+            with self.assertRaises(ValueError):parse_record(bad)
+        oldbusy='SWEET LOADIO STATUS: v=1 s=39 at=0 q=1 final=1 pending=unknown\n'
+        self.assertNotIn('gn',parse_record(oldbusy)['values'])
+        good='SWEET LOADIO STATUS: v=2 s=39 at=0 z=1 q=0 gn=2 src=0 ov=0 final=1 pending=unknown\n'
+        self.assertEqual(parse_record(good)['values']['gn'],2)
+        for q,gn in ((1,'0'),(2,'3'),(3,'4'),(4,hex((1<<64)-1))):
+            row=f'SWEET LOADIO STATUS: v=2 s=39 at=0 q={q} gn={gn} final=1 pending=unknown\n'
+            self.assertNotIn('src',parse_record(row)['values'])
+        for bad in (good.replace('gn=2','gn=0'),good.replace('gn=2','gn=3'),good.replace(' src=0',''),good.replace('v=2','v=3')):
+            with self.assertRaises(ValueError):parse_record(bad)
+
+
+    def test_actual_v2_status_worst_width_through_real_console(self):
+        route=r"""
+#define SERIALMODE_SYNCDRAIN 1
+static int serialmode;static char delivered[8192];static size_t delivered_size;
+static void console_write(char *s,int n){assert(n>=0 && delivered_size+(size_t)n<sizeof(delivered));memcpy(delivered+delivered_size,s,(size_t)n);delivered_size+=(size_t)n;delivered[delivered_size]=0;}
+"""+ipc.CONSOLE_SOURCE+r"""
+static void real_route(const char *line){struct console_printbuf_state s;console_printbuf_state_init(&s,1,1);for(const char *p=line;*p;++p)console_printbuf_putc(*p,&s);console_printbuf_clear(&s);}
+"""
+        output=self.ufs(r"""
+int main(void){
+ reset_io();struct buffer b={.count=4096,.flags=B_READ};old_strategy(&b);reset_io();sweet_ufs_load_begin();sweet_ufs_strategy(&b);
+ memset(&sweet_ufs_load_counts,255,sizeof(sweet_ufs_load_counts));sweet_ufs_load_counts.overflow=1;
+ for(unsigned i=0;i<5;++i)sweet_ufs_load_publish(i,UINT64_MAX);
+ os_atomic_store(&sweet_ufs_load_published.generation,UINT64_MAX-1,seq_cst);
+ now=UINT64_MAX;sweet_ufs_load_dumped=39;io_route=real_route;sweet_ufs_load_dump(39);assert(lines==7 && tries==0);
+ assert(delivered_size>0);fputs(delivered,stdout);return 0;
+}
+""",route,expect=None)
+        records=[parse_record(line) for line in output.splitlines(keepends=True)]
+        self.assertEqual(len(records),6)
+        self.assertEqual(records[0]['values']['gn'],(1<<64)-2)
+        self.assertEqual(records[0]['values']['src'],(1<<64)-1)
+        self.assertTrue(all(len(record['raw_line'].encode())<=255 for record in records))
 
 
 if __name__=='__main__': unittest.main()

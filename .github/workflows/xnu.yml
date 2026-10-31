@@ -475,6 +475,13 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'scope=returned-only pending=unknown'
           nm fakeroot/System/Library/Kernels/kernel.development.sweet | grep ' _sweet_load_collect$'
           nm fakeroot/System/Library/Kernels/kernel.development.sweet | grep ' _sweet_ufs_load_dump$'
+          grep -Fq '#define SWEET_UFS_VIEW_EXHAUSTED 4u' xnu/bsd/dev/SweetUFSLoadPolicy.h
+          grep -Fq 'event == LCK_MTX_EVENT(known)' xnu/osfmk/kern/lock_mtx.c
+          grep -Fq 'sweet_load_ufs_wait_class(thread->wait_event)' xnu/osfmk/kern/exception.c
+          grep -Fq 'sweet_ufs_load_published.generation, generation + 2, seq_cst' xnu/bsd/dev/sweet_ufs.c
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET LOADT: v=2'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET LOADIO STATUS: v=2'
+          nm fakeroot/System/Library/Kernels/kernel.development.sweet | grep ' _sweet_load_ufs_wait_class$'
           grep -Fq '#define SWEET_BBIPC_RECORDS 64u' xnu/bsd/dev/SweetBackboardIPCPolicy.h
           grep -Fq '#define SWEET_BBIPC_SELECTED 4u' xnu/bsd/dev/SweetBackboardIPCPolicy.h
           grep -Fq 'bounded BBIPC state and snapshot' xnu/bsd/dev/sweet_sample.c
