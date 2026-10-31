@@ -1,0 +1,789 @@
+diff --git a/bsd/dev/sweet_sample.c b/bsd/dev/sweet_sample.c
+--- a/bsd/dev/sweet_sample.c
++++ b/bsd/dev/sweet_sample.c
+@@ -1,385 +1,523 @@
+ /*
+  * SWEET process sampler: where is a daemon stuck?
+  *
+  * The phone has no debugger and daemons log nowhere readable. Every
+  * interval a kernel thread prints, for each process named in boot-arg
+  * sweetsample (comma separated, default "SpringBoard,backboardd"; "-" = off)
+  * and for each of its threads, the user pc/lr/sp and a frame-pointer
+  * backtrace as "SMP name[pid] tN pc ... lr ... bt ..." (header line with the
+  * shared region slide and the main binary's mach header, to symbolicate
+  * with tools/sweet-crash.py). A thread blocked in a syscall shows the
+  * syscall stub in pc and its caller in lr/bt.
+  *
+  * Sampling delay and period are configurable in seconds (1..3600) for a bounded
+  * user stack trace when a selected service stops making progress.
+  */
+ #include <sys/param.h>
+ #include <sys/systm.h>
+ #include <sys/proc.h>
+ #include <sys/proc_internal.h>
+ #include <kern/task.h>
+ #include <kern/thread.h>
+ #include <pexpert/pexpert.h>
+ 
+ 
+ #if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
+ #include <arm64/proc_reg.h>
+ #include <libkern/OSAtomic.h>
+ #include "SweetFeatureTrace.h"
+ 
+ static unsigned int sweet_ff_enabled;
+ static volatile UInt32 sweet_ff_guard, sweet_ff_dropped;
+ static struct sweet_ff_ring sweet_ff_events;
+ 
+ #include <kern/clock.h>
+ #include "SweetBackboardPCPolicy.h"
+ 
+ static volatile UInt32 sweet_bbpc_configured, sweet_bbpc_active;
+ static volatile UInt32 sweet_bbpc_guard, sweet_bbpc_dropped;
+ static uint64_t sweet_bbpc_interval;
+ static struct sweet_bbpc_buffer sweet_bbpc_events;
+ 
+ void sweet_bbpc_trace(struct arm_saved_state *, struct arm_saved_state *, unsigned int);
+ 
+ /* Single CAS loads use the public OSAtomic acquire/release contract, not volatile. */
+ static bool
+ sweet_bbpc_is_configured(void)
+ {
+     return OSCompareAndSwap(1, 1, &sweet_bbpc_configured);
+ }
+ 
+ /* Called only in normal startup; IRQ admission remains off until the consumer starts. */
+ static void
+ sweet_bbpc_prepare(unsigned int requested)
+ {
+     if (requested != 1 || sweet_ff_enabled != 3)
+         return;
+     uint64_t ticks = 0, ns = 0;
+     nanoseconds_to_absolutetime(SWEET_BBPC_INTERVAL_NS, &ticks);
+     absolutetime_to_nanoseconds(ticks, &ns);
+     ticks = sweet_bbpc_ceil_ticks(ticks, ns);
+     if (ticks == 0)
+         return;
+     absolutetime_to_nanoseconds(ticks, &ns);
+     if (ns < SWEET_BBPC_INTERVAL_NS)
+         return;
+     sweet_bbpc_interval = ticks;
+     (void)OSCompareAndSwap(0, 1, &sweet_bbpc_configured);
+ }
+ 
+ static void
+ sweet_bbpc_begin(void)
+ {
+     if (sweet_bbpc_is_configured()) {
+         (void)OSCompareAndSwap(0, 1, &sweet_bbpc_active);
+         printf("SWEET BBPC CONFIG: source=gic-vtimer-el0 interval=30s limit=40 interval_abs=0x%llx\n",
+             (unsigned long long)sweet_bbpc_interval);
+     }
+ }
+ 
+ /* Only the proven SWEET GIC timer branch supplies this IRQ's published frame. */
+ void
+ sweet_bbpc_trace(struct arm_saved_state *state, struct arm_saved_state *published,
+     unsigned int cpu)
+ {
+     if (!OSCompareAndSwap(1, 1, &sweet_bbpc_active) || state == NULL ||
+         state != published || !is_saved_state64(state) ||
+         !PSR64_IS_USER64(get_saved_state_cpsr(state)))
+         return;
+     proc_t p = current_proc();
+     if (p == PROC_NULL || !sweet_ff_target(3, p->p_comm))
+         return;
+     if (!OSCompareAndSwap(0, 1, &sweet_bbpc_guard)) {
+         (void)OSCompareAndSwap(0, 1, &sweet_bbpc_dropped);
+         return;
+     }
+     if (OSCompareAndSwap(1, 1, &sweet_bbpc_active)) {
+         struct sweet_bbpc_event event = {
+             .cpu = cpu, .cpsr = get_saved_state_cpsr(state), .pid = proc_pid(p),
+             .tid = thread_tid(current_thread()), .pc = get_saved_state_pc(state),
+             .lr = get_saved_state_lr(state), .sp = get_saved_state_sp(state),
+             .abstime = mach_absolute_time(),
+         };
+         (void)sweet_bbpc_record(&sweet_bbpc_events, sweet_bbpc_interval, &event);
+         if (sweet_bbpc_events.clock_stopped || sweet_bbpc_events.total >= SWEET_BBPC_LIMIT)
+             (void)OSCompareAndSwap(1, 0, &sweet_bbpc_active);
+     }
+     (void)OSCompareAndSwap(1, 0, &sweet_bbpc_guard);
+ }
+ 
+ /* No IRQ output. The existing normal consumer owns this static snapshot. */
+ static void
+ sweet_bbpc_dump(unsigned int sample)
+ {
+     static struct sweet_bbpc_event snapshot[SWEET_BBPC_LIMIT];
+     if (!sweet_bbpc_is_configured())
+         return;
+     if (sample == 39)
+         (void)OSCompareAndSwap(1, 0, &sweet_bbpc_active);
+     if (!OSCompareAndSwap(0, 1, &sweet_bbpc_guard)) {
+         printf("SWEET BBPC: sample=%u busy=1 final=%u; snapshot incomplete\n", sample, sample == 39);
+         return;
+     }
+     uint32_t count = sweet_bbpc_snapshot(&sweet_bbpc_events, snapshot);
+     uint32_t total = sweet_bbpc_events.total;
+     bool stopped = sweet_bbpc_events.clock_stopped;
+     bool dropped = OSCompareAndSwap(1, 0, &sweet_bbpc_dropped);
+     (void)OSCompareAndSwap(1, 0, &sweet_bbpc_guard);
+     printf("SWEET BBPC: sample=%u count=%u accepted=%u busy_drop=%u clock_stop=%u final=%u\n",
+         sample, count, total, dropped, stopped, sample == 39);
+     for (uint32_t i = 0; i < count; ++i) {
+         const struct sweet_bbpc_event *e = &snapshot[i];
+         printf("SWEET BBPC: n=%u source=gic-vtimer-el0 pid=%d tid=%llu cpu=%u "
+             "abs=0x%llx pc=0x%llx lr=0x%llx sp=0x%llx cpsr=0x%x\n",
+             e->seq, e->pid, (unsigned long long)e->tid, e->cpu,
+             (unsigned long long)e->abstime, (unsigned long long)e->pc,
+             (unsigned long long)e->lr, (unsigned long long)e->sp, e->cpsr);
+     }
+ }
+ 
+ 
++#include "SweetBackboardVMPolicy.h"
++
++static volatile UInt32 sweet_bbvm_configured, sweet_bbvm_open, sweet_bbvm_admit;
++static volatile UInt32 sweet_bbvm_guard, sweet_bbvm_begin_busy, sweet_bbvm_end_busy;
++static uint64_t sweet_bbvm_interval;
++static struct sweet_bbvm_buffer sweet_bbvm_events;
++
++uint32_t sweet_bbvm_enter(struct arm_saved_state *, uint32_t, uint64_t, uint64_t, uint32_t);
++void sweet_bbvm_leave(uint32_t, int32_t);
++
++static bool
++sweet_bbvm_is_configured(void)
++{
++    return OSCompareAndSwap(1, 1, &sweet_bbvm_configured);
++}
++
++static void
++sweet_bbvm_prepare(unsigned int requested)
++{
++    if (requested != 1 || sweet_ff_enabled != 3)
++        return;
++    uint64_t ticks = 0, ns = 0;
++    nanoseconds_to_absolutetime(SWEET_BBVM_INTERVAL_NS, &ticks);
++    absolutetime_to_nanoseconds(ticks, &ns);
++    ticks = sweet_bbvm_ceil_ticks(ticks, ns);
++    if (ticks == 0)
++        return;
++    absolutetime_to_nanoseconds(ticks, &ns);
++    if (ns < SWEET_BBVM_INTERVAL_NS)
++        return;
++    sweet_bbvm_interval = ticks;
++    (void)OSCompareAndSwap(0, 1, &sweet_bbvm_configured);
++}
++
++static void
++sweet_bbvm_begin(void)
++{
++    if (sweet_bbvm_is_configured()) {
++        (void)OSCompareAndSwap(0, 1, &sweet_bbvm_open);
++        (void)OSCompareAndSwap(0, 1, &sweet_bbvm_admit);
++        printf("SWEET BBVM CONFIG: source=user-vm-call interval=30s limit=40 interval_abs=0x%llx\n",
++            (unsigned long long)sweet_bbvm_interval);
++    }
++}
++
++/* A scalar token, not an object/frame pointer, crosses the possibly blocking VM call. */
++uint32_t
++sweet_bbvm_enter(struct arm_saved_state *state, uint32_t esr, uint64_t far,
++    uint64_t address, uint32_t prot)
++{
++    if (!OSCompareAndSwap(1, 1, &sweet_bbvm_admit) || state == NULL ||
++        !is_saved_state64(state) || !PSR64_IS_USER64(get_saved_state_cpsr(state)))
++        return 0;
++    proc_t p = current_proc();
++    if (p == PROC_NULL || !sweet_ff_target(3, p->p_comm))
++        return 0;
++    if (!OSCompareAndSwap(0, 1, &sweet_bbvm_guard)) {
++        (void)OSCompareAndSwap(0, 1, &sweet_bbvm_begin_busy);
++        return 0;
++    }
++    uint32_t token = 0;
++    if (OSCompareAndSwap(1, 1, &sweet_bbvm_open) &&
++        OSCompareAndSwap(1, 1, &sweet_bbvm_admit)) {
++        struct sweet_bbvm_event event = {
++            .pid = proc_pid(p), .tid = thread_tid(current_thread()),
++            .pc = get_saved_state_pc(state), .lr = get_saved_state_lr(state),
++            .sp = get_saved_state_sp(state), .cpsr = get_saved_state_cpsr(state),
++            .esr = esr, .far = far, .address = address, .prot = prot,
++            .start = mach_absolute_time(),
++        };
++        token = sweet_bbvm_enter_record(&sweet_bbvm_events, sweet_bbvm_interval, &event);
++        if (sweet_bbvm_events.clock_stopped || sweet_bbvm_events.total >= SWEET_BBVM_LIMIT)
++            (void)OSCompareAndSwap(1, 0, &sweet_bbvm_admit);
++    }
++    (void)OSCompareAndSwap(1, 0, &sweet_bbvm_guard);
++    return token;
++}
++
++void
++sweet_bbvm_leave(uint32_t token, int32_t result)
++{
++    if (token == 0 || token > SWEET_BBVM_LIMIT || !OSCompareAndSwap(1, 1, &sweet_bbvm_open))
++        return;
++    if (!OSCompareAndSwap(0, 1, &sweet_bbvm_guard)) {
++        (void)OSCompareAndSwap(0, 1, &sweet_bbvm_end_busy);
++        return;
++    }
++    if (OSCompareAndSwap(1, 1, &sweet_bbvm_open)) {
++        (void)sweet_bbvm_leave_record(&sweet_bbvm_events, token,
++            thread_tid(current_thread()), mach_absolute_time(), result);
++        if (sweet_bbvm_events.clock_stopped)
++            (void)OSCompareAndSwap(1, 0, &sweet_bbvm_admit);
++    }
++    (void)OSCompareAndSwap(1, 0, &sweet_bbvm_guard);
++}
++
++/* Only the existing normal sampler consumes/prints; no producer output or waiting. */
++static void
++sweet_bbvm_dump(unsigned int sample)
++{
++    static struct sweet_bbvm_event snapshot[SWEET_BBVM_EXPORTS];
++    _Static_assert(sizeof(sweet_bbvm_events) + sizeof(snapshot) +
++        6 * sizeof(UInt32) + sizeof(sweet_bbvm_interval) <= 32768,
++        "bounded BBVM persistent state and snapshot");
++    if (!sweet_bbvm_is_configured())
++        return;
++    if (sample == 39) {
++        (void)OSCompareAndSwap(1, 0, &sweet_bbvm_admit);
++        (void)OSCompareAndSwap(1, 0, &sweet_bbvm_open);
++    }
++    if (!OSCompareAndSwap(0, 1, &sweet_bbvm_guard)) {
++        printf("SWEET BBVM: sample=%u busy=1 final=%u; snapshot incomplete\n", sample, sample == 39);
++        return;
++    }
++    uint32_t count = sweet_bbvm_snapshot(&sweet_bbvm_events, snapshot);
++    uint32_t total = sweet_bbvm_events.total, completed = sweet_bbvm_events.completed;
++    uint32_t entries = sweet_bbvm_events.exported_entry, returns = sweet_bbvm_events.exported_return;
++    bool stopped = sweet_bbvm_events.clock_stopped;
++    bool begin_busy = OSCompareAndSwap(1, 1, &sweet_bbvm_begin_busy);
++    bool end_busy = OSCompareAndSwap(1, 1, &sweet_bbvm_end_busy);
++    uint64_t snapshot_abs = mach_absolute_time();
++    (void)OSCompareAndSwap(1, 0, &sweet_bbvm_guard);
++    printf("SWEET BBVM: sample=%u count=%u accepted=%u completed=%u exported_entry=%u "
++        "exported_return=%u begin_busy=%u end_busy=%u clock_stop=%u final=%u snapshot_abs=0x%llx\n",
++        sample, count, total, completed, entries, returns, begin_busy, end_busy, stopped,
++        sample == 39, (unsigned long long)snapshot_abs);
++    for (uint32_t i = 0; i < count; ++i) {
++        char line[SWEET_BBVM_LINE_BYTES];
++        if (sweet_bbvm_format(line, sizeof(line), &snapshot[i]) != 0)
++            printf("%s", line);
++    }
++}
++
+ void sweet_ff_trace(unsigned int, int, struct arm_saved_state *);
+ 
+ /* Current-thread state only: no user-memory reads or process iteration. */
+ void
+ sweet_ff_trace(unsigned int phase, int call, struct arm_saved_state *state)
+ {
+     if (!sweet_ff_svc_mode(sweet_ff_enabled))
+         return;
+     proc_t p = current_proc();
+     if (p == PROC_NULL || !sweet_ff_target(sweet_ff_enabled, p->p_comm) ||
+         !is_saved_state64(state))
+         return;
+     if (!OSCompareAndSwap(0, 1, &sweet_ff_guard)) {
+         (void)OSCompareAndSwap(0, 1, &sweet_ff_dropped);
+         return;
+     }
+     struct sweet_ff_event event = {
+         .phase = phase, .pid = proc_pid(p), .call = call,
+         .tid = thread_tid(current_thread()),
+         .pc = get_saved_state_pc(state), .lr = get_saved_state_lr(state),
+         .sp = get_saved_state_sp(state), .x0 = get_saved_state_reg(state, 0),
+         .cpsr = get_saved_state_cpsr(state),
+     };
+     (void)sweet_ff_record(&sweet_ff_events, &event);
+     (void)OSCompareAndSwap(1, 0, &sweet_ff_guard);
+ }
+ 
+ 
+ #include "SweetFeatureFault.h"
+ 
+ static unsigned int sweet_ff_screen_enabled, sweet_ff_fault_enabled;
+ static volatile UInt32 sweet_ff_fault_dropped;
+ static struct sweet_ff_fault_event sweet_ff_last_fault;
+ extern int sweet_console_muted;
+ extern void sweet_ramoops_append(const char *, int);
+ void sweet_ff_fault_trace(unsigned int, struct arm_saved_state *, uint32_t, uint64_t, int);
+ 
+ /* Pure retained-RAM breadcrumb: no printf, framebuffer, UFS or user copyin. */
+ void
+ sweet_ff_fault_trace(unsigned int phase, struct arm_saved_state *state,
+     uint32_t esr, uint64_t far, int result)
+ {
+     if (!sweet_ff_mode(sweet_ff_fault_enabled))
+         return;
+     proc_t p = current_proc();
+     if (p == PROC_NULL || !sweet_ff_target(sweet_ff_fault_enabled, p->p_comm) ||
+         !is_saved_state64(state))
+         return;
+     if (!OSCompareAndSwap(0, 1, &sweet_ff_guard)) {
+         (void)OSCompareAndSwap(0, 1, &sweet_ff_fault_dropped);
+         return;
+     }
+     struct sweet_ff_fault_event event = {
+         .phase = phase, .esr = esr, .pid = proc_pid(p), .result = result,
+         .tid = thread_tid(current_thread()), .pc = get_saved_state_pc(state),
+         .lr = get_saved_state_lr(state), .sp = get_saved_state_sp(state), .far = far,
+     };
+     bool accepted = sweet_ff_fault_record(&sweet_ff_last_fault, &event);
+     event.seq = sweet_ff_last_fault.seq;
+     (void)OSCompareAndSwap(1, 0, &sweet_ff_guard);
+     if (!accepted)
+         return;
+     char line[256];
+     int size = sweet_ff_fault_format(line, sizeof(line), &event);
+     if (size != 0)
+         sweet_ramoops_append(line, size);
+ }
+ 
+ /* Called only from the normal sampler thread, after releasing producer locks. */
+ static void
+ sweet_ff_screen_dump(unsigned int sample)
+ {
+     if (sweet_ff_screen_enabled != 1)
+         return;
+     sweet_console_muted = 0;
+     if (!OSCompareAndSwap(0, 1, &sweet_ff_guard)) {
+         printf("SWEET SCREEN: tick=%u observer-busy; diagnostic, not desktop\n", sample);
+         return;
+     }
+     uint32_t calls = sweet_ff_events.total;
+     struct sweet_ff_event last_svc = {0};
+     if (calls != 0)
+         last_svc = sweet_ff_events.events[(calls - 1) % SWEET_FF_RECORDS];
+     struct sweet_ff_fault_event fault = sweet_ff_last_fault;
+     bool dropped = OSCompareAndSwap(1, 0, &sweet_ff_fault_dropped);
+     (void)OSCompareAndSwap(1, 0, &sweet_ff_guard);
+     printf("SWEET SCREEN: tick=%u calls=%u faults=%u lost=%u full=%u\n",
+         sample, calls, fault.seq, dropped ? 1u : 0u,
+         fault.seq == SWEET_FF_FAULT_LIMIT ? 1u : 0u);
+     printf("SWEET SCREEN: last-call=%d phase=%u pc=0x%llx\n",
+         last_svc.call, last_svc.phase, (unsigned long long)last_svc.pc);
+     printf("SWEET SCREEN: last-fault phase=%u pc=0x%llx esr=0x%x result=%d\n",
+         fault.phase, (unsigned long long)fault.pc, fault.esr, fault.result);
+ }
+ 
+ /* Only the existing sampler thread calls this; no console output under guard. */
+ static void
+ sweet_ff_dump(unsigned int sample)
+ {
+     static struct sweet_ff_event snapshot[SWEET_FF_RECORDS];
+     if (!sweet_ff_svc_mode(sweet_ff_enabled))
+         return;
+     if (!OSCompareAndSwap(0, 1, &sweet_ff_guard)) {
+         printf("SWEET FFSVC: sample=%u busy=1\n", sample);
+         return;
+     }
+     uint32_t count = sweet_ff_snapshot(&sweet_ff_events, snapshot);
+     uint32_t total = sweet_ff_events.total;
+     bool pc_progress = sweet_bbpc_is_configured();
+     uint64_t snapshot_abs = pc_progress ? mach_absolute_time() : 0;
+     bool dropped = OSCompareAndSwap(1, 0, &sweet_ff_dropped);
+     (void)OSCompareAndSwap(1, 0, &sweet_ff_guard);
+     printf("SWEET FFSVC: sample=%u count=%u total=%u dropped=%u exhausted=%u\n",
+         sample, count, total, dropped ? 1u : 0u,
+         total == SWEET_FF_EVENT_LIMIT ? 1u : 0u);
+     if (pc_progress)
+         printf("SWEET BBPC: svc-progress sample=%u selected_svc_total=%u snapshot_abs=0x%llx\n",
+             sample, total, (unsigned long long)snapshot_abs);
+     for (uint32_t i = 0; i < count; ++i) {
+         const struct sweet_ff_event *e = &snapshot[i];
+         printf("SWEET FFSVC: n=%u phase=%u pid=%d tid=%llu call=%d "
+             "pc=0x%llx lr=0x%llx sp=0x%llx x0=0x%llx cpsr=0x%x\n",
+             e->seq, e->phase, e->pid, (unsigned long long)e->tid, e->call,
+             (unsigned long long)e->pc, (unsigned long long)e->lr,
+             (unsigned long long)e->sp, (unsigned long long)e->x0, e->cpsr);
+     }
+ }
+ #endif
+ 
+ extern task_t proc_task(proc_t);
+ extern int hz;
+ extern void sweet_sample_start(void);
+ 
+ static char sweet_sample_names[128];
+ 
+ static bool
+ sweet_sample_wanted(const char *name)
+ {
+ 	size_t n = strlen(name);
+ 	for (const char *t = sweet_sample_names; *t;) {
+ 		const char *end = strchr(t, ',');
+ 		size_t tl = end ? (size_t)(end - t) : strlen(t);
+ 		if (tl == n && n > 0 && strncmp(t, name, n) == 0) {
+ 			return true;
+ 		}
+ 		if (!end) {
+ 			break;
+ 		}
+ 		t = end + 1;
+ 	}
+ 	return false;
+ }
+ 
+ extern void sweet_sample_task(const char *name, int pid, task_t task);  /* osfmk/kern/exception.c */
+ 
+ static int
+ sweet_sample_proc(proc_t p, __unused void *arg)
+ {
+ 	char name[32];
+ 	proc_name(proc_pid(p), name, sizeof(name));
+ 	if (sweet_sample_wanted(name)) {
+ 		task_t task = proc_task(p);
+ 		if (task != TASK_NULL) {
+ 			sweet_sample_task(name, proc_pid(p), task);
+ 		}
+ 	}
+ 	return PROC_RETURNED;
+ }
+ 
+ static void
+ sweet_sample_thread(__unused void *arg, __unused wait_result_t wr)
+ {
+ 	static int chan;
+ 	unsigned int delay_seconds = 90;
+ 	unsigned int interval_seconds = 120;
+ 	unsigned int heartbeat = 0;
+ 	(void)PE_parse_boot_argn("sweetheartbeat", &heartbeat, sizeof(heartbeat));
+ 	if (!PE_parse_boot_argn("sweetsample", sweet_sample_names, sizeof(sweet_sample_names))) {
+ 		strlcpy(sweet_sample_names, "SpringBoard,backboardd", sizeof(sweet_sample_names));
+ 	}
+ 	if (sweet_sample_names[0] == '-' && heartbeat != 1
+ #if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
+-        && sweet_ff_enabled == 0 && sweet_ff_screen_enabled != 1 && !sweet_bbpc_is_configured()
++        && sweet_ff_enabled == 0 && sweet_ff_screen_enabled != 1 && !sweet_bbpc_is_configured() && !sweet_bbvm_is_configured()
+ #endif
+         ) {
+ 		return;
+ 	}
+ 	if (!PE_parse_boot_argn("sweetsampledelay", &delay_seconds, sizeof(delay_seconds)) ||
+ 	    delay_seconds < 1 || delay_seconds > 3600) {
+ 		delay_seconds = 90;
+ 	}
+ 	if (!PE_parse_boot_argn("sweetsampleinterval", &interval_seconds, sizeof(interval_seconds)) ||
+ 	    interval_seconds < 1 || interval_seconds > 3600) {
+ 		interval_seconds = 120;
+ 	}
+ 	printf("SMP config: delay=%u interval=%u samples=40 names=%s\n",
+ 	    delay_seconds, interval_seconds, sweet_sample_names);
+ #if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
+     sweet_bbpc_begin();
++    sweet_bbvm_begin();
+ #endif
+ 	(void)tsleep(&chan, PZERO, "sweetsmp", delay_seconds * hz);
+ 	for (int i = 0; i < 40; i++) {
+ #if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
+         sweet_ff_dump((unsigned int)i);
+         sweet_bbpc_dump((unsigned int)i);
++        sweet_bbvm_dump((unsigned int)i);
+ #endif
+ 		if (heartbeat == 1)
+ 			printf("SWEET BOOTHEART: sample=%d\n", i);
+ #if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
+         sweet_ff_screen_dump((unsigned int)i);
+ #endif
+ 		if (sweet_sample_names[0] != '-') {
+ 			printf("SMP --- sample %d\n", i);
+ 			proc_iterate(PROC_ALLPROCLIST, sweet_sample_proc, NULL, NULL, NULL);
+ 		}
+ 		(void)tsleep(&chan, PZERO, "sweetsmp", interval_seconds * hz);
+ 	}
+ }
+ 
+ void
+ sweet_sample_start(void)
+ {
+ #if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
+     unsigned int enabled = 0;
+     (void)PE_parse_boot_argn("sweetfftrace", &enabled, sizeof(enabled));
+     /* Initialized before userland starts; immutable after publication. */
+     sweet_ff_enabled = sweet_ff_svc_mode(enabled);
+     enabled = 0;
+     (void)PE_parse_boot_argn("sweetffscreen", &enabled, sizeof(enabled));
+     sweet_ff_screen_enabled = enabled == 1 ? 1u : 0u;
+     enabled = 0;
+     (void)PE_parse_boot_argn("sweetfffault", &enabled, sizeof(enabled));
+     sweet_ff_fault_enabled = sweet_ff_mode(enabled);
+     enabled = 0;
+     (void)PE_parse_boot_argn("sweetffpc", &enabled, sizeof(enabled));
+     sweet_bbpc_prepare(enabled);
++    enabled = 0;
++    (void)PE_parse_boot_argn("sweetbbvm", &enabled, sizeof(enabled));
++    sweet_bbvm_prepare(enabled);
+     if (sweet_ff_enabled != 0 || sweet_ff_fault_enabled != 0)
+         printf("SWEET UENTRY CONFIG: svc=%u fault=%u (0=off 1=FeatureFlags 2=SpringBoard svc3=backboardd fault3=off)\n",
+             sweet_ff_enabled, sweet_ff_fault_enabled);
+ #endif
+ 	thread_t thread;
+ 	if (kernel_thread_start(sweet_sample_thread, NULL, &thread) == KERN_SUCCESS) {
+ 		thread_deallocate(thread);
+ 	}
+ }
+diff --git a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -148,60 +148,62 @@
+ #endif
+ 
+ extern kern_return_t arm_fast_fault(pmap_t, vm_map_address_t, vm_prot_t, bool, bool);
+ 
+ static void handle_uncategorized(arm_saved_state_t *);
+ 
+ /*
+  * For UBSan trap and continue handling, we must be able to recover
+  * from handle_kernel_breakpoint().
+  */
+ #if !CONFIG_UBSAN_MINIMAL
+ __dead2
+ #endif /* CONFIG_UBSAN_MINIMAL */
+ static void handle_kernel_breakpoint(arm_saved_state_t *, uint32_t);
+ 
+ static void handle_breakpoint(arm_saved_state_t *, uint32_t) __dead2;
+ 
+ typedef void (*abort_inspector_t)(uint32_t, fault_status_t *, vm_prot_t *);
+ static void inspect_instruction_abort(uint32_t, fault_status_t *, vm_prot_t *);
+ static void inspect_data_abort(uint32_t, fault_status_t *, vm_prot_t *);
+ 
+ static int is_vm_fault(fault_status_t);
+ static int is_translation_fault(fault_status_t);
+ static int is_alignment_fault(fault_status_t);
+ 
+ typedef void (*abort_handler_t)(arm_saved_state_t *, uint32_t, vm_offset_t, fault_status_t, vm_prot_t, expected_fault_handler_t);
+ static void handle_user_abort(arm_saved_state_t *, uint32_t, vm_offset_t, fault_status_t, vm_prot_t, expected_fault_handler_t);
+ #if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
+ extern void sweet_ff_fault_trace(unsigned int, struct arm_saved_state *, uint32_t, uint64_t, int);
+ extern void sweet_bbpc_trace(struct arm_saved_state *, struct arm_saved_state *, unsigned int);
++extern uint32_t sweet_bbvm_enter(struct arm_saved_state *, uint32_t, uint64_t, uint64_t, uint32_t);
++extern void sweet_bbvm_leave(uint32_t, int32_t);
+ #endif
+ static void handle_kernel_abort(arm_saved_state_t *, uint32_t, vm_offset_t, fault_status_t, vm_prot_t, expected_fault_handler_t);
+ 
+ static void handle_pc_align(arm_saved_state_t *ss) __dead2;
+ static void handle_sp_align(arm_saved_state_t *ss) __dead2;
+ static void handle_sw_step_debug(arm_saved_state_t *ss) __dead2;
+ static void handle_wf_trap(arm_saved_state_t *ss) __dead2;
+ static void handle_fp_trap(arm_saved_state_t *ss, uint32_t esr) __dead2;
+ 
+ static void handle_watchpoint(vm_offset_t fault_addr) __dead2;
+ 
+ static void handle_abort(arm_saved_state_t *, uint32_t, vm_offset_t, abort_inspector_t, abort_handler_t, expected_fault_handler_t);
+ 
+ static void handle_user_trapped_instruction32(arm_saved_state_t *, uint32_t esr) __dead2;
+ 
+ static void handle_simd_trap(arm_saved_state_t *, uint32_t esr) __dead2;
+ 
+ extern void mach_kauth_cred_thread_update(void);
+ void   mach_syscall_trace_exit(unsigned int retval, unsigned int call_number);
+ 
+ struct proc;
+ 
+ typedef uint32_t arm64_instr_t;
+ 
+ extern void
+ unix_syscall(struct arm_saved_state * regs, thread_t thread_act, struct proc * proc);
+ 
+ extern void
+ mach_syscall(struct arm_saved_state*);
+ 
+@@ -1378,63 +1380,70 @@
+ #endif
+ 
+ 	thread->iotier_override = THROTTLE_LEVEL_NONE; /* Reset IO tier override before handling abort from userspace */
+ 
+ 	if (!is_vm_fault(fault_code) &&
+ 	    thread->t_rr_state.trr_fault_state != TRR_FAULT_NONE) {
+ 		thread_reset_pcs_done_faulting(thread);
+ 	}
+ 
+ 	if (is_vm_fault(fault_code)) {
+ 		vm_map_t        map = thread->map;
+ 		vm_offset_t     vm_fault_addr = fault_addr;
+ 		kern_return_t   result = KERN_FAILURE;
+ 
+ 		assert(map != kernel_map);
+ 
+ 		if (!(fault_type & VM_PROT_EXECUTE)) {
+ 			vm_fault_addr = tbi_clear(fault_addr);
+ 		}
+ 
+ 		/* check to see if it is just a pmap ref/modify fault */
+ 		if (!is_translation_fault(fault_code)) {
+ 			result = arm_fast_fault(map->pmap,
+ 			    vm_fault_addr,
+ 			    fault_type, (fault_code == FSC_ACCESS_FLAG_FAULT_L3), TRUE);
+ 		}
+ 		if (result != KERN_SUCCESS) {
+ 
+ 			{
+ 				/* We have to fault the page in */
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++                uint32_t sweet_bbvm_token = sweet_bbvm_enter(state, esr, fault_addr,
++                    vm_fault_addr, (uint32_t)fault_type);
++#endif
+ 				result = vm_fault(map, vm_fault_addr, fault_type,
+ 				    /* change_wiring */ FALSE, VM_KERN_MEMORY_NONE, THREAD_ABORTSAFE,
+ 				    /* caller_pmap */ NULL, /* caller_pmap_addr */ 0);
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++                sweet_bbvm_leave(sweet_bbvm_token, result);
++#endif
+ 			}
+ 		}
+ #if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
+         sweet_ff_fault_trace(1, state, esr, fault_addr, result);
+ #endif
+ 		if (thread->t_rr_state.trr_fault_state != TRR_FAULT_NONE) {
+ 			thread_reset_pcs_done_faulting(thread);
+ 		}
+ 		if (result == KERN_SUCCESS || result == KERN_ABORTED) {
+ 			return;
+ 		}
+ 
+ 		/*
+ 		 * vm_fault() should never return KERN_FAILURE for page faults from user space.
+ 		 * If it does, we're leaking preemption disables somewhere in the kernel.
+ 		 */
+ 		if (__improbable(result == KERN_FAILURE)) {
+ 			panic("vm_fault() KERN_FAILURE from user fault on thread %p", thread);
+ 		}
+ 
+ 		codes[0] = result;
+ 	} else if (is_alignment_fault(fault_code)) {
+ 		kern_return_t vmfkr = KERN_SUCCESS;
+ 		thread->machine.recover_esr = 0;
+ 		thread->machine.recover_far = 0;
+ 		int result = handle_alignment_fault_from_user(state, &vmfkr);
+ 		if (result == 0) {
+ 			/* Successfully emulated, or instruction
+ 			 * copyin() for decode/emulation failed.
+ 			 * Continue, or redrive instruction.
+diff --git a/bsd/dev/SweetBackboardVMPolicy.h b/bsd/dev/SweetBackboardVMPolicy.h
+new file mode 100644
+--- /dev/null
++++ b/bsd/dev/SweetBackboardVMPolicy.h
+@@ -0,0 +1,119 @@
++/* Fixed boot-lifetime transactions at the actual user vm_fault call boundary. */
++#ifndef SWEET_BACKBOARD_VM_POLICY_H
++#define SWEET_BACKBOARD_VM_POLICY_H
++#define SWEET_BBVM_LIMIT 40u
++#define SWEET_BBVM_EXPORTS (2u * SWEET_BBVM_LIMIT)
++#define SWEET_BBVM_INTERVAL_NS (30ULL * 1000000000ULL)
++#define SWEET_BBVM_LINE_BYTES 512u
++struct sweet_bbvm_event {
++    uint32_t token, version, esr, cpsr, prot;
++    int32_t pid, result;
++    uint64_t tid, pc, lr, sp, far, address, start, end, duration;
++    bool duration_valid;
++};
++struct sweet_bbvm_slot {
++    struct sweet_bbvm_event event;
++    uint32_t exported;
++};
++struct sweet_bbvm_buffer {
++    uint32_t total, completed, exported_entry, exported_return;
++    bool has_last, clock_stopped;
++    uint64_t last;
++    struct sweet_bbvm_slot slots[SWEET_BBVM_LIMIT];
++};
++static inline uint64_t
++sweet_bbvm_ceil_ticks(uint64_t ticks, uint64_t ns)
++{
++    if (ticks == 0 || ticks == UINT64_MAX)
++        return 0;
++    return ns < SWEET_BBVM_INTERVAL_NS ? ticks + 1 : ticks;
++}
++/* All policy operations require the recorder's independent nonblocking guard. */
++static inline uint32_t
++sweet_bbvm_enter_record(struct sweet_bbvm_buffer *buffer, uint64_t interval,
++    const struct sweet_bbvm_event *event)
++{
++    if (interval == 0 || buffer->clock_stopped || buffer->total >= SWEET_BBVM_LIMIT)
++        return 0;
++    if (buffer->has_last) {
++        if (event->start < buffer->last) {
++            buffer->clock_stopped = true;
++            return 0;
++        }
++        if (event->start - buffer->last < interval)
++            return 0;
++    }
++    uint32_t token = buffer->total + 1;
++    struct sweet_bbvm_slot *slot = &buffer->slots[buffer->total];
++    slot->event = *event;
++    slot->event.token = token;
++    slot->event.version = 1;
++    slot->event.result = -1;
++    slot->event.end = slot->event.duration = 0;
++    slot->event.duration_valid = false;
++    slot->exported = 0;
++    buffer->total = token;
++    buffer->last = event->start;
++    buffer->has_last = true;
++    return token;
++}
++static inline bool
++sweet_bbvm_leave_record(struct sweet_bbvm_buffer *buffer, uint32_t token,
++    uint64_t tid, uint64_t end, int32_t result)
++{
++    if (token == 0 || token > buffer->total || token > SWEET_BBVM_LIMIT)
++        return false;
++    struct sweet_bbvm_event *event = &buffer->slots[token - 1].event;
++    if (event->token != token || event->version != 1 || event->tid != tid)
++        return false;
++    event->end = end;
++    event->result = result;
++    event->duration_valid = end >= event->start;
++    event->duration = event->duration_valid ? end - event->start : 0;
++    if (!event->duration_valid)
++        buffer->clock_stopped = true;
++    event->version = 2;
++    ++buffer->completed;
++    return true;
++}
++/* A mutable slot needs separate entry/return export state, not a total cursor. */
++static inline uint32_t
++sweet_bbvm_snapshot(struct sweet_bbvm_buffer *buffer, struct sweet_bbvm_event *out)
++{
++    uint32_t count = 0;
++    for (uint32_t i = 0; i < buffer->total; ++i) {
++        struct sweet_bbvm_slot *slot = &buffer->slots[i];
++        if (slot->exported == 0) {
++            out[count] = slot->event;
++            out[count].version = 1;
++            out[count].result = -1;
++            out[count].end = out[count].duration = 0;
++            out[count].duration_valid = false;
++            ++count;
++            ++buffer->exported_entry;
++            slot->exported = 1;
++        }
++        if (slot->event.version == 2 && slot->exported == 1) {
++            out[count++] = slot->event;
++            ++buffer->exported_return;
++            slot->exported = 2;
++        }
++    }
++    return count;
++}
++static inline int
++sweet_bbvm_format(char *line, unsigned int bytes, const struct sweet_bbvm_event *e)
++{
++    int size = snprintf(line, bytes,
++        "SWEET BBVM: token=%u kind=%s pid=%d tid=%llu pc=0x%llx lr=0x%llx "
++        "sp=0x%llx cpsr=0x%x esr=0x%x far=0x%llx address=0x%llx prot=0x%x "
++        "start_abs=0x%llx end_abs=0x%llx result=%d duration_abs=0x%llx duration_valid=%u\n",
++        e->token, e->version == 1 ? "entry" : "return", e->pid,
++        (unsigned long long)e->tid, (unsigned long long)e->pc,
++        (unsigned long long)e->lr, (unsigned long long)e->sp, e->cpsr, e->esr,
++        (unsigned long long)e->far, (unsigned long long)e->address, e->prot,
++        (unsigned long long)e->start, (unsigned long long)e->end, e->result,
++        (unsigned long long)e->duration, e->duration_valid);
++    return size > 0 && (unsigned int)size < bytes ? size : 0;
++}
++#endif

@@ -1,3 +1,220 @@
+## CURRENT — 0173 host implementation passed; publication not authorized (2026-10-31)
+
+HEAD remains cf8372a9752acc8ff60bd13cfce67854080cefb3 / successfulCI41174432129.
+New local0173 patch `xnu/patches/0173-sweet-bounded-backboard-vm-fault.patch`
+adds only actualvm_fault begin/end, independent40boot-slots/30s acceptedentry
+interval, local scalar token across blocking, exactbackboardd/EL0/defaultoff
+`sweetbbvm=1`+svc3. Quota/clock stop newentries but acceptedends still complete;
+finalcapturecutoff rejects lateupdates. Busyreturns canbe lost: unmatchedentry
+means completionNOTobserved, never stillrunning/deadlocked. Producers nooutput/
+wait/allocation/userreads; normal40sampler exports≤80data/121lines/61952bytes;
+newpersistentstate+snapshot≤32KiB compileassert. ExistingPC/SVC/old4096fault3off/
+IRQ/WDT/GUI/HID unchanged.
+
+12newactualC tests PASS (blockedVM export, realcallbranch+disabledbuilds,
+outoforder/wrongtoken/TID, quota/clock/busy/endloss, deterministicfinaloverlap,
+pthreadcompetition, threadcreationfail/finiteconsumer/log+storagebounds).
+Finalfull local98cases/19scripts + repo/ADT PASS. Workflow registered96CIcases
+but NOT remotely run for0173. Zero-fuzz/no-offset3file replay, trueARM64sampler+
+sleh objects0of2failed; newdefinedandundefinedsymbolpairs verified. Workflow
+source+futurelinkedgates/docs added; native macOS15Arm64/Xcode16.4/iigABI unchanged.
+No full0173link/runtime/desktop success. Exactfinalsource/object/publication
+manifests under `.tmp/desktop-diagnostics-20261030/` prefixbackboard-vm-fault.
+Final fivefilehashbatch `backboard-vm-fault-source-batch.json` and27-source/object
+manifest `backboard-vm-fault-local-validation.json` verified; next request separate
+commit/push/fullCI approval;
+no sourcepublication/device/COW permission follows from hostimplementation plan.
+User mkadt/mkiosroot changes excluded and untouched.
+
+Device last fully verified stockAndroid/fullphysicaloriginalpair/NEWb4ee16GiB,
+all4flagsfalse/0172singletrialspent. Completeoriginal760aec98…scene+triplehash/
+sidecar retainedunrepaired, old0adbscene alsointact. Newrootcontracts b4ee→07ba/
+sparse3c522fd5 unchanged; dedicatedrecoverybackup outsideGit retained. No active
+hardware/recovery task and no newdevicepermission. Desktop stillnotachieved.
+
+---
+
+### Prior handoff snapshots (superseded)
+
+## CURRENT — 0172trial CLOSED, stock+NEWb4ee fully verified; no desktop (2026-10-31)
+
+Recovery bg2klplly COMPLETE0: all256chunkscompared; actualchanged7chunks
+[0,11,13,107,119,186,187]/448MiB restored+readback; full16GiB NEWb4ee and
+originalAndroid/fullphysicalbootpair PASS. State trial_closed_stock_and_new_b4ee_baseline_verified;
+all4deviceflagsfalse, restorependingfalse, oneattemptspent, noactivejobs.
+Dedicated recovery sourceFD held from fullhash/plan through allwrites/readbacks.
+Old098 unavailable/notrestored. No newtrial/publication/scene replacement permission.
+
+New full16GiB originalactual SHA256
+`760aec982efa60659b04954d0f9b7a15e4ef056289df0c8e003d96fd391ffff0`:
+newpair `shim/out-dali/ufs-41174432129/candidate-desktop-backboard-interrupt-pc-20261031/`
+`trial/attempt1/posttrial-root/root.raw` +sidecar; remote-before/local/afterequal,
+unrepaired/unreplaced. Old0adb fullscene retained too; do notdelete/replace either.
+Readonlyfsck8: incorrectnumberofhardlinks only. Frozen5diagnosticpaths/no selected
+persistedcrash; not proof noexception or reasonGUIfailed.
+
+Runtime sameUUID5B3CA7D0-EE34-4D17-88EF-21454878DCDD:4GICtimerEL0PCs
+PID57/TID315,138acceptedselectedSVCs/92dumped,40snapshots/finalPCclosure,
+PC2+PC4betweenstabletotalSVCsnapshots.3PCs independentlyresolved to dyld:
+slide0x2e0f4000 proven bytrap10/12/14; PC2unslid0x1a4613d08 ldrw8[x20+4],
+PC3unslid0x1a4617edc ldrw8[x0+4], PC4unslid0x1a465db0c ldrw0[x0+4].
+No sharedcache/kernelimage slide proven. PC1only consistentwith standalone
+DYLDentry underalignedslide, not independentlyverifiedmain. Lastclose6returned0;
+thisboot did not reachpreviousboot's getentropyrecord, do notmerge conclusions.
+NoGUIpresent/refresh and genuinehuman "仅日志色块或黑屏"; desktopNOTachieved.
+
+Exact data/report/disassembly `.tmp/desktop-diagnostics-20261030/backboard-interrupt-pc-*`;
+fullCI41174432129/cf8372a verified/84CI+86local/26sources/17legacyIIG unchanged.
+Next hostonly narrow dyldloading/map_with_linking/pagein/callee audit; data-load
+PCs do notalone prove pagefault/badpointer/deadlock. No guessingfunctionalpatch,
+RNG/signature/daemonchange, oldtasklocksampler or longertrial. Usermkadt/mkiosroot
+edits excluded; thislocalhandoff NOT a newapprovedcommit.
+
+---
+
+### Earlier snapshots (superseded)
+
+## CURRENT — stockAndroid verified, full0172 actual-root capture pending (2026-10-31)
+
+HumanFastboot returned; originalboot_b/init_boot_b restored and physical fullhashes+
+Androididentity/slotcompleted/root verified. Stockrestorepermission consumed. No
+new iOS boot. Actualroot capture b5c65yg0n running via exclusive0700 newdirectory;
+NO rootrestore/repair until full16GiB remote-before/local/remote-after hashes pass.
+Remaining device/rootrestorepermission only thisapprovedtrial. Old0adbsceneuntouched.
+
+Human0172screen: "仅日志色块或黑屏"; desktopNOTachieved. Logs84,160/pstore84,204
+sameUUID5B3CA7D0-EE34-4D17-88EF-21454878DCDD.4PCs PID57/TID315,40snapshots,
+lastselectedSVCtotal138/92dumped, noGUIpresent/refresh. PC2+PC4occurbetween
+same-totalSVCsnapshots, sourceproves actualEL0 afterSVCstability (notmain/liveness).
+Dyldslide0x2e0f4000 independentlytrap10/12/14; no sharedcache slide available.
+PC2/3/4exactdyld LDRinstructions (differentfunctions); PC1outsideprovenimage,
+unresolved. NoFAR/dataregister/faultresult; no badpointer/deadlock/RNGinference.
+LastselectedSVCclose6returned0, notpriorbootgetentropy. ExactJSON/disassembly in
+`.tmp/desktop-diagnostics-20261030/backboard-interrupt-pc-*`.
+
+Next aftercaptureCOMPLETE: fullraw/fsckreadonly/frozenfiles, scanall256chunks
+and pinnedverifieddedicatedsource restore NEWb4ee, perrange/fullhash/stockchecks,
+closeflags. No old098/missingbaseline or fixedchunkreuse. Initialposttriallog
+wrapper wronghostpath failedbeforecapture; corrected, logsnow retained. Do not
+repeat stockflash/boot or overwrite evidence. No newcommit/sceneCOWapproval.
+
+---
+
+### Earlier handoff snapshots (superseded)
+
+## RECOVERY PENDING — 0172 ended, genuine noGUI, waiting Fastboot (2026-10-31)
+
+Fixeddeadline06:42:45UTC reached; watcher exited2 (timeout, not crash proof).
+Actual AskUserQuestion result: "仅日志色块或黑屏" / Fastboot "尚未进入".
+No realGUI/desktop. Askedhuman to holdpower+volumedown; read-only targetFastboot
+waiter bjyqrgews active (recovery entry only, NOT an observation extension).
+No stock boot/root recovery completed. No retrial/reboot command permitted.
+Thistrial's remaining approved restoration stayspending: targetFastboot→original
+physicalpair→Androidphysicalhash→boundedlogs/fullactual16GiB+triplehash BEFOREroot
+restore→scanall256actualchunks→NEWb4ee/pinnedsource/readbacks/fullhash/stockchecks→
+closeflags. Latest prior0adbscene untouched; newactual scene notyetcaptured.
+Newpairstate `shim/out-dali/ufs-41174432129/candidate-desktop-backboard-interrupt-pc-20261031/trial-state.json`.
+No new sourcepublication/scene replacement authorization. User mkadt/mkiosroot
+edits remainexcluded. Do not claim originalAndroid/newb4ee currentlyrestored.
+
+---
+
+### Earlier handoff snapshots (superseded for device state)
+
+## ACTIVE single0172 trial — stock/root recovery pending (2026-10-31)
+
+Genuine AskUserQuestion approval: exactpair once≤1200seconds/fullcapture+NEWb4ee
+recovery. Start wrapper b7i5me3t2COMPLETE0; freshdedicatedrecoveryfullhash/current
+b4eefullhash/identityphysicalpair/static13/capacity passed; newdelta+full07ba verified.
+Exact boot/initboot flashed once and rebooted; trial_attempts=1, no retry.
+StartUTC `2026-10-31T06:22:45.306562+00:00`; fixeddeadline `2026-10-31T06:42:45.306562+00:00`.
+Watcher `bux5m43s1` active; no polling/sleep/extension. Rootdelta permission false;
+originalbootpair+rootrestore permissions active for this one trial only.
+
+Next terminal Fastboot/ADB/deadline then real-screen result; if necessary ask
+human to return Fastboot. Restore physicaloriginalpair and verify Android/hash;
+collect boundedSWEET+pstore, newcompleteactual16GiB+triplehash via newcapturewrapper,
+then existingnewpinnedsource restore helper compares all256chunks and restores
+onlyactualdifferences to NEWb4ee, perrange/fullhash/physicalstock verification,
+closeallflags. Do not restore root before fullactual preservation. Old0adbscene
+untouched/noCOWpermission; no newtrial. Desktop evidence not obtained yet.
+
+---
+
+### Prior host/candidate snapshots (superseded for device state)
+
+## Current handoff — exact0172 candidate verified; device approval required (2026-10-31)
+
+Full CI41174432129/cf8372a and independent candidate verification COMPLETE/PASS.
+Candidate: `shim/out-dali/ufs-41174432129/candidate-desktop-backboard-interrupt-pc-20261031/`.
+boot`ddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39`
+initboot`9f234cf199e95f67eb983db9a16c132634f662fb5c7af70579884e9daf288e22`
+kernel`f1490b02766643b9bc991a44debdcedab2d091e604a04f82fbefb7e9361d25c8`.
+VerificationSHA`09e3ca7996764b54a1c55a63cd210647da90ef257e2c11212357d2c7f00bc03c`;
+static13manifestSHA`eae10a3e9395704cb4324dc1eec3e33ece932b047a59d87772beef9a29246390`.
+Full v4/LZ4/CPIO/524byteargs/ADT/payloadrebuild/AVB and full16GiB virtualrootreplay
+PASS. NEWb4ee→07ba/sparse3c522fd5/rederived9runs11blocks45056bytes;12hoststorage
+adaptertestsPASS incl pinned-source and defaultno-permission; final13hashes current.
+Available capture space40,972,111,872bytes at verification, recheck beforehardware.
+
+No deviceaccess this round; approved_trials=attempts=0/all4writeflagsfalse.
+Next separate exactpair once≤1200s/rootdelta/fullactual16GiBcapture+triplehash/
+scanall256chunks→b4ee restore+readback/fullroot+stockAndroid approval required.
+Latest0adbscene remains unchanged/noCOWpermission. No pending background jobs.
+Desktop NOTachieved; sourcepublication permission does not authorize devicewrites.
+This is local post-publication handoff; do not commit it without separateapproval.
+
+---
+
+### Earlier handoff snapshots (superseded)
+
+## Current handoff — 0172 full CI verified; candidate verification pending (2026-10-31)
+
+Commit `cf8372a9752acc8ff60bd13cfce67854080cefb3`; full CI41174432129 attempt1
+SUCCESS, independently verified build/link, exact26sources,17byteidentical legacy
+iig outputs, unchanged four-field IORPC, newPCmarkers/defined __TEXT_EXEC symbols.
+CI84tests + local2fbcon = local86; all passed. Kernel SHA256:
+`f1490b02766643b9bc991a44debdcedab2d091e604a04f82fbefb7e9361d25c8`.
+
+Host candidate `shim/out-dali/ufs-41174432129/candidate-desktop-backboard-interrupt-pc-20261031/`:
+boot`ddfbc184…`, initboot`9f234cf199e95f67eb983db9a16c132634f662fb5c7af70579884e9daf288e22`.
+Only adds sweetffpc=1 to prior args; uses NEWb4ee/07ba/sparse3c522fd5 and locally
+12-test-verified new root adapters. Complete candidate verifier boj0znghr still
+pending: do not authorize/boot until full unpack/AVB/root-replay/static13 pass.
+Capture wrapper `capture-backboard-interrupt-pc-root.py` default localdryrunPASS.
+
+Device untouched this round; last verified stockAndroid/originalphysicalpair/
+NEWb4ee fullroot; all4writeflagsfalse, approved_trials=attempts=0. Latest0adb raw
+unrepaired/unreplaced; no scene COW approval. Dedicated full recovery backup retained.
+Desktop still not achieved. Source approval consumed for five files + singleCI;
+new exact device trial/fullcapture/recovery requires separate genuine approval.
+This local post-publication handoff is NOT a new authorized commit.
+
+---
+
+### Earlier handoff snapshots (superseded)
+
+## Current handoff — 0172 published; full CI pending (2026-10-31)
+
+Actual AskUserQuestion approval covered exact five files + one complete CI only.
+Commit `cf8372a9752acc8ff60bd13cfce67854080cefb3` pushed and remote hash verified.
+Full native CI: https://github.com/localhosts-A/ios-sweet/actions/runs/41174432129
+Dispatch succeeded once; status/result/artifacts not yet verified. Do not rerun
+or claim full link/runtime/desktop success while pending. Local86 tests,
+26-source zero-fuzz/offset replay and2ARM64 objects pass as detailed below.
+No new device trial/scene replacement/root write permission. Device last verified
+stockAndroid/originalphysicalpair/NEWb4ee root, all4writeflagsfalse. Latest0adb
+scene untouched; dedicated recovery backup and freshly verified07ba seed retained.
+
+This head is LOCAL post-publication handoff, not part of the approved snapshot.
+Do not add original mkadt/mkiosroot edits or make another commit implicitly.
+Next: await CI completion, independently verify exact-commit kernel/source/markers;
+only after success prepare a new host-only candidate with NEW storage bindings.
+
+---
+
+### Prior host-validation handoff (snapshot at approval)
+
 ## Current handoff — 0172 host checks passed; publication pending (2026-10-31)
 
 **Desktop is not achieved.** HEAD remains `90f71b27d5705f3cae29a91771d6422af6d84412`;

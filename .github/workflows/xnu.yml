@@ -43,6 +43,7 @@ on:
       - "tools/iig_legacy_rpc.py"
       - "tools/test_iig_legacy_rpc.py"
       - "tools/test_dali_backboard_interrupt_pc.py"
+      - "tools/test_dali_backboard_vm_fault.py"
 
 concurrency:
   group: xnu-${{ github.ref }}
@@ -148,6 +149,7 @@ jobs:
           python3 tools/test_xnu_macos15_runner.py
           python3 tools/test_iig_legacy_rpc.py
           python3 tools/test_dali_backboard_interrupt_pc.py
+          python3 tools/test_dali_backboard_vm_fault.py
 
       - name: Build
         working-directory: dxb
@@ -454,6 +456,15 @@ jobs:
           IIG_DIR="build/xnu.obj/${KERNEL_CONFIG}_ARM64_${MACHINE_CONFIG}/iokit/DriverKit"
           test "$(find "$IIG_DIR" -name '*.iig.cpp' -type f | wc -l | tr -d ' ')" = 17
           ! grep -l kernelContent "$IIG_DIR"/*.iig.cpp
+          grep -Fq '#define SWEET_BBVM_LIMIT 40u' xnu/bsd/dev/SweetBackboardVMPolicy.h
+          grep -Fq '#define SWEET_BBVM_INTERVAL_NS (30ULL * 1000000000ULL)' xnu/bsd/dev/SweetBackboardVMPolicy.h
+          grep -Fq 'sweet_bbvm_token = sweet_bbvm_enter(state, esr, fault_addr,' xnu/osfmk/arm64/sleh.c
+          grep -Fq 'sweet_bbvm_leave(sweet_bbvm_token, result);' xnu/osfmk/arm64/sleh.c
+          grep -Fq 'bounded BBVM persistent state and snapshot' xnu/bsd/dev/sweet_sample.c
+          nm fakeroot/System/Library/Kernels/kernel.development.sweet | grep ' _sweet_bbvm_enter$'
+          nm fakeroot/System/Library/Kernels/kernel.development.sweet | grep ' _sweet_bbvm_leave$'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET BBVM CONFIG: source=user-vm-call interval=30s limit=40'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'exported_return=%u begin_busy=%u end_busy=%u clock_stop=%u final=%u'
           grep -Fq '#define SWEET_BBPC_LIMIT 40u' xnu/bsd/dev/SweetBackboardPCPolicy.h
           grep -Fq '#define SWEET_BBPC_INTERVAL_NS (30ULL * 1000000000ULL)' xnu/bsd/dev/SweetBackboardPCPolicy.h
           grep -Fq 'state != published' xnu/bsd/dev/sweet_sample.c
