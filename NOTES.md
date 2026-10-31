@@ -1,3 +1,54 @@
+## 当前交接 — 0174 CI测试夹具失败；宏修正本地通过；COW仅评估（2026-10-31）
+
+HEAD2a5433b038a274ae3279bfeb608b2aef4aa7255e／CI41189879761结论failure。
+测试阶段真实Darwin bzero宏重定义触发-Werror，Build被跳过；打包产物随后因无
+buildtree失败，不能称内核编译失败或完整链接通过。无重跑授权。已仅在本地修复
+新IPC测试的bzero宏隔离，并加fortified宏负控（旧冲突重现）及两种正控。
+全部111测试／repo／ADT再次PASS；kernelpatch／workflow／其余已发布文件不变。
+下一源码批次仅test_dali_backboard_ipc_context.py＋NOTES.md，待单独发布与一次CI批准。
+
+真人选择“评估旧现场COW方案”，仅只读评估已完成：旧0adb、760a各16GiB独占；
+对专用完整b4ee源全256chunk／4KiB比较，9304块38109184字节（27runs）及
+8639块35385344字节（22runs），原件全哈希及虚拟重放全哈希一致。两份合计差异
+73494528字节，实际COW额外占用还含extent／元数据，预计可回收接近32GiB但未实施。
+`old-scenes-cow-assessment-20261031/assessment.json`与Btrfs占用记录在工作目录.tmp。
+没有创建替代镜像、没有替换／删除原件；最新6015不在评估替换范围。
+实际等价COW创建、全SHA验收、原路径替换及释放旧独占inode都必须再获精确批准；
+原sidecar／日志保留，存储变化另记manifest，不掩盖原fsck8，不修复原始字节。
+
+用户问屏幕只有kprintf startup complete/色块是否正常：源码证实这是stage20
+早期绘屏标记，serial_init成功后early绘屏关闭；当前serial0/ffscreen0未强制显示
+滚动诊断。后续真实日志证明执行越过该标记，不是卡死证据；但无GUI仍是目标失败。
+sweetfb_noconsole仅首次GUIpresent后静默，不能解释本轮未出现GUI。
+
+设备保持已验收原厂Android／物理启动对／完整b4ee，四权限false，无活动任务。
+6015／760a／0adb三份原始现场未修复未替换；现6.2GB容量门禁仍关闭。没有新的
+设备试验、源码推送／CI重跑或COW替换授权。本地交接不是新的提交批准。
+
+---
+
+### 旧快照（当前状态以上文为准）
+
+## 当前交接 — 0174已发布，完整CI等待中；容量门禁关闭（2026-10-31）
+
+真人批准精确七文件与一次CI，已提交／推送并核验remote：
+`2a5433b038a274ae3279bfeb608b2aef4aa7255e`。
+https://github.com/localhosts-A/ios-sweet/actions/runs/41189879761
+仅触发一次，b6tqa9k3g等待终态与隔离产物；不自动重跑、不提前报完整链接通过。
+本地111测试＋真实ARM64对象＋28源码重放已验收；独立CI核验脚本
+`verify-backboard-ipc-context-ci.py`仅准备／语法通过，尚未执行。
+
+设备最后验收原厂Android／物理启动对／完整新b4ee，四权限false，无硬件任务。
+6015、760a、0adb原始完整现场不动；主机约6.2GB不足下一16GiB＋2GiB捕获。
+系统盘也不足，不能绕过容量门禁制作可试机候选或刷机；存储／删除／COW／新试机
+均无授权。下一步CI完成后独立kernel／28源码／console路径／17IIG／IORPC验收，
+再处理容量选择，不自动继续候选。桌面未实现。原mkadt/mkiosroot不动。
+此本地发布后交接不是新的提交批准。
+
+---
+
+### 旧交接快照（当前状态以上文为准）
+
 ## 当前交接 — 0174主机实现已通过本地检查，尚未授权发布（2026-10-31）
 
 HEAD仍为8081a41cd18bb99a16155f8bd569487aacf3695e／成功CI41181923386。

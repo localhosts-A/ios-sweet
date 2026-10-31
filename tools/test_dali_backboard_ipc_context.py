@@ -360,6 +360,9 @@ int main(void) {
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#ifdef bzero
+#undef bzero
+#endif
 #define bzero(p,n) memset(p,0,n)
 #define SERIALMODE_SYNCDRAIN 1
 static int serialmode;
@@ -394,10 +397,19 @@ int main(void) {
 """
         compiler=shutil.which('clang') or shutil.which('cc');self.assertIsNotNone(compiler)
         with tempfile.TemporaryDirectory() as temp:
-            root=Path(temp);source=root/'roundtrip.c';source.write_text(body)
-            subprocess.run([compiler,'-std=c11','-O2','-Wall','-Wextra','-Werror',str(source),'-o',str(root/'test')],check=True)
-            result=subprocess.run([str(root/'test')],capture_output=True,text=True,timeout=30)
-            self.assertEqual(result.returncode,0,result.stderr)
+            root=Path(temp);source=root/'roundtrip.c'
+            guarded='#ifdef bzero\n#undef bzero\n#endif\n#define bzero(p,n) memset(p,0,n)'
+            fortified='#ifdef bzero\n#undef bzero\n#endif\n#define bzero(dest, ...) __builtin___memset_chk(dest,0,__VA_ARGS__,__builtin_object_size(dest,0))'
+            negative=body.replace(guarded,fortified+'\n#define bzero(p,n) memset(p,0,n)')
+            source.write_text(negative)
+            failed=subprocess.run([compiler,'-std=c11','-O2','-Wall','-Wextra','-Werror',str(source),'-o',str(root/'negative')],capture_output=True,text=True)
+            self.assertNotEqual(failed.returncode,0)
+            self.assertIn("'bzero' macro redefined",failed.stderr)
+            for text in (body,body.replace(guarded,fortified+'\n'+guarded)):
+                source.write_text(text)
+                subprocess.run([compiler,'-std=c11','-O2','-Wall','-Wextra','-Werror',str(source),'-o',str(root/'test')],check=True)
+                result=subprocess.run([str(root/'test')],capture_output=True,text=True,timeout=30)
+                self.assertEqual(result.returncode,0,result.stderr)
         lines=result.stdout.splitlines(keepends=True);self.assertEqual(len(lines),3)
         ipc=parse_ipc(lines[0]);entry=parse_compact_vm(lines[1]);returned=parse_compact_vm(lines[2])
         self.assertEqual(ipc['t'],(1<<64)-1);self.assertEqual(ipc['n'],65536)
