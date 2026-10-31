@@ -45,6 +45,7 @@ on:
       - "tools/test_dali_backboard_interrupt_pc.py"
       - "tools/test_dali_backboard_vm_fault.py"
       - "tools/test_dali_backboard_ipc_context.py"
+      - "tools/test_dali_gui_load_progress.py"
 
 concurrency:
   group: xnu-${{ github.ref }}
@@ -152,6 +153,7 @@ jobs:
           python3 tools/test_dali_backboard_interrupt_pc.py
           python3 tools/test_dali_backboard_vm_fault.py
           python3 tools/test_dali_backboard_ipc_context.py
+          python3 tools/test_dali_gui_load_progress.py
 
       - name: Build
         working-directory: dxb
@@ -159,6 +161,11 @@ jobs:
           # keep going after errors so one run reports every compile failure
           MAKEFLAGS: ${{ inputs.keep_going == 'false' && '' || '-k' }}
         run: bash build.sh
+
+      - name: Verify final GUI load sources
+        env:
+          SWEET_LOAD_SOURCE_DIR: ${{ github.workspace }}/dxb/xnu
+        run: python3 tools/test_dali_gui_load_progress.py
 
       - name: Compiler cache statistics
         if: always()
@@ -458,6 +465,16 @@ jobs:
           IIG_DIR="build/xnu.obj/${KERNEL_CONFIG}_ARM64_${MACHINE_CONFIG}/iokit/DriverKit"
           test "$(find "$IIG_DIR" -name '*.iig.cpp' -type f | wc -l | tr -d ' ')" = 17
           ! grep -l kernelContent "$IIG_DIR"/*.iig.cpp
+          grep -Fq '#define SWEET_LOAD_TARGETS 2u' xnu/osfmk/kern/SweetLoadProgress.h
+          grep -Fq '#define SWEET_LOAD_THREADS 8u' xnu/osfmk/kern/SweetLoadProgress.h
+          grep -Fq 'SweetLoadProgress.h' xnu/osfmk/kern/Makefile
+          grep -Fq 'bounded GUI load records, control and formatter scratch' xnu/bsd/dev/sweet_sample.c
+          grep -Fq 'bounded UFS load counters and snapshot' xnu/bsd/dev/sweet_ufs.c
+          grep -Fq 'simple_lock_try(&thread->sched_lock, &thread_lck_grp)' xnu/osfmk/kern/exception.c
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'reference_policy=until_reboot'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'scope=returned-only pending=unknown'
+          nm fakeroot/System/Library/Kernels/kernel.development.sweet | grep ' _sweet_load_collect$'
+          nm fakeroot/System/Library/Kernels/kernel.development.sweet | grep ' _sweet_ufs_load_dump$'
           grep -Fq '#define SWEET_BBIPC_RECORDS 64u' xnu/bsd/dev/SweetBackboardIPCPolicy.h
           grep -Fq '#define SWEET_BBIPC_SELECTED 4u' xnu/bsd/dev/SweetBackboardIPCPolicy.h
           grep -Fq 'bounded BBIPC state and snapshot' xnu/bsd/dev/sweet_sample.c

@@ -1,3 +1,180 @@
+## 当前交接 — 0175主机实现验收完成，精确发布／CI待批准（2026-10-31）
+
+基线ee4ff351／CI41191237900。新0175仅默认off sweetload观察，不是GUI功能修复：
+两个首个采纳SVC目标槽（BB/SB），最多2task引用保留至重启；每目标最多8线程标量try快照，
+recount累计CPU ticks；无进程遍历、新worker、用户栈读取或调度hook。UFS三returned-wrapper组＋两strategy组，
+原mutex统计、单次try快照，不改DMA/MMIO/CDB/timeout/sense/poison/sync。间接task资源延迟销毁已在获批计划明确，
+不是10KiB诊断buffer上限的一部分；firstgeneration/pending/busy/unknown与因果限制明确。
+
+最终21suite124actual unittest PASS（未来CI policy122；独立postbuild finalsource13另计），
+3真实ARM64对象0/3failed；独立32源码zero-fuzz/offset重放、26其余源hash不变，
+console255夹具与精确CI serial_general.c/serial_protos.h字节一致，6sourcegates/10bash-n blocks通过。
+validate-repo175patch/42Python/12shell、ramoopsADT通过（缺可选d22ap productnode警告保留）；未做YAML schema验证。
+新增共享头必须在osfmk/kern/Makefile XNU_ONLY_EXPORTS导出；该必要第6source已包含补丁并验证。
+CI另加物化/Build之后最终源码测试，不能用旧0174片段绿灯冒充新sweet_ff_trace/consumer。
+
+预期发布仅5文件：0175patch、新test、新doc、xnu.yml、NOTES；用户mkadt.py/mkiosroot.sh不动，.tmp/out/Apple/设备数据不提交。
+目前未提交/推送/运行0175完整CI；三个对象不是完整链接或运行证明，下一关另行精确批准。
+设备仍0174恢复后的原厂Android／物理启动对／完整b4ee，四写权限false；无新设备试验授权。
+0174真实boot及完整77eb原始现场保留，末尾550是map_with_linking_np不是getentropy；桌面未实现。
+详见docs/dali-gui-load-progress.md和.tmp/desktop-diagnostics-20261030/gui-load-progress-{host,object}-verification.json。
+
+---
+
+## 当前交接 — 0174试验与恢复完整闭合，继续离线定位（2026-10-31）
+
+CI41191237900／ee4ff351，唯一1200秒试验已耗尽。真人“仅日志色块或黑屏”，无GUI提交／成功刷新。
+bootUUID EAB8154D-950B-422C-9649-0E4165DE45D8；BB56/TID315，SVC accepted140/exported92(seq49..140)，最后map_with_linking_np(550)及close6返回0；没有可导出IPC参数，不能套用上轮mach_msg2等待。
+3 IRQ PCs、3完整VMv2配对r0/vld1，dyld独立slide0x3f9a8000，shared-cache slide未证实。
+实际根77eb582151032f0f90e32d8bb5d0c424c9e0b369003be62d905989e0d25bc0c9完整16GiB三hash，保留未修复。
+只读fsck8：hardlink、两个目录计数、bitmap/freecount；新增2053块不一致已定位uuidtext/dsc临时文件，不证明GUI因果。
+完整256chunk比较后7块448MiB恢复，pinnedFD／范围回读／全b4ee根及原厂Android／物理启动对全部通过。
+闭合时间2026-10-31T11:28:26.606883+00:00；四权限false、root_restore_pending=false，无后台任务，无新发布／CI／设备授权。
+下一步只读比较关键启动文件和加载证据，再决定下一主机侧方案；桌面未实现。
+
+---
+
+## 当前交接 — 0174完整现场已验收，b4ee恢复运行中（2026-10-31）
+
+actual root完整16GiB三SHA一致：77eb582151032f0f90e32d8bb5d0c424c9e0b369003be62d905989e0d25bc0c9。
+原厂Android／物理启动对已验收，原始现场及sidecar冻结保留，不修复。
+后台 `b6bk4fnzw` 执行已批准全256chunk实际比较及pinned恢复源FD b4ee恢复，日志 `.tmp/desktop-diagnostics-20261030/backboard-ipc-context-root-recovery.log`。
+等待完成通知后核验完整b4ee／原厂对和四权限false，不重跑。恢复尚未宣告完成；桌面未实现。
+
+---
+
+## 当前交接 — 原厂对已验收，完整现场读取仍在进行（2026-10-31 11:12 UTC）
+
+明确进度检查的一次快照：bhyuzzuok仍在完整capture，root.raw.part已有6929559040bytes（6.45GiB／16GiB），mtime距检查22ms，读取进程存在；不是卡住33分钟。保留原读取流，不重跑或覆盖。
+原厂Android／物理启动对已验收，stock_restore权限已消耗；限定日志已保存并离线分析。仍须完整16GiB及三hash验收后才能执行已批准的pinnedFD b4ee恢复，root_restore_pending=true。桌面未实现。
+
+---
+
+## 当前交接 — 0174未见桌面，原厂对已写回，完整现场捕获运行中（2026-10-31）
+
+真人反馈“仅日志色块或黑屏”及“已进入Fastboot”；未满足桌面验收。
+已验证目标Fastboot并写回原厂init_boot_b／boot_b、请求Android启动。
+后台任务 `bhyuzzuok` 负责原厂Android／物理启动对回读、限定日志、一次完整实际16GiB三hash捕获。
+任务结束前不得重复capture或修复根。原始现场验收后才执行获批全256chunk实际比较、pinned恢复源FD b4ee恢复及全根／物理原厂对验收，关闭四权限。
+唯一候选试验已耗尽，不追加试验；root恢复pending。恢复日志位于 `.tmp/desktop-diagnostics-20261030/backboard-ipc-context-original-pair-recovery.log`。
+
+---
+
+## 当前交接 — 0174窗口到期，等待Fastboot恢复（2026-10-31）
+
+唯一试验UTC10:41:30.011412至11:01:30.011412已到期，watcher bfqr03h0c exit2（设计的时间上限）。
+窗口内未检测到目标ADB／Fastboot返回；不能据此认定硬件reset原因，真人屏幕反馈待取得。
+已尝试1次／批准1次，禁止延长或再次启动候选。下一动作：真人返回Fastboot，核对目标后执行已批准原厂启动对恢复验收，完整实际16GiB捕获三hash，再全256chunk比较与pinnedFD b4ee恢复。
+root_restore_pending=true；root_delta权限false，剩余三权限仅限本次恢复。桌面未验证。
+
+---
+
+## 当前交接 — 0174一次候选已启动，固定1200秒窗口（2026-10-31）
+
+CI41191237900／ee4ff351，static13清单c68d4567…；获批的fresh设备／原厂对／完整b4ee／容量／恢复源门禁全部通过。
+9段11块45056字节seed差分逐段读回及完整07ba哈希通过；精确boot／init_boot_b候选写入并启动一次。
+启动 2026-10-31T10:41:30.011412+00:00，硬截止 2026-10-31T11:01:30.011412+00:00；watcher `bfqr03h0c` 运行中。
+trial_attempts=approved_trials=1；root_delta权限false，剩余三权限仅用于本次恢复，root_restore_pending=true。
+下一动作收到watcher通知后确认真实terminal状态及真人画面／Fastboot，执行原厂对恢复验收、完整实际16GiB三hash、全256chunk比较和pinnedFD b4ee恢复。
+不延长／重试／追加试验；桌面仍未验证。pretrial旧日志不能当0174运行证据。
+
+---
+
+## 当前交接 — 0174获批流程运行中，未确认候选启动（2026-10-31）
+
+后台任务 `bj6v6kq23`；完成通知后读取执行日志与state，再接watcher或按实际错误恢复，不重跑。
+
+真人AskUserQuestion“批准一次试验及恢复”，批准时间 2026-10-31T10:37:26.681049+00:00。
+精确CI41191237900／ee4ff351；候选static13清单SHA
+`c68d45677cbb90f1bb3494ae8a0908998404b349aed9347eee486fee97130298`。
+批准一次≤1200秒及完整现场捕获、原厂对／b4ee恢复；四权限仅为此开启，尚未尝试。
+下一步fresh身份／槽b／物理原厂对／完整b4ee根／容量，任何不符停止，禁止自动重试。
+恢复前完整实际16GiB三hash；全256chunk比较、pinned已验证恢复源FD、范围与完整b4ee回读及原厂对验收。
+旧现场无新替换权限，桌面未实现。所有后续状态以上方最新交接与候选trial-state为准。
+
+---
+
+## 当前交接 — 0174精确候选全面验收，等待新试机授权（2026-10-31）
+
+CI41191237900/ee4ff351e5a05490ad702bbac9d865c1a59ea75b完整build/link及
+独立28源码／109CI＋111local／IPC+VMv2markers／17IIG不变／IORPC验收通过。
+候选 `shim/out-dali/ufs-41191237900/candidate-desktop-backboard-ipc-context-20261031/`
+bootSHA ddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39
+initbootSHA fb1790a0afc7c7e8b1e8c22415c9860d8d6d23037f675ab2b18bce13864a93d3
+kernelSHA 4b9dccd648b58722c7ab8dd9920d630fe25a113900b8bb9613d06f884a6b6ffd
+static13manifestSHA c68d45677cbb90f1bb3494ae8a0908998404b349aed9347eee486fee97130298
+verificationSHA fff2ca52b4bf520c422741ef305b024804f0170f5f09aca70df37d91eea89030
+完整v4/LZ4/CPIO/bootargs549bytes/ADT/payloadrebuild/AVB及新b4ee→07ba
+全16GiB虚拟重放通过，delta9runs/11blocks45056bytes。只加sweetbbipc1；
+serial0/ffscreen0/PC1/VM1/GUI/HID/WDT保持原值，未为实时日志增加另一轮试验。
+新storagehelper12项门禁及捕获默认零访问通过。可用空间113754992640bytes，
+已满足容量门禁，但试机前仍要fresh检查。
+
+真人授权的旧0adb/760a等价COW已完整验收并关闭权限，两份仍逻辑16GiB/hash不变，
+sidecar/logs保留，base前后全hash不变，最新6015未替换。原始故障字节未修复。
+设备仍最后验收原厂Android／物理启动对／完整b4ee，四写权限false，
+新candidate approved_trials=attempts0，无活动任务／新手机试验授权。
+下一关只允许单独确认精确候选一次≤1200/fullcapture+NEWb4ee恢复后才执行。
+桌面未实现。此本地交接不是新提交授权，用户mkadt/mkiosroot不动。
+
+---
+
+### 旧快照（当前状态以上文为准）
+
+## 当前交接 — 0174完整CI与旧现场等价COW已验收，新候选验收中（2026-10-31）
+
+CI41191237900/ee4ff351e5a05490ad702bbac9d865c1a59ea75b独立验收PASS：
+完整nativebuild/link、109CI＋111local、28源码、IPC／VMv2新标记、17IIG逐字节不变、
+四字段IORPC。kernelSHA4b9dccd648b58722c7ab8dd9920d630fe25a113900b8bb9613d06f884a6b6ffd。
+之前本机/tmp满只阻碍下载，已新workdiskTMPDIR恢复下载，没有再次跑CI。
+
+获批0adb/760a等价COW替换bu0lm7yf8COMPLETE0：两份仍逻辑完整16GiB，
+全SHA与cmp在替换前后都通过；原sidecar/logs不变，独占旧inode在验收后释放。
+Btrfs独占分别36.34MiB/33.75MiB，共享b4ee源前后全SHA不变；最新6015不替换，
+stat/sidecar不变。实际操作前后空闲增加31.64GiB，当前约106GiB，不把此前其他
+空闲变化全归因COW。权限已关闭。独立存储变更记录在.tmp/
+old-scenes-cow-replacement-20261031/{approval,progress}.json；原hash/未修复字节不变。
+
+容量重新达到18GiB门禁后仅生成主机候选：
+shim/out-dali/ufs-41191237900/candidate-desktop-backboard-ipc-context-20261031/
+initbootSHAfb1790a0afc7c7e8b1e8c22415c9860d8d6d23037f675ab2b18bce13864a93d3，
+boot仍ddfb…；只加sweetbbipc1，保留PC/VM、serial0/ffscreen0/GUI/HID/WDT，
+NEWb4ee→07ba/sparse3c52不变。新CI绑定12项hoststorage门禁PASS。
+bunsoc59s正在独立解包/AVB/完整根重放/static13验证，未完成前不试机。
+
+没有新的手机权限：候选approved_trials=attempts0/all4flagsfalse，设备仍最后验收的
+原厂Android/物理启动对/完整b4ee。所有原始逻辑现场保留，无新的清理或COWgrant。
+仅最终候选验收后再单独询问精确一次试机/fullcapture/recovery；桌面未实现。
+本地交接不构成新提交授权；原mkadt/mkiosroot不动。
+
+---
+
+### 旧快照（当前状态以上文为准）
+
+## 当前交接 — 测试宏修正CI与获批旧现场等价COW均在进行（2026-10-31）
+
+真人分别批准两文件修正发布＋一次CI、仅旧0adb/760a等价COW替换。
+精确2文件提交ee4ff351e5a05490ad702bbac9d865c1a59ea75b已推送核验；
+新完整CI https://github.com/localhosts-A/ios-sweet/actions/runs/41191237900
+bq90xywgt等待全部终态；之前41189879761测试宏失败/Build跳过，不自动重跑。
+内核patch不变，本地111测试含Darwinfortified负控/双正控通过；独立CI核验脚本
+verify-backboard-ipc-darwin-bzero-ci.py仅准备，尚未执行或报链接成功。
+
+bu0lm7yf8执行精确获批COW替换：两新逻辑完整16GiB副本先应用9304/8639块差异，
+分别sha256sum＋cmp全量相同后才原路径原子替换，旧inode用硬链接保留至发布后
+再全SHA/cmp通过才释放。专用b4ee源FD/完整hash前后、旧sidecar/hash/日志保留；
+独立progress/存储表示清单在old-scenes-cow-replacement-20261031。尚未完成，
+不能称已释放32GiB或容量已满足。小文件真实reflink/patch/hash/cmp/bounds先验通过。
+最新6015与恢复备份不替换不删除；无手机/新试机权限。设备四权限false。
+
+上述两任务仍pending；不读pending输出循环poll，不开始候选刷机。完成COW先验收
+逻辑全hash/cmp/sidecar/base/实际free，再验收CI完整产物。桌面仍未实现。
+这份本地发布后交接不构成新的提交批准，原mkadt/mkiosroot不动。
+
+---
+
+### 旧快照（当前状态以上文为准）
+
 ## 当前交接 — 0174 CI测试夹具失败；宏修正本地通过；COW仅评估（2026-10-31）
 
 HEAD2a5433b038a274ae3279bfeb608b2aef4aa7255e／CI41189879761结论failure。
