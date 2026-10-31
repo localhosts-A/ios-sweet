@@ -1,3 +1,19 @@
+## CURRENT LEGACY IIG ADAPTER LOCAL PASS — full native CI pending approval (2026-10-31)
+
+NativeCI41128102930/c21de8d allpolicytestsPASS then132generatedDriverKitkernelContenterrors; no linkedkernel. StrictBUILDONLYadapter usesfreshXcode16iigoutputs butselectsknowninline-With-Content branches, checksactual4fieldIORPCheaderbeforetool, removesextraunionpointer/knowninitializer+assignment/newreplynonnulloptimizationhints, keepsoldruntimechecks/ABI. Version427.100.5/knownpatterns/counts only, unknownsFAILCLOSED; nofieldadded/no xnu sourcechange/no oldAppleasset/executable reuse. WorkflowIIGoverrideusesexistingMakeIncgate, hashincachekey, validates17generatedcpp/headernokernelContent.
+
+PASS: all17actualadaptedgeneratedcpp realARM64compile; same17oldreferenceobjectscompile; allglobaldefined+undefinedsymbolsets EXACTLYequal.8newexecutabletests incl24byteIORPC/union/inlineoffset/requestreply/malformed/error/nullreplyerror/unknown/generator/makeoverride+spaces;76totalunittest/repo+ADT/10bashblocksPASS. ActualfailedCI25sourcebytes/localcriticalhashesunchanged. Nativeadapterfullbuild/link/runtime NOTverified. Exact5publicationfilesadapter/test/docs/workflow/NOTESawaitnewapproval.
+
+No activebackgroundtask/newdevice/scene-replacementapproval. PhoneoriginalAndroid/physicalpair/fullcleanverified/allflagsclosed; fullfe1scene+COWcopyretained/originaluntouched. DesktopNOTachieved. Nextsourcepublication/fullCI, nothardwaretrial.
+
+---
+
+## CURRENT DARWIN FIX CI — exact test-only fix pushed, full build pending (2026-10-31)
+
+Approved2filecommitc21de8d612f68c3ffec49589330bf89d583568fb pushedforkbranch; NEWCI41128102930 dispatched13.5/DEVELOPMENT/SWEET onmacos15Arm64/Xcode16.4. Testmacro/private-strlcpyfix only,68localtests+negativecontrolPASS/kernel25unchanged. Fullnativebuild/link/iig NOTyetverified. WatchnewCI, inspectactualerrorsbeforekernelABIchange; independentverifierready forsuccessonly. PriorCI41127058628 testfailurebeforeBuild isnotthisrun. No devicewrite/newtrial/scene-replacementapproval; phonefullyrestored/allflagsclosed/fullfe1sceneintact. DesktopNOTachieved.
+
+---
+
 ## CURRENT NATIVE CI TEST FIX LOCAL PASS — kernel Build not reached (2026-10-31)
 
 CI41127058628 macos-15Arm64/Xcode16.4 setup/deps/guardsPASS; testfailedbecause0171samplerfixture collidedwithDarwin__unused/securestrlcpy, BuildSKIPPED. Packagingmissingxnu/fakeroot secondary; iigcompatibilityUNKNOWN, not actualkernelcompilefailure. Watchbovg4o819 completedexit1; no activebackgroundtask.

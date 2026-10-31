@@ -40,6 +40,8 @@ on:
       - "tools/test_dali_late_gui_budget.py"
       - "tools/test_dali_backboard_user_entry.py"
       - "tools/test_xnu_macos15_runner.py"
+      - "tools/iig_legacy_rpc.py"
+      - "tools/test_iig_legacy_rpc.py"
 
 concurrency:
   group: xnu-${{ github.ref }}
@@ -95,12 +97,15 @@ jobs:
           echo "DEVELOPER_DIR=$XC/Contents/Developer" >> "$GITHUB_ENV"
           sudo xcode-select -s "$XC"
           xcodebuild -version
-          xcrun --find iig
+          REAL_IIG=$(xcrun --find iig)
+          echo "$REAL_IIG"
+          IIG_COMMAND=$(python3 -c 'import shlex,sys; print(shlex.join(sys.argv[1:]))' "$(command -v python3)" -I "$GITHUB_WORKSPACE/tools/iig_legacy_rpc.py" "$REAL_IIG" "$GITHUB_WORKSPACE/dxb/xnu/iokit/IOKit/IORPC.h")
+          echo "IIG=$IIG_COMMAND" >> "$GITHUB_ENV"
 
       - name: Cache toolchain identity
         id: toolchain
         run: |
-          identity=$({ xcodebuild -version; xcrun clang --version; xcrun --sdk macosx --show-sdk-version; ccache --version; } | shasum -a 256 | cut -d ' ' -f 1)
+          identity=$({ xcodebuild -version; xcrun clang --version; xcrun --sdk macosx --show-sdk-version; ccache --version; shasum -a 256 tools/iig_legacy_rpc.py; } | shasum -a 256 | cut -d ' ' -f 1)
           echo "key=$identity" >> "$GITHUB_OUTPUT"
           echo "SWEET_CCACHE=$(command -v ccache)" >> "$GITHUB_ENV"
 
@@ -140,6 +145,7 @@ jobs:
           python3 tools/test_dali_late_gui_budget.py
           python3 tools/test_dali_backboard_user_entry.py
           python3 tools/test_xnu_macos15_runner.py
+          python3 tools/test_iig_legacy_rpc.py
 
       - name: Build
         working-directory: dxb
@@ -441,6 +447,11 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET GUIEXEC: name=%s pid=%d phase=%s result=%d csflags=0x%llx'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -Fx 'signature-failure-before-kill'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -Fx 'release-after'
+          # Generated messages must still use the legacy inline IORPC ABI.
+          ! grep -Fq kernelContent xnu/iokit/IOKit/IORPC.h
+          IIG_DIR="build/xnu.obj/${KERNEL_CONFIG}_ARM64_${MACHINE_CONFIG}/iokit/DriverKit"
+          test "$(find "$IIG_DIR" -name '*.iig.cpp' -type f | wc -l | tr -d ' ')" = 17
+          ! grep -l kernelContent "$IIG_DIR"/*.iig.cpp
           grep -Fq 'sweet_ff_enabled = sweet_ff_svc_mode(enabled)' xnu/bsd/dev/sweet_sample.c
           grep -Fq 'sweet_ff_fault_enabled = sweet_ff_mode(enabled)' xnu/bsd/dev/sweet_sample.c
           grep -Fq 'return requested == 3 ? requested : sweet_ff_mode(requested);' xnu/bsd/dev/SweetFeatureTrace.h
