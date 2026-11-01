@@ -1,3 +1,19 @@
+## 当前交接 — CI41267851036失败于macOS信号取消，已本地定点修正，禁止自动重跑（2026-11-01）
+
+已提交09a7671ec46566f410ce6f8ce53e63b19ed1a280的唯一CI https://github.com/localhosts-A/ios-sweet/actions/runs/41267851036 为completed/failure/attempt1；bk9gvskj8观察exit1/完整log已取，未下载成功artifact。prebuild前6套实际执行80cases，其中新安全suite20有1error，不能写247已执行；Build未完成，package/upload次生失败，不是完整native验收。禁止使用此提交封装可刷候选，不重发/rerun。
+真实失败：test_termination_signal_stops_local_group_and_restores_handler预期取消却在Popen.wait超时10s。已只读核对CPython v3.15.2 Lib/subprocess.py:2253–2282的macOS _wait_kqueue：kq.control外围except OSError会吞掉handler的InterruptedError（OSError子类），与CI Python3.15.2/栈line2349吻合；本地3.14.7旧wait循环无此catch，故本地原20项通过。定点本地改为StageInterrupted(RuntimeError)并新增精确kqueue-shaped捕获负控，不删真实信号测试/不放宽预算。协调器/安全suite修改尚未提交；b4ppz2hx4 completed0，全部25suite204cases+继承storage12=216实际本地PASS，新安全suite21。integrated-dsc-signalfix-{all-tests,host-test-counts}为权威；下一次CI预期202pre+46post=248，不当已执行。拟只提交3文件（tools/dali_unattended_return.py、tools/test_dali_trial_safety.py、NOTES.md）和一次新完整CI，需要另行批准；当前计划一次CI已耗用，无自动重跑/追加提交。
+主机新根33215490...完整验收仍有效，原b4ee/07ba/现场不变；stage/verify脚本已主机准备但未运行/未封装候选，三个具体绑定adapter/启动入口仍须最终成功CI后生成并验收。设备仍零操作、0177spent/四权限false，实际进Fastboot/刷入仍单独确认；桌面未实现。
+
+---
+
+## 当前交接 — 整合恢复链已提交，唯一新CI41267851036进行中（2026-11-01）
+
+精确7文件已提交推送09a7671ec46566f410ce6f8ce53e63b19ed1a280到fork/port/dali-mt6991；唯一dispatch https://github.com/localhosts-A/ios-sweet/actions/runs/41267851036，receipt integrated-dsc-publication.json/source-batch SHA b3a25816b79041b9242665f44520ef18461a36d220cf5dee0efef6343f67f2a2。后台bk9gvskj8仅观察全部终态/取日志/隔离下载，不重发/rerun、不poll活动输出。
+本地215cases、主机DSC新根33215490.../10runs24839blocks101740544bytes/全184183旧文件内容不变/全16GiB重放+fsck0已完成。预期新CI247执行/native link/IIG/source仍须真实终态与独立验收，不能提前写成功。新候选stage/verify及启动恢复绑定工具正在主机准备，不执行设备或旧spent脚本。
+设备仍未访问，0177spent/四权限false。原b4ee/07ba/现场保持。新CI成功后用新commit/run/kernel实物封装验收一个候选，实际进入Fastboot/刷入仍须精确整轮确认；运行接纳、自动Fastboot、桌面均未验证。本条仅发布后本地交接，不再为此自动提交/重跑CI。
+
+---
+
 ## 当前交接 — DSC整合根与恢复链主机验收通过，准备精确7文件/一次新CI（2026-11-01）
 
 新批准playful-tickling-lemur范围：仅新主机COW加入DSC、参数化三adapter/固定起点/依赖门禁、POSIX进程组有界终止及远端写入不确定性阻断，精确发布/一次新完整CI后封装一个候选。未批准实际进入Fastboot/刷入，0177spent/四权限false保持。任何已启动执行超时/异常保留pending、阻断后续写/自动restore-only；host组消失不证明远端dd静止。

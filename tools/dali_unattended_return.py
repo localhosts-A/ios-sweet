@@ -19,6 +19,14 @@ FLAGS = ('device_write_authorized', 'root_delta_authorized', 'stock_restore_auth
          'root_restore_authorized')
 
 
+class StageInterrupted(RuntimeError):
+    """Control-flow cancellation, deliberately NOT OSError/InterruptedError.
+
+    Python 3.15 macOS Popen._wait_kqueue catches OSError from kqueue.control;
+    raising InterruptedError in a signal handler is swallowed by that fallback.
+    """
+
+
 def require(value, message):
     if not value:
         raise ValueError(message)
@@ -240,7 +248,7 @@ def run_stage(argv, timeout, evidence):
     process = subprocess.Popen(argv, start_new_session=True)
     old_handlers = {}
     def interrupted(number, frame):
-        raise InterruptedError('协调器收到终止信号 ' + str(number))
+        raise StageInterrupted('协调器收到终止信号 ' + str(number))
     try:
         for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
             old_handlers[sig] = signal.signal(sig, interrupted)
@@ -323,7 +331,7 @@ def main(argv=None):
         parser.error('请使用python3 -I')
     try:
         result = recover(args.candidate, args.approval_sha256, args.recover)
-    except (ValueError, OSError, KeyError, subprocess.SubprocessError) as error:
+    except (ValueError, OSError, KeyError, StageInterrupted, subprocess.SubprocessError) as error:
         print('无人值守接管停止：' + str(error) + '；保留pending状态，不自动重试。', file=sys.stderr)
         return 1
     print(json.dumps(result, indent=2))

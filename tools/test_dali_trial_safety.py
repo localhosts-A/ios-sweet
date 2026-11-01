@@ -314,12 +314,29 @@ time.sleep(60)
             evidence=Path(t)/'process.json'
             timer.start()
             try:
-                with self.assertRaises(InterruptedError):
+                with self.assertRaises(c.StageInterrupted):
                     c.run_stage([sys.executable,'-I','-c','import time;time.sleep(60)'],10,evidence)
             finally:
                 timer.cancel();timer.join()
             self.assertFalse(c.group_exists(json.loads(evidence.read_text())['pgid']))
         self.assertEqual(signal.getsignal(signal.SIGTERM),old)
+
+    def test_cancellation_cannot_be_swallowed_by_kqueue_oserror_fallback(self):
+        # Exact relevant shape of CPython v3.15.2 _wait_kqueue: an OSError
+        # raised inside control(), including InterruptedError, returns False.
+        # Use our signal handler on a real child; never execute fetched code.
+        def kqueue_shaped_wait(process, timeout):
+            try:
+                signal.getsignal(signal.SIGTERM)(signal.SIGTERM,None)
+            except OSError:
+                return 0
+        self.assertFalse(issubclass(c.StageInterrupted,OSError))
+        with tempfile.TemporaryDirectory() as t, \
+             mock.patch.object(c.subprocess.Popen,'wait',autospec=True,side_effect=kqueue_shaped_wait):
+            evidence=Path(t)/'process.json'
+            with self.assertRaises(c.StageInterrupted):
+                c.run_stage([sys.executable,'-I','-c','import time;time.sleep(60)'],10,evidence)
+            self.assertFalse(c.group_exists(json.loads(evidence.read_text())['pgid']))
 
     def test_nonzero_helper_never_counts_as_success(self):
         with tempfile.TemporaryDirectory() as t:
