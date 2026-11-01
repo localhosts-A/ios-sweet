@@ -8,7 +8,7 @@
 
 **CF完整函数静态分支：** `w/desktop-current-cf-stat-branches-v1/verification.json`只读取得两函数真实LC范围（Bundle 7916bytes/Properties 528bytes），本次累计读取224308bytes<8MiB；源raw metadata保持、未重hash。Properties函数对ENOENT专门置零可选输出并走正常返回路径；Bundle错误路径可继续根据其他输入走不同静态分支。静态结构加此前runtime errno支持“有错误处理”，但未记录用户态返回/参数，不能断言上层接受、路径可选或与桌面无关；未知路径不猜补、不强制成功。
 
-**当前显示日志的证据边界：** 同boot日志有IOCoreSurfaceRoot注册、AppleCLCD创建与logical/physical几何行，但没有观察到GUI present或成功DSI记录；注册不是用户进程已经打开接口或提交画面。launchd记录SpringBoard/backboardd service state running不等它们已完成GUI初始化。已提取的限定服务日志未指出可以安全修改的显示/IPC根因；其无匹配日志不证明其他错误不存在。本次没有改动显示源码。
+**当前显示日志的证据边界：** 同boot日志有IOCoreSurfaceRoot注册、AppleCLCD创建与logical/physical几何行，但没有观察到GUI present或成功DSI记录；注册不是用户进程已经打开接口或提交画面。新增只读 `w/desktop-current-display-log-coverage.json` 将同boot console与实际CI-source的日志条件对照：没有匹配FB externalMethod selector/IOSurface selector或trap日志；FB低于64的selector及surface selector/trap按全局位首次记录（FB≥64另每次记录），client init/start本身没有日志。全局首次标志/并发、过滤或日志丢失等限制负面推断，不能据此断言没有client打开/调用或显示根因。launchd记录SpringBoard/backboardd service state running不等它们已完成GUI初始化。已提取的限定服务日志未指出可以安全修改的显示/IPC根因；其无匹配日志不证明其他错误不存在。本次没有改动显示源码。
 
 上一步计划审批工具被中断/拒绝，用户随后说“继续”；这不是已批准该诊断候选或新实机轮的证明。本次继续利用现有封存数据做有限主机分析，不修改正式源码/发CI/发布候选/访问设备；HS与原恢复保护不变。下一步先重新评估可从现有日志解决的问题及候选必要性，尤其不能以错误的“所有MachMsg2上下文未采”为理由追加诊断。
 
