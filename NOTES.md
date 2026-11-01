@@ -1,4 +1,22 @@
-## 当前交接 — 桌面仍未实现；晚期BB调用已定位，缺失路径/IPC对象仍待实证（2026-11-02）
+## 当前交接 — 真人已批准上次方案；先做主机原型，桌面仍未实现
+
+**固定内存下的后续设计方向（尚未实现）：** `osfmk/arm64/sleh.c:1664-1719` 的正常SVC可在已有内核栈局部保存epoch并显式传给正常return；`osfmk/ipc/mach_msg.c:391-402` 的接收continuation以`thread_syscall_return(mr)`非局部返回，旧栈上的token不能假定仍可用。遵循已批准方案中的“不能证明时unknown”：continuation原始返回可作为有界独立事件输出，不和pending事务伪配；BSD continuation同理，普通BSD返回继续使用已有栈token。必须增加固定槽/独立无关联返回计数和所有重入/丢失/关窗负控、真实source/ARM64重测，不能把该方向当完成结果。此法不需要扩大全系统每线程结构，但要核实hook路径、跨组件私有接口及保守槽回收，避免旧pending永久耗尽或被误标完成。
+
+**新增发布阻塞：** 当前实验用 `struct uthread` 追加两个64位字段以实现显式token，但会改变每个线程的结构尺寸、即使诊断关闭也有成本；它不是已经证明符合批准方案“固定内存”的实现。thread zone按 `uthread_size` 向上取整，实际每线程增量及上界尚未独立量化；`thread_max` 名称本身不是已证明的强制上限。不能因8槽记录器静态断言通过而忽略系统范围成本，也不能为复用未知线程字段改变其他行为。`w/bbctx-patch-replay-v1/verification.json` 仅表明隔离候选九文件真实Git回放和缺metadata负控通过，不代表候选被接受；**禁止安装该候选、提交为正式补丁、发CI或设备部署，直至有满足固定内存及token契约的实现或经用户明确批准的具体设计变更**。现有内核和设备恢复状态未变。
+
+最新增量：检查精确XNU `kern_fork.c:171` 以 `sizeof(struct uthread)` 导出分配尺寸、`osfmk/kern/thread.c:247-255` 按此尺寸创建thread zone，`thread.c:1322/1369` 分配后调用 `uthread_init`；不依赖推测的allocator初始值，在隔离overlay的 `bsd/kern/kern_fork.c` 给两个epoch显式置零（原文件与本轮native archive逐字节相同，原SHA `a3e5d585e4fc39a8fb16de7691c3b448ed3d517bba6cb2f1ae8eac1ed7e7d01e`）。字段位于struct末尾，避免移动已有字段；结构大小与外部组件兼容性仍需完整native重构建/ABI核验。更新 `w/bbctx-source-hooks-v4/tests.log` 2项通过，覆盖实际初始化hook位置；四个ARM64源对象含kern_fork均通过、无atomic helper，见 `w/bbctx-arm64-objects-v5/verification.json`，仍手动stage header，非正式导出/完整CI。未触碰设备。
+
+上一进展（2026-11-02，仍仅主机）：为消除仅凭TID搜索返回的问题，独立overlay从与native archive source/export逐字节一致的 `bsd/sys/user.h`（原SHA `94c4180c1c23bab778dd23039576831936dad85d193c61d1a3123ca6848b3b13`）另建文件，在struct uthread末尾追加两个仅DEVELOPMENT/SWEET的owner-thread epoch。BSD每次入口重置，dispatch后保存；normal/continuation取精确token，Mach phase0保存、phase1/3取并清除token；错误/缺失token不按TID猜配。`w/bbctx-runtime-fixture-v10/tests.log` 14项ASan/UBSan合成测试通过，`w/bbctx-source-hooks-v3/tests.log` 实际参数规范化/hook片段2项通过；最新 `w/bbctx-arm64-objects-v4/verification.json` 三实际ARM64对象编译通过且无atomic helper。头文件被手动stage，并非正式导出/完整link；线程结构大小改变、所有组件布局一致、真实调度与生命周期仍须完整native构建/严格检查，不能依据mock宣称安全部署。先前v9/v2证据只绑定旧源码，不得套用本版。正式 `tools/test_mkpayload_cmdline.py` 加精确607-byte候选与608-byte拒绝，`w/bbctx-cmdline-official-v1/tests.log` 8项通过，安全参数保留；无新设备、CI或桌面。
+
+上一进展（2026-11-02，仍仅主机）：抽取实际 `arm_get_u64_syscall_args` 和新增syscall hook片段执行直接/间接寄存器、参数溢出、原始errno测试；同时静态检查真实namei与过滤/返回hook位置。`w/bbctx-source-hooks-v2/tests.log` 2项通过；v1因测试脚本猜错namei结束标记而失败并保留。此测试不执行完整namei或证明continuation事务唯一。饱和字段40轮压力最初v6/v7/v8发现丢弃，未提高7900预算；精简Mach七原始字到单条hex后 `w/bbctx-runtime-fixture-v9/tests.log` 13项通过（含极值无丢弃），仍需与旧日志同ring的总体覆盖评估及严格解析器。隔离构建复用CI命令、手动暂存正式路径头后三个实际ARM64对象编译通过，`w/bbctx-arm64-objects-v2/verification.json`，无atomic helper；此不是Makefile实际导出、完整链接/CI或设备结果，任何下一次修改后必须重编。继续前须证明continuation无token时不误配，无法证明则改成保守unknown；不可宣称严格关联。未发CI/设备操作，桌面仍未实现。
+
+上一私有overlay里程碑：`SweetBBContextRuntime.h` 增加固定book/snapshot总量编译断言、每book有界槽满/重入/stale/exhausted状态行及无匹配continuation计数；最终snapshot无法取得guard时明确snapshot unknown。真实源码复核发现 `NAMEI_CONTLOOKUP` 早退与最终copy失败原来可能漏记第二次namei，现加受guard保护的unobserved事件：单次仍unknown，已有/随后另一次lookup则ambiguous、不得输出可信路径。新源码重跑实际host policy v5 **18项通过**及ASan/UBSan runtime fixture v5 **12项通过**（含这些新负控），见 `w/bbctx-host-policy-tests-v5/tests.log`、`w/bbctx-runtime-fixture-v5/tests.log`；不与旧版相加。状态计数仅有guard快照才有效、loss粘性使对应记录vld=0。此为独立部分源overlay和合成XNU stub，未证明真正内核控制流/并发、未完成真实ARM64对象、正式patch、完整回归/CI或新设备验证。继续优先验证真实source hook、重试与continuation关联及日志最坏预算；LSP孤立头缺XNU include不是native结果。旧kernel/现场/恢复和桌面未达标不变。
+
+真人最新原话：“我批准上次方案”。这是真实的明确方案批准；允许按 `/home/baka/.claude/plans/playful-tickling-lemur.md` 先实施独立host原型/测试，并在全部CI/精确新scope/fresh门禁/同轮完整取证恢复证明后最多一轮整合定位。旧spent不重开，任何不确定在途写不竞态恢复；不改GPT/未备份尾部/原厂源/用户工具。原计划写“末期IPC未捕获”已由 `w/desktop-current-machmsg2-continuations-v1.json` 纠正为sample30三次已有标量与返回，不能重新表述为缺失；新观测只补仍未知的namei初始路径/事务关联与未返回状态。此方案是定位，不是已证桌面修复；HS/VCORE/PMIF-P禁用保持。当前HEAD b7ffe13，无活动设备；独立overlay的纯C策略与实际编译host tests已完成v4聚焦18项，仍未完成生产接线、ARM64、完整回归/CI/设备验证。
+
+host原型 `w/bbctx-host-overlay-v1/bsd/dev/SweetBBContextPolicy.h` 和 `w/test-bbctx-host-policy.py`：8槽、身份+epoch、晚期BSD ENOENT快照、重入/槽满/关窗保守状态、192字节路径hex分块、BSD restart/justreturn与Mach域分离，所有操作要求调用者持guard。v4真实18项通过（含32线程受保护快照、C/C++严格告警），只证明host策略；尚无任何kernel hook/真实namei/user/mach调用或完整CI，不可当桌面修复。`bsd/dev/sweet_sample.c`/`bsd/dev/arm/systemcalls.c`与前CI45源hash相同；`bsd/vfs/vfs_lookup.c`/`bsd/sys/Makefile`额外直接只读对照CI buildtree archive逐字节核同，四份已用独立新regular files复制到overlay（baseline.json），绝不写穿冻结source symlink。source接线、竞争/continuation实际测试和新完整回归仍待完成。
+
+### 前一交接 — 桌面仍未实现；晚期BB调用已定位，缺失路径/IPC对象仍待实证（2026-11-02）
 
 **主目标未完成，当前没有活动后台或设备任务。** 下方273项host测试/40a7562文档提交不等桌面。当前kernel仍为源码48784e2/nativeCI41317700197，boot5188F046、GUIpresent0/成功DSI0；未收到真人实屏图标网格/Dock/UI更新/稳定120秒证据。原PWM轮closed/1次spent不重开。
 

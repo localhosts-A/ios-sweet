@@ -90,6 +90,30 @@ class PayloadCommandLineTest(unittest.TestCase):
         self.assertEqual(len(proposed.encode()), 594)
         self.assertEqual(self.packed_command(proposed), proposed)
 
+    def test_dali_bbctx_optin_at_exact_limit(self):
+        # The existing 594-byte PWM fixture plus one 13-byte diagnostic opt-in.
+        before = ('debug=0xc cpus=1 keepsyms=1 sweettouch=0 sweetkeys=0 sweetbattery=0 '
+                  'rd=ufsroot0 ufsroot=unixnu_data sweetlog=1 ufslogsecs=30 '
+                  'unentitled_ios_sim_launch=1 ignition_level=1 launchd_unsecure_cache=1 '
+                  'wdt=-1 ufsrw=1 rootrw=1 sweetsample=- sweetsampledelay=30 '
+                  'sweetsampleinterval=30 sweethfsdiag=1 sweethfsblock=3059250 '
+                  'sweetheartbeat=1 sweettasktrace=1 daligui=1 sweetfb_noconsole=1 '
+                  'sweetfb_hz=10 sweethidswipe=60 sweetfftrace=3 '
+                  'sweetfffault=0 serial=0 daliwdtlease=1140 sweetguiexec=1 '
+                  'sweethidwait=1200 sweetffpc=1 sweetbbvm=1 sweetbbipc=1 '
+                  'sweetload=1 ufswait=1 dalifastboot=1 sweetloadrw=1 ufspwm=1')
+        self.assertEqual(len(before.encode('utf-8')), 594)
+        candidate = before + ' sweetbbctx=1'
+        self.assertEqual(len(candidate.encode('utf-8')), 607)
+        self.assertEqual(self.packed_command(candidate), candidate)
+        for required in ('sweettouch=0', 'sweetkeys=0', 'serial=0', 'dalifastboot=1',
+                         'daliwdtlease=1140', 'sweetsample=-', 'sweetsampledelay=30',
+                         'sweetsampleinterval=30', 'sweetheartbeat=1', 'sweethidwait=1200',
+                         'ufspwm=1', 'sweetbbctx=1'):
+            self.assertEqual(candidate.split().count(required), 1, required)
+        with self.assertRaisesRegex(ValueError, 'UTF-8 bytes; maximum is 607'):
+            mkpayload.build(self.root / 'missing', self.tree, candidate + 'x')
+
     def test_cli_leaves_existing_output_untouched(self):
         output = self.root / 'payload'
         output.write_bytes(b'preserve existing artifact')
