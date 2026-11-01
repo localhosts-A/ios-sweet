@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 
 ROOT = Path(__file__).resolve().parents[1]
 PATCH = ROOT / 'xnu/patches/0178-sweet-dali-fastboot-return.patch'
+SAMPLER_OVERLAY = ROOT / 'xnu/patches/0179-sweet-gui-rw-wait-provenance.patch'
 _SPEC = importlib.util.spec_from_file_location('recovery_adt', ROOT / 'tools/dali_recovery_adt.py')
 recovery = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(recovery)
@@ -25,8 +26,8 @@ unattended = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(unattended)
 
 
-def fragment(path):
-    blocks = [block for block in PATCH.read_text().split('diff --git ')[1:]
+def fragment(path, patch=PATCH):
+    blocks = [block for block in patch.read_text().split('diff --git ')[1:]
               if ('b/' + path + '\n') in block]
     if len(blocks) != 1:
         raise AssertionError(path)
@@ -309,7 +310,11 @@ in_irq=false;preempt=1;assert(!sweet_log_fastboot_drain(100));puts("PASS");}
             for path in ('pexpert/arm/pe_dali_watchdog.c', 'pexpert/arm/DaliFastbootReturnPolicy.h',
                          'pexpert/arm/DaliFastbootReturnSMC.h', 'osfmk/arm64/dali_watchdog.h',
                          'bsd/dev/sweet_sample.c', 'bsd/dev/sweet_ufs.c'):
-                self.assertEqual((Path(source_dir) / path).read_text(), fragment(path), path)
+                expected = fragment(path, SAMPLER_OVERLAY) if path == 'bsd/dev/sweet_sample.c' else fragment(path)
+                self.assertEqual((Path(source_dir) / path).read_text(), expected, path)
+                if path == 'bsd/dev/sweet_sample.c':
+                    self.assertEqual(function(expected, 'sweet_sample_thread'), function(sampler, 'sweet_sample_thread'))
+                    self.assertEqual(expected.count('dali_fastboot_return_poll();'), 1)
 
 
 class UnattendedReturnTests(unittest.TestCase):

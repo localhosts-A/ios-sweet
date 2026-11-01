@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise final0178 functions; optional SWEET_LOAD_SOURCE_DIR verifies materialized sources."""
+"""Exercise final0179 functions; optional SWEET_LOAD_SOURCE_DIR verifies materialized sources."""
 from pathlib import Path
 import os
 import re
@@ -24,8 +24,17 @@ SOURCE.update({p: fixture.fragment(p, PATCH) for p in OVERLAY_PATHS})
 CURRENT_PATCH = ROOT/'xnu/patches/0178-sweet-dali-fastboot-return.patch'
 SOURCE.update({p: fixture.fragment(p, CURRENT_PATCH)
                for p in ('bsd/dev/sweet_ufs.c', 'bsd/dev/sweet_sample.c')})
+RW_PATCH = ROOT/'xnu/patches/0179-sweet-gui-rw-wait-provenance.patch'
+RW_PATHS = ('osfmk/kern/thread.h', 'osfmk/kern/Makefile', 'osfmk/kern/lock_rw.c',
+            'osfmk/kern/exception.c', 'bsd/dev/sweet_sample.c',
+            'osfmk/kern/SweetLoadProgress.h', 'osfmk/kern/SweetRWWaitProgress.h')
+SOURCE.update({p: fixture.fragment(p, RW_PATCH) for p in RW_PATHS})
 LOCK = SOURCE['osfmk/kern/lock_mtx.c']
 SAMPLER, UFS, EXCEPTION, GUI_POLICY, IO_POLICY = (SOURCE[p] for p in PATHS)
+RW_POLICY = SOURCE['osfmk/kern/SweetRWWaitProgress.h']
+RW_LOCK = SOURCE['osfmk/kern/lock_rw.c']
+# Embed the actual exported header for standalone host harnesses, not a rewritten model.
+GUI_POLICY = GUI_POLICY.replace('#include <kern/SweetRWWaitProgress.h>', RW_POLICY)
 
 
 def function(source, name):
@@ -75,6 +84,7 @@ def parse_record(line):
         'SWEET LOAD': 'v s at claims ready miss final',
         'SWEET LOADP': 'v s g p id iv rg q',
         'SWEET LOADT': 'v s g j th q',
+        'SWEET LOADRW': 'v s g j th q gn',
         'SWEET LOADIO STATUS': 'v s at q final pending',
         'SWEET LOADIO': 'v s g n vld d m x',
     }
@@ -97,6 +107,17 @@ def parse_record(line):
         if q == 0: expected |= set('st h pr bp wr b z u k'.split())
         if q == 0 and values['v'] == 2: expected.add('uw')
         if 'uw' in values and values['uw'] not in (0, 1, 2, 3): raise ValueError('wait class')
+    elif prefix == 'SWEET LOADRW':
+        if q not in range(9): raise ValueError('RW status')
+        generation=values.get('gn',-1)
+        if q==0:
+            expected |= {'ev','ca','site'}
+            if generation<=0 or generation&1 or values.get('ev',0)==0 or values.get('ca',0)==0 or values.get('site') not in (1,2): raise ValueError('RW match')
+        if q in (1,7,8) and generation!=0: raise ValueError('RW absent generation')
+        if q==2 and (generation<=0 or not generation&1 or generation==(1<<64)-1): raise ValueError('RW writer generation')
+        if q==4 and generation!=(1<<64)-1: raise ValueError('RW exhaustion')
+        if q in (5,6) and (generation<=0 or generation&1): raise ValueError('RW stable generation')
+        if q==3 and not 0<generation<(1<<64)-1: raise ValueError('RW crossed generation')
     elif prefix == 'SWEET LOADIO STATUS':
         if q not in ((0, 1) if values['v']==1 else (0, 1, 2, 3, 4)) or values.get('pending') != 'unknown': raise ValueError('IO status')
         if q == 0: expected |= {'z', 'ov'}
@@ -122,7 +143,7 @@ def parse_record(line):
     small = {'iv', 'n', 'st', 'h'} if prefix in ('SWEET LOADP', 'SWEET LOADT') else set()
     if any(values[k] >= 1 << 32 for k in small if k in values): raise ValueError('32-bit width')
     if 'ov' in values and values['ov'] not in (0, 1): raise ValueError('overflow flag')
-    if prefix in ('SWEET LOADP', 'SWEET LOADT') and not 0 <= values['g'] < 2: raise ValueError('target')
+    if prefix in ('SWEET LOADP', 'SWEET LOADT', 'SWEET LOADRW') and not 0 <= values['g'] < 2: raise ValueError('target')
     if 'j' in values and not 0 <= values['j'] < 8: raise ValueError('thread index')
     if prefix == 'SWEET LOADP' and q == 0 and not 0 <= values['c'] <= 8: raise ValueError('thread cap')
     if 'final' in values and values['final'] != int(values['s'] == 39): raise ValueError('final')
@@ -149,15 +170,18 @@ def parse_boot_records(text):
         match = re.search(r'SWEET BOOT SESSION UUID: ([0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12})', line)
         if match:
             current = match[1].upper()
-            boots.setdefault(current, dict(records=[], rejected=[], samples={}))
+            boots.setdefault(current, dict(records=[], rejected=[], samples={}, rw_support='unknown'))
+        if current is not None and line.startswith('SWEET LOADRW CONFIG: v=1 '):
+            boots[current]['rw_support']='observed'
         if current is None or not any(line.startswith(prefix) for prefix in
-                                      ('SWEET LOAD: ', 'SWEET LOADP: ', 'SWEET LOADT: ', 'SWEET LOADIO: ', 'SWEET LOADIO STATUS: ')):
+                                      ('SWEET LOAD: ', 'SWEET LOADP: ', 'SWEET LOADT: ', 'SWEET LOADRW: ', 'SWEET LOADIO: ', 'SWEET LOADIO STATUS: ')):
             continue
         boot = boots[current]
         try:
             record = parse_record(line)
         except ValueError as error:
             boot['rejected'].append(dict(raw_line=line, error=str(error))); continue
+        if record['kind']=='SWEET LOADRW': boot['rw_support']='observed'
         v = record['values']; sample = boot['samples'].setdefault(v['s'], dict(records=[], duplicates=[], missing=[]))
         key = (record['kind'], v.get('g'), v.get('j'))
         if any((r['kind'],r['values'].get('g'),r['values'].get('j')) == key for r in sample['records']):
@@ -227,10 +251,14 @@ struct task {unsigned references;};typedef struct task *task_t;
 #define TASK_NULL NULL
 static struct task target_task;
 static bool eligible=true;static unsigned task_lookups,ident_reads,collector_calls,io_calls,io_closes,io_begins;
-static task_t current_task(void) {__atomic_add_fetch(&task_lookups,1,__ATOMIC_RELAXED);return &target_task;}
+static task_t selected_task=&target_task;
+static task_t current_task(void) {__atomic_add_fetch(&task_lookups,1,__ATOMIC_RELAXED);return selected_task;}
 static void task_reference(task_t t) {__atomic_add_fetch(&t->references,1,__ATOMIC_RELAXED);}
 struct proc_ident {int p_pid;uint64_t p_uniqueid;uint32_t p_idversion;};
-static struct proc_ident proc_ident(proc_t p) {__atomic_add_fetch(&ident_reads,1,__ATOMIC_RELAXED);return (struct proc_ident){p->pid,123,1};}
+static uint64_t ident_uniqueid=123;static uint32_t ident_version=1;
+static bool irq_context;
+static bool ml_at_interrupt_context(void){return irq_context;}
+static struct proc_ident proc_ident(proc_t p) {__atomic_add_fetch(&ident_reads,1,__ATOMIC_RELAXED);return (struct proc_ident){p->pid,ident_uniqueid,ident_version};}
 bool sweet_ufs_load_eligible(void) {return eligible;}
 void sweet_ufs_load_begin(void) {++io_begins;}
 void sweet_ufs_load_close(void) {++io_closes;}
@@ -243,12 +271,12 @@ void sweet_load_collect(task_t t,struct sweet_load_snapshot *out) {
 IPC_HELPERS = ipc.HELPERS
 GUI_TAIL = ipc.TAIL + r'''
 static void load_reset(void) {
- reset();sweet_load_configured=false;sweet_load_control=sweet_load_ready=sweet_load_missed=0;sweet_load_dumped=0;
+ reset();irq_context=false;sweet_load_rw_configured=0;selected_task=&target_task;ident_uniqueid=123;ident_version=1;sweet_load_configured=false;sweet_load_control=sweet_load_ready=sweet_load_missed=0;sweet_load_dumped=0;
  bzero(sweet_load_slots,sizeof(sweet_load_slots));bzero(&target_task,sizeof(target_task));
  task_lookups=ident_reads=collector_calls=io_calls=io_closes=io_begins=0;eligible=true;atomic_hook=NULL;atomic_before=NULL;atomic_load_hook=atomic_store_hook=NULL;
 }
 static void load_common(void) {
- common();load_reset();sweet_load_prepare(0);sweet_load_begin();sweet_load_register(0,&regs);sweet_load_dump(0);
+ common();load_reset();sweet_load_prepare(0);sweet_load_rw_prepare(0);sweet_load_begin();sweet_load_register(0,&regs);sweet_load_dump(0);
  assert(!current_calls && !clock_reads && !task_lookups && !target_task.references && !io_begins);
  load_reset();
 }
@@ -258,6 +286,15 @@ static void load_common(void) {
 class LoadProgressTest(unittest.TestCase):
     def compile_run(self, body, *, prefix=PREFIX, expect='PASS', compiler_error=None):
         compiler = shutil.which('clang') or shutil.which('cc'); self.assertIsNotNone(compiler)
+        # Embedded headers are in the main C file, unlike a normal include: mark the
+        # extra formatter as referenced while retaining -Werror and all old assertions.
+        references=[]
+        if 'sweet_load_rw_format(' in body:
+            references += ['sweet_load_rw_format','sweet_load_kind','sweet_load_admitting',
+                           'sweet_load_process_format','sweet_load_thread_format']
+        if 'static bool atomic_cas(' in prefix: references.append('atomic_cas')
+        if references:
+            body=re.sub(r'(int main\(void\)\s*{)', lambda m:m[1]+' '+''.join('(void)'+name+';' for name in references), body, count=1)
         with tempfile.TemporaryDirectory() as temp:
             p=Path(temp); (p/'test.c').write_text(prefix+body)
             command=[compiler, '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', '-pthread',
@@ -395,7 +432,7 @@ int main(void){
         if os.environ.get('SWEET_LOAD_SOURCE_DIR'):
             directory=Path(os.environ['SWEET_LOAD_SOURCE_DIR'])
             for path,text in SOURCE.items(): self.assertEqual((directory/path).read_text(encoding='latin-1'),text,path)
-            self.assertEqual((directory/'osfmk/kern/Makefile').read_text(),fixture.fragment('osfmk/kern/Makefile',BASE_PATCH))
+            self.assertEqual((directory/'osfmk/kern/Makefile').read_text(),SOURCE['osfmk/kern/Makefile'])
         old=old_fragment(PATHS[0])
         for name in ('sweet_bbpc_trace','sweet_bbvm_enter','sweet_bbvm_leave','sweet_ff_fault_trace','sweet_ff_screen_dump','sweet_ff_dump'):
             self.assertEqual(function(SAMPLER,name),function(old,name),name)
@@ -416,26 +453,30 @@ int main(void){
         self.assertEqual(PATCH.read_text().count('diff --git '),5)
         self.assertEqual(function(LOCK,'sweet_load_ufs_wait_class').count('LCK_MTX_EVENT(known)'),1)
         self.assertNotIn('LCK_EVENT_TO_MUTEX',function(LOCK,'sweet_load_ufs_wait_class'))
-        self.assertEqual(function(EXCEPTION,'sweet_load_collect').count('thread->wait_event'),1)
+        self.assertEqual(function(EXCEPTION,'sweet_load_collect').count('thread->wait_event'),2)
         self.assertIn('SweetLoadProgress.h',fixture.fragment('osfmk/kern/Makefile',BASE_PATCH))
 
-    def test_actual_collector_bounded_locks_lifetimes_and_unknowns(self):
-        mock=r'''
+    @staticmethod
+    def collector_mock():
+        return r'''
 #define DEVELOPMENT 1
 struct recount_times_mach {uint64_t rtm_user,rtm_system;};
-struct thread {struct thread *next;uint64_t tid;int sched_lock;uint32_t state,block_hint;uint64_t wait_event;int sched_pri,base_pri,wait_result;};
+struct thread {struct thread *next;struct sweet_rw_wait_record sweet_rw_wait;uint64_t tid;int sched_lock;uint32_t state,block_hint;uint64_t wait_event;int sched_pri,base_pri,wait_result;};
 typedef struct thread *thread_t;
 #define TH_WAIT 1u
 #define TH_RUN 4u
 #define TH_WAKING 256u
 #define kThreadWaitNone 0u
 #define kThreadWaitKernelMutex 1u
+#define kThreadWaitKernelRWLockWrite 8u
 typedef struct {uint64_t prefix[2];struct {uint32_t data;} lck_mtx;} lck_mtx_t;
 static lck_mtx_t known_mutex;static bool known_available=true;
 static lck_mtx_t *sweet_ufs_load_mutex(void){return known_available?&known_mutex:NULL;}
 #define CAST_EVENT64_T(p) ((uint64_t)(uintptr_t)(p))
 #define LCK_MTX_EVENT(lck)      CAST_EVENT64_T(&(lck)->lck_mtx.data)
 struct task {bool active;uint32_t thread_count;struct thread *threads;};typedef struct task *task_t;
+static uint32_t rw_target_fixture;
+uint32_t sweet_load_rw_target(void *task){assert(task);return rw_target_fixture;}
 static bool task_held,spl_held,thread_held,busy;static unsigned tries,tasktries,reads,clocks;static int thread_lck_grp;
 typedef int spl_t;
 static bool task_lock_try(task_t t){assert(t && !task_held && !spl_held);++tasktries;if(busy)return false;task_held=true;return true;}
@@ -450,6 +491,8 @@ static struct recount_times_mach recount_task_times(task_t t){assert(t && task_h
 static struct recount_times_mach recount_thread_times(thread_t t){assert(t && task_held && spl_held && thread_held);++reads;return (struct recount_times_mach){t->tid,t->tid+1};}
 #define queue_iterate(head,item,type,field) for((item)=*(head);(item);(item)=(item)->next)
 '''
+    def test_actual_collector_bounded_locks_lifetimes_and_unknowns(self):
+        mock=self.collector_mock()
         self.compile_run(GUI_POLICY+mock+function(LOCK,'sweet_load_ufs_wait_class')+function(EXCEPTION,'sweet_load_collect')+r'''
 int main(void){
  struct task task={.active=true,.thread_count=12};struct thread threads[12]={0};task.threads=threads;
@@ -818,5 +861,207 @@ int main(void){
         self.assertEqual(records[0]['values']['src'],(1<<64)-1)
         self.assertTrue(all(len(record['raw_line'].encode())<=255 for record in records))
 
+
+    def rw(self, body):
+        return self.compile_run('#define SWEET_RW_WAIT_ATOMICS 1\n'+RW_POLICY+body)
+
+    def test_rw_optin_current_incarnation_and_closed_admission(self):
+        self.gui(r'''
+int main(void) {
+ for(unsigned i=0;i<4;++i){load_reset();sweet_load_prepare(1);sweet_load_rw_prepare(i);assert(sweet_load_rw_configured==(i==1));}
+ load_reset();sweet_load_rw_prepare(1);assert(!sweet_load_rw_configured);
+ sweet_load_prepare(1);sweet_load_rw_prepare(1);assert(!sweet_load_rw_admit() && !task_lookups);
+ sweet_load_begin();assert(!sweet_load_rw_admit() && !ident_reads);
+ strcpy(process.p_comm,"SpringBoard");sweet_load_register(0,&regs);
+ assert(target_task.references==1 && sweet_load_rw_target(&target_task)==2 && sweet_load_rw_admit()==2);
+ irq_context=true;unsigned irq_ids=ident_reads;assert(!sweet_load_rw_admit() && ident_reads==irq_ids);irq_context=false;
+ ++ident_version;assert(!sweet_load_rw_admit());--ident_version;
+ ++ident_uniqueid;assert(!sweet_load_rw_admit());--ident_uniqueid;
+ ++process.pid;assert(!sweet_load_rw_admit());--process.pid;
+ struct task replacement={0};selected_task=&replacement;assert(!sweet_load_rw_admit());selected_task=&target_task;
+ sweet_load_rw_configured=0;unsigned before=task_lookups,ids=ident_reads;assert(!sweet_load_rw_admit());assert(task_lookups==before && ident_reads==ids);
+ sweet_load_rw_configured=1;os_atomic_or(&sweet_load_control,SWEET_LOAD_CLOSED,acq_rel);
+ assert(!sweet_load_rw_admit() && task_lookups==before);
+ assert(sweet_load_rw_target(&target_task)==2); /* final snapshot still reads long waits */
+ for(unsigned i=0;i<40;++i)sweet_load_dump(i);
+ unsigned rows=0;for(char *p=captured;(p=strstr(p,"SWEET LOADRW: v=1"));++p)++rows;
+ assert(rows==320 && target_task.references==1);puts("PASS");return 0;
+}
+''')
+
+    def test_rw_actual_atomic_record_lifecycle_and_poison(self):
+        self.rw(r'''
+static struct sweet_rw_wait_view read_view(struct sweet_rw_wait_record *r,bool stable,uint64_t event,uint32_t target){
+ struct sweet_rw_wait_view v;sweet_rw_wait_read_begin(r,&v);sweet_rw_wait_read_finish(r,&v,stable,event,target);return v;
+}
+int main(void){
+ struct sweet_rw_wait_record r={0};assert(sizeof(r)==32);
+ assert(read_view(&r,true,1,1).status==SWEET_RW_UNPUBLISHED);
+ uint64_t t=sweet_rw_wait_publish(&r,0x1001,0x9000,1,1);assert(t==2);
+ struct sweet_rw_wait_view v=read_view(&r,true,0x1001,1);assert(v.status==0 && v.generation==2 && v.site==1 && v.caller==0x9000);
+ assert(read_view(&r,false,0x1001,1).status==6);assert(read_view(&r,true,0x1002,1).status==6);
+ assert(read_view(&r,true,0x1001,2).status==6);assert(read_view(&r,true,0x1001,0).status==7);
+ sweet_rw_wait_clear(&r,t);assert(read_view(&r,true,0x1001,1).status==5 && r.generation==4);
+ t=sweet_rw_wait_publish(&r,0x1001,0x9001,2,1);assert(t==6);
+ assert(read_view(&r,true,0x1001,1).site==2);sweet_rw_wait_clear(&r,t);assert(r.generation==8);
+ sweet_rw_wait_clear(&r,0);assert(r.generation==8);
+ t=sweet_rw_wait_publish(&r,1,2,1,1);sweet_rw_wait_clear(&r,t+2);assert(r.poisoned && read_view(&r,true,1,1).status==4);
+ assert(!sweet_rw_wait_publish(&r,1,2,1,1));
+ r=(struct sweet_rw_wait_record){0};t=sweet_rw_wait_publish(&r,1,2,1,1);assert(!sweet_rw_wait_publish(&r,1,2,1,1));sweet_rw_wait_clear(&r,t);assert(read_view(&r,true,1,1).status==4);
+ r=(struct sweet_rw_wait_record){.generation=UINT64_MAX-3};t=sweet_rw_wait_publish(&r,1,2,1,1);assert(t==UINT64_MAX-1);
+ sweet_rw_wait_clear(&r,t);assert(r.poisoned && r.generation==UINT64_MAX);
+ for(unsigned i=0;i<5;++i){r=(struct sweet_rw_wait_record){0};assert(!sweet_rw_wait_publish(&r,i==0?0:1,i==1?0:2,i==2?3:1,i==3?0:i==4?3:1));assert(r.poisoned);}
+ puts("PASS");return 0;
+}
+''')
+
+    def test_rw_partial_publication_crossed_read_and_sticky_nested_poison(self):
+        self.rw(r'''
+static struct sweet_rw_wait_record r;static unsigned odd,crossed,nested;
+static void inspect_odd(const void *p){
+ if(p==&r.generation && (r.generation&1)){atomic_store_hook=NULL;struct sweet_rw_wait_view v;sweet_rw_wait_read_begin(&r,&v);assert(v.status==2);++odd;}
+}
+static void cross_read(const void *p){
+ if(p==&r.event){atomic_load_hook=NULL;uint64_t token=r.generation;sweet_rw_wait_clear(&r,token);assert(sweet_rw_wait_publish(&r,0x101,0x202,2,1));++crossed;}
+}
+static void nested_writer(const void *p){
+ if(p==&r.key){atomic_store_hook=NULL;assert(!sweet_rw_wait_publish(&r,1,2,1,1));++nested;}
+}
+int main(void){
+ atomic_store_hook=inspect_odd;uint64_t token=sweet_rw_wait_publish(&r,0x101,0x201,1,1);assert(token==2 && odd==1);
+ struct sweet_rw_wait_view v;atomic_load_hook=cross_read;sweet_rw_wait_read_begin(&r,&v);sweet_rw_wait_read_finish(&r,&v,true,0x101,1);assert(v.status==3 && crossed==1);
+ sweet_rw_wait_read_begin(&r,&v);assert(v.status==0);sweet_rw_wait_poison(&r);sweet_rw_wait_read_finish(&r,&v,true,0x101,1);assert(v.status==4);
+ r=(struct sweet_rw_wait_record){0};atomic_store_hook=nested_writer;assert(!sweet_rw_wait_publish(&r,1,2,1,1));assert(nested==1 && r.poisoned);
+ /* An interrupted outer writer may finish stores, but cannot clear sticky poison. */
+ sweet_rw_wait_read_begin(&r,&v);assert(v.status==4 && v.generation==UINT64_MAX);sweet_rw_wait_clear(&r,2);assert(r.poisoned);
+ puts("PASS");return 0;
+}
+''')
+
+    def test_rw_one_writer_parallel_reader_never_accepts_torn_payload(self):
+        self.rw(r'''
+static struct sweet_rw_wait_record r;static unsigned done;
+static void *write_many(void *arg){
+ (void)arg;for(unsigned n=1;n<=20000;++n){uint64_t t=sweet_rw_wait_publish(&r,0x1001,n,n%2+1,1);assert(t);sweet_rw_wait_clear(&r,t);}
+ __atomic_store_n(&done,1,__ATOMIC_SEQ_CST);return NULL;
+}
+int main(void){
+ pthread_t writer;assert(!pthread_create(&writer,NULL,write_many,NULL));unsigned accepted=0;
+ for(unsigned i=0;i<200000 && !__atomic_load_n(&done,__ATOMIC_SEQ_CST);++i){
+  struct sweet_rw_wait_view v;sweet_rw_wait_read_begin(&r,&v);sweet_rw_wait_read_finish(&r,&v,true,0x1001,1);
+  assert(v.status<=6);if(v.status)continue;++accepted;
+  assert(v.event==0x1001 && v.target==1 && v.caller==(v.generation+2)/4 && v.site==v.caller%2+1);
+ }
+ pthread_join(writer,NULL);struct sweet_rw_wait_view v;sweet_rw_wait_read_begin(&r,&v);sweet_rw_wait_read_finish(&r,&v,true,0x1001,1);
+ assert(v.status==5 && v.generation==80000 && !r.poisoned);(void)accepted;puts("PASS");return 0;
+}
+''')
+
+    def test_rw_both_actual_wait_fragments_preserve_assert_unlock_block_order(self):
+        start=RW_LOCK.index('static boolean_t\nlck_rw_lock_exclusive_gen(')
+        slow=RW_LOCK[start:RW_LOCK.index('\n}\n',start)+3]
+        fragments=re.findall(r'(res = assert_wait\(LCK_RW_WRITER_EVENT\(lock\),.*?slept\+\+;\n\t\t\t\t})',slow,re.S)
+        self.assertEqual(len(fragments),2)
+        wrappers='\n'.join('static void site'+str(i)+'(void *lock,void *caller){'+f+'}\n' for i,f in enumerate(fragments))
+        self.rw(r'''
+#define DEVELOPMENT 1
+#define ARM64_BOARD_CONFIG_SWEET 1
+#define THREAD_WAITING 1
+#define THREAD_UNINT 8
+#define THREAD_WAIT_NOREPORT_USER 16
+#define THREAD_CONTINUE_NULL 0
+#define LCK_RW_WRITER_EVENT(p) ((uintptr_t)(p)+1)
+struct thread {struct sweet_rw_wait_record sweet_rw_wait;};static struct thread self;
+static unsigned admitted,blocked,slept;static bool interlock;static int res,assert_result=1,istate;
+static struct thread *current_thread(void){return &self;}
+static uint32_t sweet_load_rw_admit(void){assert(interlock);return admitted;}
+static int assert_wait(uintptr_t event,unsigned flags){assert(interlock && event==0x1001 && flags==24);return assert_result;}
+static void lck_interlock_unlock(void *lock,int old){assert(lock && interlock && !old);interlock=false;}
+static int thread_block(int continuation){
+ assert(!interlock && !continuation);++blocked;struct sweet_rw_wait_view v;
+ sweet_rw_wait_read_begin(&self.sweet_rw_wait,&v);sweet_rw_wait_read_finish(&self.sweet_rw_wait,&v,true,0x1001,1);
+ assert(v.status==(admitted?0:1));return 0;
+}
+'''+wrappers+r'''
+int main(void){
+ void (*sites[])(void *,void *)={site0,site1};
+ for(unsigned s=0;s<2;++s)for(unsigned enabled=0;enabled<2;++enabled)for(unsigned wait=0;wait<2;++wait){
+  self=(struct thread){0};blocked=slept=0;admitted=enabled;interlock=true;assert_result=(int)wait;
+  sites[s]((void *)0x1000,(void *)0x9000);assert(!interlock && blocked==wait && slept==wait);
+  struct sweet_rw_wait_view v;sweet_rw_wait_read_begin(&self.sweet_rw_wait,&v);sweet_rw_wait_read_finish(&self.sweet_rw_wait,&v,true,0x1001,1);
+  assert(v.status==(enabled && wait?5:1) && !self.sweet_rw_wait.poisoned);
+ }
+ puts("PASS");return 0;
+}
+''')
+
+    def test_rw_actual_collector_state_event_and_single_snapshot(self):
+        code='#define SWEET_RW_WAIT_ATOMICS 1\n#define ARM64_BOARD_CONFIG_SWEET 1\n'+GUI_POLICY+self.collector_mock()
+        code+=function(LOCK,'sweet_load_ufs_wait_class')+function(EXCEPTION,'sweet_load_collect')+r'''
+int main(void){
+ struct thread th={.tid=44,.state=TH_WAIT|8,.block_hint=8,.wait_event=0x1001};
+ struct task task={.active=true,.thread_count=1,.threads=&th};struct sweet_load_snapshot v;
+ uint64_t token=sweet_rw_wait_publish(&th.sweet_rw_wait,0x1001,0x9000,1,1);assert(token);
+ sweet_load_collect(&task,&v);assert(v.threads[0].rw.status==7);rw_target_fixture=1;
+ sweet_load_collect(&task,&v);assert(v.threads[0].rw.status==0 && v.threads[0].rw.caller==0x9000);
+ th.state|=TH_RUN;sweet_load_collect(&task,&v);assert(v.threads[0].rw.status==6);th.state&=~TH_RUN;
+ th.state|=TH_WAKING;sweet_load_collect(&task,&v);assert(v.threads[0].rw.status==6);th.state&=~TH_WAKING;
+ th.wait_event=0x1002;sweet_load_collect(&task,&v);assert(v.threads[0].rw.status==6);th.wait_event=0x1001;
+ rw_target_fixture=2;sweet_load_collect(&task,&v);assert(v.threads[0].rw.status==6);rw_target_fixture=1;
+ sweet_rw_wait_clear(&th.sweet_rw_wait,token);sweet_load_collect(&task,&v);assert(v.threads[0].rw.status==5);
+ th.sched_lock=1;sweet_load_collect(&task,&v);assert(v.threads[0].status==1 && v.threads[0].rw.status==7);
+ assert(tries>0 && tasktries>0 && reads>0);puts("PASS");return 0;
+}
+'''
+        self.compile_run(code)
+
+    def test_rw_full_width_format_real_console_and_strict_versioned_parser(self):
+        prefix=PREFIX[:PREFIX.index('/* Host atomics')]+r'''
+#define SERIALMODE_SYNCDRAIN 1
+static int serialmode;static char delivered[4096];static size_t delivered_size;
+static void console_write(char *s,int n){assert(n>=0 && delivered_size+(size_t)n<sizeof(delivered));memcpy(delivered+delivered_size,s,n);delivered_size+=n;delivered[delivered_size]=0;}
+'''
+        body=GUI_POLICY+ipc.CONSOLE_SOURCE+r'''
+static void route(const char *text){struct console_printbuf_state s;console_printbuf_state_init(&s,1,1);for(const char *p=text;*p;++p)console_printbuf_putc(*p,&s);console_printbuf_clear(&s);}
+int main(void){
+ struct sweet_load_thread t={.tid=UINT64_MAX};char line[256];t.rw=(struct sweet_rw_wait_view){.generation=UINT64_MAX-1,.event=UINT64_MAX,.caller=UINT64_MAX,.site=2,.target=2,.status=0};
+ int n=sweet_load_rw_format(line,sizeof(line),39,1,7,&t);assert(n>0 && n<=255);
+ assert(!sweet_load_rw_format(line,1,39,1,7,&t));assert(sweet_load_rw_format(line,sizeof(line),39,1,7,&t)==n);route(line);assert(delivered_size==(size_t)n);fputs(delivered,stdout);delivered_size=0;
+ for(unsigned q=1;q<9;++q){t.rw.status=q;t.rw.generation=q==4?UINT64_MAX:q==2?3:q==3?4:q==5||q==6?2:0;n=sweet_load_rw_format(line,sizeof(line),39,1,7,&t);assert(n>0);route(line);assert(delivered_size==(size_t)n);fputs(delivered,stdout);delivered_size=0;}
+ return 0;
+}
+'''
+        output=self.compile_run(body,prefix=prefix,expect=None)
+        records=[parse_record(line) for line in output.splitlines(keepends=True)]
+        self.assertEqual(len(records),9)
+        self.assertTrue(all(len(r['raw_line'].encode())<=255 for r in records))
+        good=records[0]['raw_line']
+        for bad in (good.replace('gn=0xfffffffffffffffe','gn=0'),good.replace('site=2','site=3'),good.replace('ev=0xffffffffffffffff','ev=0'),good.replace('v=1','v=2'),good[:-1],good.replace(' q=0',' q=0 q=0')):
+            with self.assertRaises(ValueError):parse_record(bad)
+        a='AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA';b='BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB'
+        boots=parse_boot_records('SWEET BOOT SESSION UUID: '+a+'\n'+good+'SWEET BOOT SESSION UUID: '+b+'\n')
+        self.assertEqual(boots[a]['rw_support'],'observed');self.assertEqual(boots[b]['rw_support'],'unknown')
+        self.assertFalse(boots[b]['records']);self.assertFalse(parse_boot_records(good))
+
+    def test_rw_source_hooks_scoped_exported_and_no_new_lock_algorithm(self):
+        old=old_fragment('osfmk/kern/lock_rw.c',RW_PATCH)
+        self.assertEqual(old.count('res = assert_wait(LCK_RW_WRITER_EVENT(lock),'),3)
+        self.assertEqual(RW_LOCK.count('res = assert_wait(LCK_RW_WRITER_EVENT(lock),'),3)
+        self.assertEqual(RW_LOCK.count('sweet_rw_wait_publish('),2)
+        self.assertEqual(RW_LOCK.count('sweet_rw_wait_clear('),2)
+        self.assertIn('lck_rw_lock_exclusive_gen(lock, caller, lock_pause)',RW_LOCK)
+        self.assertIn('lck_rw_lock_exclusive_gen(lock, __builtin_return_address(0), NULL)',RW_LOCK)
+        self.assertEqual(RW_PATCH.read_text().count('diff --git '),7)
+        self.assertIn('SweetRWWaitProgress.h',SOURCE['osfmk/kern/Makefile'])
+        self.assertIn('struct sweet_rw_wait_record sweet_rw_wait;',SOURCE['osfmk/kern/thread.h'])
+        for forbidden in ('printf','malloc','lck_','while (','for (','cmpxchg','ctid_get','mach_absolute_time'):
+            self.assertNotIn(forbidden,RW_POLICY)
+        self.assertIsNone(re.search(r'\b(?:thread_t|task_t)\b',RW_POLICY))
+        admit=function(SAMPLER,'sweet_load_rw_admit')
+        for forbidden in ('proc_find(','task_reference(','printf(','lck_','p_comm','proc_iterate('):self.assertNotIn(forbidden,admit)
+        self.assertIn('ident.p_idversion == slot->version',admit)
+        self.assertIn('sizeof(sweet_load_rw_configured)',GUI_HELPERS)
+        # The old exported LOADT formatter remains exact, despite snapshot growth.
+        self.assertEqual(function(GUI_POLICY,'sweet_load_thread_format'),function(fixture.fragment('osfmk/kern/SweetLoadProgress.h',PATCH),'sweet_load_thread_format'))
 
 if __name__=='__main__': unittest.main()

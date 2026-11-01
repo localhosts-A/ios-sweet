@@ -1,3 +1,111 @@
+## 当前交接 — 0179主机范围完成：212测试/5对象/43文件验收；未发布或刷机，桌面未达标（2026-11-01）
+
+ExitPlanMode已批准SpringBoard写锁来源的主机最小观测：仅源码/host测试/独立回放/局部ARM64对象/交接，明确不提交、不推送、不CI、不封装可部署候选、不操作设备/根镜像。0179补丁当前7文件，私有新树rw-wait-host-source，原source/xnu和CI归档保持。实际registry在sweet_sample.c而非sweet_ufs.c；每线程32byte单写者全原子record，默认sweetloadrw=0，两个exclusive等待点assert_wait成功后发布，block返回无条件clear。仅登记task+当前proc三元身份相符并非IRQ时捕获；新LOADRW独立行不改原LOADT，event只比较不解引用，无owner/用户VM/新锁/日志热路径。
+
+rw-wait-expanded-tests-v4.log真实27项通过（原19+新增8），包括实际等待片段/collector、串行writer-并行reader、嵌套sticky poison/溢出、身份/关闭、真实console最坏宽度；保留所有初轮失败日志，不删/skip测试。rw-wait-compile-v3.log最终5/5真实ARM64对象通过（lock_rw/exception/thread/sample/HFS cnode），不是native link或CI；首次sample包含顺序暴露原子头未声明，已显式正式依赖修复，不用临时include绕过。rw-wait-independent-v2/verification.json核验CI41272623933归档完整SHA后43文件零fuzz/零offset回放、原lock原语去hook后逐字节相同、原源不变。新数据行最坏130bytes/最多640行=83200bytes，另有固定config行；原LOADT字节保持。
+
+本阶段已全部完成：rw-wait-layout-v1实际ARM64 thread1528→1560/align8，请求thread-zone元素增32；运行bucket/page/resident取整未知。rw-wait-object-verification-v1核验5生产对象+1不入patch/Makefile的host-only原子探针，实际探针CFG无环/无调用/无atomic helper，admit仅current_task/current_proc/proc_ident/ml_at_interrupt_context，targetlookup无调用；真实wrapper保存LR并通过x1传caller。rw-wait-regressions-v2实际25suite/212测试全部通过，不沿用旧storage12计数；v1有1个Fastboot最终源码固定0178断言失败，已明确0179 overlay并新增原consumer/poll不变断言，不关源比对/删测试。repo validator179patch/50Python/12shell及workflow11段bash-n通过，未执行workflow。契约docs/dali-gui-rw-wait-provenance.md；完整闭合rw-wait-host-implementation-closure.json；补丁SHA daff8b72a872ae658e5138f2fa153aeaea76ee647811a2c61b868a860cb858c7。所有后台已结束，无新提交/nativeCI/候选或设备批准；下一发布/nativeCI需另行明确范围。
+
+后续不能将observer或这些测试当桌面。最新defaults-domain-v2已核实actual domain=com.apple.springboard、构建键SBLastSystemVersion（旧属性名过滤缺口已纠正）；两属性options1不取setter显式sync分支，磁盘缺键仍不定位阻塞。preferences-v2实际12plist/1385bytes，含PrototypeTools临时文件；原95ab fullhash不变，不repair或预造marker跳迁移。本阶段未访问原根镜像；恢复/DSC单元测试的合成fixture读写与原16GiB恢复源明确区分。
+
+原厂Android+完整b4ee恢复closed、root_restore_verified=true/pending=false、四权限false、唯一试验1/1耗尽。HEAD仍a29d621...，无新提交/CI/设备权限；GUI present0/成功DSI0，无实屏桌面验收。原mkadt/mkiosroot改动保留，index不得暂存。当前仅主机核验，不追加纯诊断刷机。
+
+---
+
+## 历史交接 — 主入口恢复标识迁移静态链闭合；现场偏好未见对应键，桌面未达标（2026-11-01）
+
+本段所有主机后台均已完成，无活动设备任务。Foundation精确方法为-[SBBootDefaults _bindAndRegisterDefaults]，只做lastRestoreIdentifier→SBLastRestoreIdentifier偏好键绑定，不能称文件writer。实际libobjc __objc_opt_ro v16给出专用selector基址0x18229979f（🤯）；修正普通字段相对指针假设后217/1955类零解析错误，旧UnicodeDecodeError日志保留。SpringBoard同名常量经真实v2两级指针到NSConstantArray对象0x1da052500，实际布局24bytes/count+8=2/data+16，值SpringBoard与SBLastRestoreIdentifier；旧+24扫描0不作无使用证明。
+
+bb23wd890 completed0，springboard-restore-main-v1/{verification.json,main-annotated.txt}：实际导出trie确认_SBSystemAppMain=0x1c5864258（image+0x9a258），5316byte函数内读marker、与bootDefaults恢复/构建值比较、必要时迁移清cache。新UUID写入分支：PC0x1c586534c writeToFile:atomically:encoding:error:（atomically=NO/encoding4），随后resource设置、remove/move到最终路径，move成功后PC0x1c5865410 setLastRestoreIdentifier:。后面仍有SBFMappedImageCache sessionCache清理、BLSHService earlyInitialization与最终主调用；静态链及新文件均不证明末态栈、锁owner或进入UI。368个BL中112个selector已解，未解C导入不擅自命名。13项解析回归+8项导出负控通过，均纯主机合成，不是新完整CI。
+
+b6q7kwhf1 completed0，springboard-restore-preferences-v1/verification.json：pinned95ab现场在前后完整16GiB SHA核验后保持原样；限定/Preferences/*.plist实际解析11个共1239bytes，零超限/零解析错误。com.apple.springboard.plist为171bytes/SHAe80395c6...，此范围未见SBLastRestoreIdentifier或LastSystemBuildVersion对应键。不能据磁盘未落盘证明setter未执行/被阻塞（异步写回，持久域仍需核对）。marker仍为有效36byteUUID/SHA b58b3528...；不预造UUID跳过迁移，不repair原件，不盲改RW锁。
+
+下一步仅主机核对SBBootDefaults持久域/CFPreferences写回与迁移后的初始化边界；当前boot svc=3仅backboardd，现有SB snapshot无RW锁地址/caller/owner，不能从hint8归到上述某个调用。唯一试验1/1已耗尽、四权限false、原厂Android+完整b4ee恢复closed，root_restore_verified=true/pending=false；HEAD仍a29d621...，无新提交/CI/试验批准。用户mkadt.py/mkiosroot.sh原SHA保持且index空。GUI present0/成功DSI0、无实屏桌面验收；不追加纯诊断刷机。
+
+---
+
+## 历史交接 — 设备恢复闭合；只读定位新SB恢复标识与单块漏分配，桌面未达标（2026-11-01）
+
+b1faenofl bitmap v2 completed0/full95ab原件hash不变：位图实算free1109826，卷头free1109841多15；catalog/metadata全部inlinefork独立对照实际仅发现1个referenced-clearblock3084483，归属新36byte文件private/var/mobile/Library/SpringBoard/SBLastRestoreIdentifier（CNID321507）。15是freecount差不是漏分配数量；首轮错误等值假设在断言拒绝/无JSON，已纠正说明并保留initial/v2日志，未repair。单块归属不证明SpringBoard写锁因果，也未解释全部目录/xattr一致性错误。证据integrated-dsc-bitmap-audit.json。
+51关键程序/cache每根3333419024bytes全hash与clean相同，完整95ab冻结根在所有只读检查后保持；bkd5kn562已完成。新launchd日志driverkitd perprocesslimit jetsam只是观察，不能据此禁用daemon/调限额。SB主TID219/version177 sample32..35 state9/hint8/CPU相同，但没有RW wait_event/caller/owner；现有snapshot仅对knownUFSmutex比较event，不可从hint8命名VM/HFS锁或活用kdp_find_owner。现有通用SMP用户栈回溯会在task锁内读用户VM，不宜直接启用去探可能VM锁等待。
+后台by8zykb2e仅inspect-springboard-restore-marker.py：只读seed/actual的marker与小SpringBoard实物、DSC精确string-owner定位、最后fullrawhash，日志springboard-restore-marker-audit.log。未完成不读活动输出，不预测常量所属镜像或writer。恢复closed/四权限false/唯一试验spent保持，无活动设备任务，无新提交/CI/刷机权限；原基线/现场都保留。下一步主机从marker常量及实际调用路径收敛，不追加纯诊断刷机，桌面未实现。
+
+---
+
+## 当前交接 — DSC完整保留/GUI仍0，单轮恢复完全闭合，纯主机查SpringBoard写锁末态（2026-11-01）
+
+bmw5d6q6w只读audit completed0：新95ab4543...原件完整16GiB在所有读取/fsck-n后fullhash相同；正式DSC最终路径8F970452...仍101685978bytes/SHAea59524b.../272:272/0644全部相同、非临时文件，无相同shared-cache harvest日志。只能证明启动后实物存活，不单独证明消费快路径或GUI修复。logd.0.log635bytes新见Logging目录迁移及第二次kernel info harvest；timesync112bytes含本boot1DC89EE2-17CA-4D10-AB78-292CF2AEF917，保持boot身份独立。kernel UUID本轮ED7B1180-D613-3930-A1DB-D77C99DD6C2C，不套旧轮slide/端口。
+原件fsck-n exit8：hardlink、4目录itemcount、xattr应2非3、underallocation及free应1109826/header1109841差15；未repair，不把旧0177差262或0174 2053套用。两boot/logd事件时钟不拼连续等待。SWEET GUI present0/成功DSI0；pstore空只能说无console证据，不能用audit计数0推零活动。末BB3线程PortReceive/PortReceive/ParkedWorkQueue，SB主线程hint8=KernelRWLockWrite/次线程ParkedWorkQueue；没有锁地址/owner，不能猜具体VM/HFS锁或持续死锁。
+后台bkd5kn562仅新脚本check-integrated-dsc-frozen-assets.py对51关键程序/cache与clean完整hash对照、额外诊断文件提取、最后原raw fullhash，尚待完成不读活动结果。设备完全恢复/四权限false/唯一1次耗尽，无新设备任务或许可，不再刷诊断候选；下一步从新日志/冻结字节主机查因。桌面未实现，无真人屏幕反馈。以下闭合详情保持。
+
+---
+
+## 当前交接 — DSC唯一试验取证/完整恢复闭合，冻结现场只读审计中（2026-11-01）
+
+bg5zoklus全链completed0/bydjaya0r终态；独立核对持久state/progress/3阶段marker/Android完整物理对回读与全根hash，闭合UTC2026-11-01T05:36:56.918204+00:00。state=trial_closed_stock_and_new_b4ee_baseline_verified、root_restore_verifiedtrue/pendingfalse、四权限false；approved=attempts1耗尽。设备原厂Android/fullboot_b6dc40de7.../fullinit_boot_b08794a43...、完整b4ee根均已验收，不重跑恢复/启动。
+完整新actual16GiB三SHA95ab45436dd8fea8d6e2637723203b751650aa0ef584396ab44611ec61bfea38，原raw/sidecar保留未repair。全256实际对照后8chunks[0,11,13,107,119,186,187,188]，536870912bytes由pinned源FD恢复并范围/完整根/物理对验收，不套旧块表。权威独立记录.tmp/desktop-diagnostics-20261030/integrated-dsc-recovery-closure.json。
+后台bmw5d6q6w仅执行audit-integrated-dsc-frozen-result.py：已闭合/完整capture门禁后只读检查DSC/logd/timesync/fsck-n、最后全rawhash，日志integrated-dsc-frozen-result-audit.log，未完成前不读活动审计输出/预测存活或fsck结果。所有设备执行/监听已结束，无新设备权限。新boot1DC89EE2...持久SWEET present0/成功DSI0，armed/prepared token匹配且脚本实际检测Fastboot；具体复位机制与真人未按键未独立确认，pstore空。无真人实屏反馈，桌面未实现。下一步等待只读审计，再根据冻结证据继续主机查因，不追加诊断刷机。
+
+---
+
+## 当前交接 — 完整DSC试验现场16GiB三hash通过，原链pinned根恢复运行中（2026-11-01）
+
+05:33:28UTC bydjaya0r事件stock_pair/capture complete后独立核对已发布actual-capture-verified.json、raw stat、state：完整17179869184bytes，remote-before/local/remote-after及state同SHA95ab45436dd8fea8d6e2637723203b751650aa0ef584396ab44611ec61bfea38，目标身份一致；capture完成UTC05:33:27.749510。原始新现场和sidecar保留未repair，未读活动.part或重跑capture。
+主链bg5zoklus仍活动，unattended-root_restore-process.json已发布，尚无root-restore-progress（可能仍在完整源/actual对照门禁，不能猜卡住或已写）。state originals_verified/root_restore_pendingtrue/verifiedfalse/无unattended_failed；同链将全256chunk实际比较、持已验b4ee源FD恢复、范围及全根/物理对验收，只有真实终态才关闭权限。不要另开恢复命令或重置已耗尽唯一试验。
+当前只读监听bydjaya0r；待bg5zoklus终态/最终closed后运行已准备audit-integrated-dsc-frozen-result.py对完整原件fsck-n、DSC/logd/timesync/新boot证据并前后fullhash，禁止repair/替换原件。SWEET新boot1DC89EE2...已有GUI present0/成功DSI0，末BB PortReceive/SB KernelRWLockWrite；无真人屏幕反馈，桌面未证。本条仅本地交接。
+
+---
+
+## 当前交接 — 已返回Fastboot/原厂Android与完整物理对验收，完整现场捕获运行中（2026-11-01）
+
+本地状态observer bib91krud：05:12:24UTC restoring_originals、05:12:26 originals_flashed_readback_pending、05:12:49 originals_verified且stock_pair complete。只读已发布fastboot-reset-evidence/fastboot-preflight/stockprocess：实际目标dali/slotb/unlocked/原分区尺寸均通过；boot-reason/reboot-reason空值不证明具体reset来源，无真人未按键确认。主链bg5zoklus按同轮批准检测目标Fastboot并恢复原厂对，Android及完整物理启动对已验收，非仅flash/reboot成功。只读监听bib91krud正常到期，已重新监听bydjaya0r（不重置试验/执行链/窗口）；05:26:17UTC当前仍originals_verified/stock_pair complete/pendingtrue/无失败，继续等全根capture和原链恢复终态。
+下一阶段capture-actual-once由同一链继续，必须限定日志及全新完整16GiB三hash后才全256diff/pinned b4ee恢复；root_restore_pending仍true。当前不读活动raw文件，不第二次启动capture/恢复或重启。仅新b2nlnmksh在主机等待已完整发布的posttrial-log-capture marker后核对两日志hash并解析，输出integrated-dsc-runtime-{analysis.log,evidence.json,logs/}，不接触活动根捕获或设备。
+窗口04:53:45–05:13:45UTC未延长；approved=attempts1耗尽。用户尚无本轮屏幕反馈，桌面未证。b2nlnmksh已completed0：已验证限定日志新boot1DC89EE2-17CA-4D10-AB78-292CF2AEF917，SWEET370load/36samples0..35/reject0/dup0，GUI present0/成功DSI0；pstore0bytes不能当第二份同boot或无活动。token匹配armed/prepared，13MHz差1082.046835s（prepared仅意图，Fastboot实际枚举另外证明）。BB末3线程hint2/2/15（PortReceive/PortReceive/ParkedWorkQueue），SB末hint8/15（KernelRWLockWrite/ParkedWorkQueue），不同boot不复用PID/端口身份，BB selectedSVC4529/后续incoming说明不能继续把旧11600send当新轮末态。DSC实物/消费者日志仍须完整capture后只读核对。原始baseline/seed/旧现场保持，所有设备权限仍仅本轮取证恢复义务。本条仅本地交接。
+
+---
+
+## 当前交接 — DSC唯一试验已请求启动，固定窗口至05:13:45UTC/自动恢复链接管（2026-11-01）
+
+bwzq52hjz启动里程碑completed0后核对发布state/config/start：state=trial_rebooted，trial_started_utc=2026-11-01T04:53:45.403558+00:00，固定终点05:13:45.403558UTC；approved_trials=trial_attempts=1已耗尽。root delta target_full_prefix_verified、完整33215490a4ae9103cb4da7d413c64ffc4adc33d985d9b8e5a2b297894e6808d8已验，root_delta_authorized=false，两个flash结果已发布，无unattended_failed。unattended-return-claim存在，主链bg5zoklus仍活动，负责同轮Fastboot/stock/capture/pinnedrestore，无需再次启动协调器。只证明启动请求/根与镜像写入验收，不等iOS或桌面运行成功。
+授权approval SHA d2e453e865e03c713bffff98a4db98a27ba441779ddedbca45305f9bdb9eb3ea、scope1f964e99...，token54a67220dc862d9a1901d6415ffb5112；不重跑/加时/追加试验。after1080/drain≤20/lease1140，自动返回未实测；如失败/远端写入不确定先停止，不能与旧进程竞态恢复。root_restore_pending=true，剩余设备/stock/root权限仅该轮恢复义务。
+已告知用户固定UTC窗口，请观察真实图标网格/Dock/120秒/UI变化并提供画面，约60秒合成swipe非实体触摸，不为返回预先按键；尚无真人画面或本boot日志证据。bg5zoklus完成通知前不读活动输出/不操作第二条transport链；事后audit-integrated-dsc-frozen-result.py已准备，仅在闭合且完整capture后运行，不读活动根文件。桌面未实现。
+
+---
+
+## 当前交接 — 真人批准唯一DSC整合试验，执行链运行中/尚未确认启动（2026-11-01）
+
+AskUserQuestion真实选择“批准一次整合试验和恢复”：精确scope SHA1f964e99e4bb23a0ec504ffc067fbac8d4ee60d89ed3afed89487037ddaf5c9d，CI41272623933/a29d621/init_boot f8a4845b...仅一次，含低4位marker/单次cold/限定增量及同轮stock+完整actualcapture+pinned b4ee恢复。已本地排他发布trial-approval.json SHA d2e453e865e03c713bffff98a4db98a27ba441779ddedbca45305f9bdb9eb3ea，初始approved1/attempt0/四权限仅该轮义务，不批准下一轮；不是自动通知代替真人批准。
+后台bg5zoklus运行候选run-trial-once.py --execute的完整链，日志.tmp/desktop-diagnostics-20261030/integrated-dsc-authorized-single-trial.log；TMPDIR固定job工作目录。fresh恢复源/身份/全根/时钟等门禁真实通过后才写；尚未确认root delta/实际reboot，不能宣称启动。独立bwzq52hjz只等待原子state中的reboot或失败里程碑，无transport、不读活动执行日志、不重试parent。通知到达后才读取静态已发布证据，禁止重复运行启动器。
+执行开始若超时/异常/远端在途不确定则保留pending/现场，阻断下一写和自动restore-only，不自动恢复竞态；未确认静止前不重跑。实际启动后固定trial_started_utc+1200窗口、after1080/drain≤20/lease1140，原厂对→限定日志/完整16GiB三hash→全256比较/pinned b4ee恢复，终态真实验收后才关闭义务。原始b4ee/07ba/所有旧现场保持。暂无本轮画面/运行接纳/桌面证据，本条仅本地交接。
+
+---
+
+## 当前交接 — 唯一DSC整合候选全面验收/只读fresh通过，待精确一次设备批准（2026-11-01）
+
+CI41272623933/a29d62172562536abc0a7644534a896bc41ae90a完整248执行/native link/36不变源/17IIG/IORPC独立通过；bosstsfva最终候选离线验收completed0：v4/64KiB独立LZ4/CPIO/587byte参数/payload/ADT返回契约/AVB/完整16GiB重放/static13/依赖/7真实入口零transport拒绝均通过。候选shim/out-dali/ufs-41272623933/candidate-desktop-integrated-dsc-20261101。
+init_boot f8a4845b6008a72380f60758f5e737e6eeec47991d6e12a30b6362242597736a；boot ddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39；kernel a4bbd959552c33c340476e138ec2c022023281701e645e966c85d08279497187；根33215490a4ae9103cb4da7d413c64ffc4adc33d985d9b8e5a2b297894e6808d8。delta6fb85143.../10RAW24839blocks101740544bytes，严格unixnu_data前16GiB。canonical static13 SHA c8bc27b3f117234c8159a5ca2754fd6d0303fa0a8897465f8f79e591b685a988；dependency manifest ffdef80156dcc99651c582f707e4898a88e254770bda1177fe2578f4822d5e1f。
+刷前整轮scope冻结.tmp/desktop-diagnostics-20261030/integrated-dsc-trial-scope.json，SHA1f964e99e4bb23a0ec504ffc067fbac8d4ee60d89ed3afed89487037ddaf5c9d：仅一次/≤1200s，TOPRGU+0x24低4位3（其他位保持/MODE LENGTH不变）、after1080/drain≤20/lease1140，单次PSCI cold，无AEE fallback；返回Fastboot后原厂对/Android完整回读、限定日志+完整新actual16GiB三hash，最后全256比较/pinned b4ee恢复+物理对/全根验收关闭四权限。自动返回未本项目实测，不保证所有故障无人值守；不确定则停止，不自动重试或竞态恢复。
+已用获准非刷写权限做一次fresh只读检查（bw0kd2qlu completed0）：当前目标Android dali/槽b/completed/root、完整物理原厂对、完整设备b4ee根及主机恢复源fullhash、未挂载、DSC正常ctime6211秒/空间42421084160bytes通过。证据integrated-dsc-readonly-preapproval/verification.json；未重启/切模式/写设备、state字节不变。新候选仍0approved/0attempts/四权限false，无trial-approval/config/claim；旧0177spent不改，原现场/基线保持。
+下一步只对scope 1f964e...另请一次完整设备/取证恢复批准，批准后fresh门禁再执行新run-trial-once.py，不能提前进入Fastboot/写根。实屏120秒/真实UI更新/同boot surface和成功DSI仍未验；合成swipe非实体触摸，桌面未实现。本条仅本地交接不追加提交或CI。
+
+---
+
+## 当前交接 — 修正后CI41272623933独立通过，唯一DSC候选封装完成/离线验收运行中（2026-11-01）
+
+新CI41272623933/commita29d62172562536abc0a7644534a896bc41ae90a为completed/success/attempt1，b7xwd8wlw收集exit0；参数化verify-integrated-dsc-ci.py已首次运行exit0：202pre+46post=248实际执行、macos-15/Xcode16.4完整native build/link、精确3blob、36XNU源与0178全相同、17IIG相同/四字段IORPC/链接marker及符号/no atomic helpers均通过。内核实物SHA仍a4bbd959552c33c340476e138ec2c022023281701e645e966c85d08279497187，证据integrated-dsc-ci-source-check/{source-verification,run-result}.json及integrated-dsc-ci-independent-verification.log；旧失败41267851036保留未重跑。
+唯一新候选shim/out-dali/ufs-41272623933/candidate-desktop-integrated-dsc-20261101已host-only stage完成，含新根33215490.../10RAW24839blocks、唯一ADT token/返回契约、严格dalifastboot1/after1080/lease1140/window1200及必要delay30，三adapter/启动器/全部依赖。actual generator转换5个零transport负控+2dry-run通过，无设备访问。后台bosstsfva正在独立验收v4/LZ4/CPIO/payload/ADT/AVB/full16GiB sparse replay/static13/7入口零transport；完成通知前不读活动输出、不宣称最终候选已通过。
+设备未访问，new0approved/0attempts/四权限false，无真人设备批准/运行config/claim；旧0177spent及原baseline/scene保持。验收通过后才给精确单轮候选/根写范围/自动返回取证恢复方案，实际进Fastboot/刷入前确认。桌面仍未实现。本条只本地交接不追加提交或CI。
+
+---
+
+## 当前交接 — 真人追加批准三文件已发布，信号修正CI41272623933进行中（2026-11-01）
+
+AskUserQuestion真实选择“提交并运行一次CI”：仅coordinator/safetytest/NOTES三文件及一次新完整CI，不含设备操作。提交a29d62172562536abc0a7644534a896bc41ae90a已推fork/port/dali-mt6991；新CI https://github.com/localhosts-A/ios-sweet/actions/runs/41272623933，仅dispatch一次，不重跑41267851036。source_batch SHA28c131588ff2a701a2e59fbe51615d101f42840dea564a93aa4e3f7b178e0199，publication为integrated-dsc-signalfix-publication.json。
+后台b7xwd8wlw固定receipt观察/终态full log/分目录隔离下载；未完成不poll输出、不预测248执行或native成功。216本地cases已过，CI预期202pre+46post=248；仍须实际macOS结果。参数化verify-integrated-dsc-ci.py只在success+完整下载后调用，明确传publication/batch/counts/artifacts/log/output；输出须为integrated-dsc-ci-source-check，供本地主机stage使用。
+新主机根33215490...已完整验收，ctime2026-11-01T02:54:21Z；stage-integrated-dsc-candidate.py、verify-integrated-dsc-candidate.py、integrated-dsc-runner-template.py均仅本地准备，尚未执行或创建候选。成功后必须绑定新CI实物commit/run/kernel，恢复helper及启动器加入依赖表；default0批准/0尝试/四权限false。旧0177spent及原b4ee/07ba/全部现场保持，设备未访问。实际进入Fastboot/刷入仍须精确整轮确认，自动返回/运行接纳/桌面未实现。本条仅本地交接不追加提交。
+
+---
+
 ## 当前交接 — CI41267851036失败于macOS信号取消，已本地定点修正，禁止自动重跑（2026-11-01）
 
 已提交09a7671ec46566f410ce6f8ce53e63b19ed1a280的唯一CI https://github.com/localhosts-A/ios-sweet/actions/runs/41267851036 为completed/failure/attempt1；bk9gvskj8观察exit1/完整log已取，未下载成功artifact。prebuild前6套实际执行80cases，其中新安全suite20有1error，不能写247已执行；Build未完成，package/upload次生失败，不是完整native验收。禁止使用此提交封装可刷候选，不重发/rerun。
@@ -2169,7 +2277,7 @@ Patch0156 rejects Dali `ufsroot=` overrides, caps the `unixnu_data` BSD view and
 
 Committed/pushed `06723da` (`dali: bound UFS root view and sync logs`). Full XNU CI run `40859163839` passed: build, source/linked-marker gates and both artifact uploads. Candidate `shim/out-dali/ufs-40859163839/candidate-ufs-prefix-boundary-20261029/` packages the exact CI kernel and init_boot. Boot SHA-256 `ddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39`; init_boot `1a3870cb46efb21c52ca14de72bf9b4d75022499a8baba12dbc45466d14239e8`; payload `06e94b2815cedd88c8745cdb6c6266b93ff975c743d322408704af1a2c573d82`; kernel `146a80b2d16a0f27e4b29b05b52c11e9a66da60e892fe092a3f282a8e4231ab7`; ADT `94a8702a29841d0e3c2bbe2413fb306cc460728f823c407d8c9eaca960c942cf`. All 22 candidate checks and all SHA256SUMS entries pass. Patch replay from CI 40842265515 is byte-identical to the 408591 buildtree's `sweet_ufs.c` (SHA-256 `96d5a1f8a498385556d9e713023ddabfa651d5bd1cfdbf9bb1c3588a00467fac`).
 
-Read-only Android preflight at 2026-10-29 10:55 UTC sees serial `N7MJ65H6MRGESC9X`, Dali / `25060RK16C`, slot `_b`, `boot_completed=1`, root ADB and `vbmeta.device_state=locked`. Stock `boot_b`/`init_boot_b` hashes match backups. `unixnu_data` and `unixnu_logs` sizes are 34,326,183,936 and 33,554,432 bytes; the first-16-GiB `unixnu_data` hash remains `ea6fe9549adc6a2f4f466079e5fb4e2b7432e80977923dbc98a3c6944c5be3cd`. The user approved and completed one bounded trial of the exact candidate pair. Stock `boot_b` and `init_boot_b` physical hashes match the backups; the first 16 GiB HFSX prefix was restored and device-side readback matches source hash `ea6fe9549adc6a2f4f466079e5fb4e2b7432e80977923dbc98a3c6944c5be3cd`. Logs reach usermanagerd `LOADING PERSONA..`; no unallocated-block error was captured for block 1966891, but this does not prove the HFS allocator is fixed. Preboot error 25 maps to unsupported HFS `VFSIOC_MOUNT_BYROLE`; the current root builder has Cryptexes inside one HFS volume and no separate Preboot role volume. The `unixnu_data` tail has no full backup and was not rewritten. Offline candidate `shim/out-dali/ufs-40859163839/candidate-ignition-level1-20261029/` reuses the CI 408591 kernel and adds `ignition_level=1 launchd_unsecure_cache=1 wdt=-1`; boot/init_boot SHA-256 are `ddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39` / `35f035514382385032b69d3ca50b20de40c8d1c66249d354018d6deda6d835fa`. Its 22 offline checks and file checksums pass. The user approved one bounded trial; fresh preflights passed, both flashes and reboot returned `OKAY`. The trial reached usermanagerd `LOADING PERSONA..` but not desktop. Ramoops (`E988930C-9E79-447F-ABDB-D1059C5E1B83`) and SWEET log (`83DE932D-ECAC-4022-A256-BDD290DCE787`) have different session UUIDs, so their attribution to the same trial is uncertain; both traces show `FAILED to Set Foreground ID + multiuser in commpage successfully`. Recovery is complete: stock boot/init_boot physical hashes match backups, Android is booted on `_b`, and the first 16-GiB root-prefix readback matches source hash `ea6fe9549adc6a2f4f466079e5fb4e2b7432e80977923dbc98a3c6944c5be3cd`. The strongest next hypothesis is the macOS-config host multiuser setter returning `KERN_NOT_SUPPORTED`; patch `0157-sweet-multiuser-commpage-config` was committed as `c143a58` and passed XNU CI `40879313976`. Candidate `shim/out-dali/ufs-40879313976/candidate-multiuser-commpage-20261029/` passes 23 offline checks and all package checksums; boot/init_boot SHA-256 are `ddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39` / `2789ec205315cd2e2ea61a2d0c7a25b859c861cc66e07fc43b3f46c638ad63d9`. Fresh Android/Fastboot preflights passed. This pair has not been flashed; exact-hash/write-scope approval is pending.
+Read-only Android preflight at 2026-10-29 10:55 UTC sees serial `[DEVICE_SERIAL_REDACTED]`, Dali / `25060RK16C`, slot `_b`, `boot_completed=1`, root ADB and `vbmeta.device_state=locked`. Stock `boot_b`/`init_boot_b` hashes match backups. `unixnu_data` and `unixnu_logs` sizes are 34,326,183,936 and 33,554,432 bytes; the first-16-GiB `unixnu_data` hash remains `ea6fe9549adc6a2f4f466079e5fb4e2b7432e80977923dbc98a3c6944c5be3cd`. The user approved and completed one bounded trial of the exact candidate pair. Stock `boot_b` and `init_boot_b` physical hashes match the backups; the first 16 GiB HFSX prefix was restored and device-side readback matches source hash `ea6fe9549adc6a2f4f466079e5fb4e2b7432e80977923dbc98a3c6944c5be3cd`. Logs reach usermanagerd `LOADING PERSONA..`; no unallocated-block error was captured for block 1966891, but this does not prove the HFS allocator is fixed. Preboot error 25 maps to unsupported HFS `VFSIOC_MOUNT_BYROLE`; the current root builder has Cryptexes inside one HFS volume and no separate Preboot role volume. The `unixnu_data` tail has no full backup and was not rewritten. Offline candidate `shim/out-dali/ufs-40859163839/candidate-ignition-level1-20261029/` reuses the CI 408591 kernel and adds `ignition_level=1 launchd_unsecure_cache=1 wdt=-1`; boot/init_boot SHA-256 are `ddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39` / `35f035514382385032b69d3ca50b20de40c8d1c66249d354018d6deda6d835fa`. Its 22 offline checks and file checksums pass. The user approved one bounded trial; fresh preflights passed, both flashes and reboot returned `OKAY`. The trial reached usermanagerd `LOADING PERSONA..` but not desktop. Ramoops (`E988930C-9E79-447F-ABDB-D1059C5E1B83`) and SWEET log (`83DE932D-ECAC-4022-A256-BDD290DCE787`) have different session UUIDs, so their attribution to the same trial is uncertain; both traces show `FAILED to Set Foreground ID + multiuser in commpage successfully`. Recovery is complete: stock boot/init_boot physical hashes match backups, Android is booted on `_b`, and the first 16-GiB root-prefix readback matches source hash `ea6fe9549adc6a2f4f466079e5fb4e2b7432e80977923dbc98a3c6944c5be3cd`. The strongest next hypothesis is the macOS-config host multiuser setter returning `KERN_NOT_SUPPORTED`; patch `0157-sweet-multiuser-commpage-config` was committed as `c143a58` and passed XNU CI `40879313976`. Candidate `shim/out-dali/ufs-40879313976/candidate-multiuser-commpage-20261029/` passes 23 offline checks and all package checksums; boot/init_boot SHA-256 are `ddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39` / `2789ec205315cd2e2ea61a2d0c7a25b859c861cc66e07fc43b3f46c638ad63d9`. Fresh Android/Fastboot preflights passed. This pair has not been flashed; exact-hash/write-scope approval is pending.
 
 ---
 
