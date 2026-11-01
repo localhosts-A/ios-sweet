@@ -2,9 +2,19 @@
 
 **主目标未完成，当前没有活动后台或设备任务。** 下方273项host测试/40a7562文档提交不等桌面。当前kernel仍为源码48784e2/nativeCI41317700197，boot5188F046、GUIpresent0/成功DSI0；未收到真人实屏图标网格/Dock/UI更新/稳定120秒证据。原PWM轮closed/1次spent不重开。
 
+**本次继续的主机只读进展：** `w/audit-current-cf-stat-callers.py`读取此前已验证HFS/cache checkpoint，仅rb+O_NOFOLLOW取219576bytes（预算8MiB），原始16GiB封存现场inode/大小/mtime/ctime不变，未重复全盘hash。`w/desktop-current-cf-stat-static-v1/verification.json`含实际CF两个窗口和SHA：BundleGrokFileType与CFGetFileProperties的stat调用都使用各自栈缓冲区准备的路径，两处失败后都有处理分支；CFGetFileProperties显式检查errno2。仍没有当时路径字节/上层调用栈，不能由静态分支断言这是正常可选探测或真正缺件，不得据此强行返回成功或推断GUI因果。
+
+**重要纠正（本boot已录的MachMsg2上下文并非全部缺失）：** `w/desktop-current-machmsg2-continuations-v1.json`核实际sample30 BBIPC的n1451/1453/1489全部eligible=matched=selected3、missing0，同pid56/tid303/call/PC/LR/SP且相邻接受seq的return分别phase3/1/3，结果依次`MACH_RCV_TOO_LARGE`(0x10004004)、`MACH_MSG_SUCCESS`、`MACH_MSG_SUCCESS`；请求分别send+receive、receive-only、send+receive，非vector的接收缓冲204/244/11092bytes。后续两条成功说明本已录调用发生进一步进展；结果不依赖先前只查phase1的错误筛选。没有显式事务token，故称一致匹配而非绝对证明；后续成功是否是同消息retry、返回消息内容/peer、以及是否与GUI相关仍未知。sample31–35零eligible不能覆盖sample30已有数据，也不能证明后续不存在IPC。下文旧“最终MachIPC未保存消息对象/peer”仅指对象/peer未采集，不能扩成未保存任何packed上下文或return。
+
+**CF完整函数静态分支：** `w/desktop-current-cf-stat-branches-v1/verification.json`只读取得两函数真实LC范围（Bundle 7916bytes/Properties 528bytes），本次累计读取224308bytes<8MiB；源raw metadata保持、未重hash。Properties函数对ENOENT专门置零可选输出并走正常返回路径；Bundle错误路径可继续根据其他输入走不同静态分支。静态结构加此前runtime errno支持“有错误处理”，但未记录用户态返回/参数，不能断言上层接受、路径可选或与桌面无关；未知路径不猜补、不强制成功。
+
+**当前显示日志的证据边界：** 同boot日志有IOCoreSurfaceRoot注册、AppleCLCD创建与logical/physical几何行，但没有观察到GUI present或成功DSI记录；注册不是用户进程已经打开接口或提交画面。launchd记录SpringBoard/backboardd service state running不等它们已完成GUI初始化。已提取的限定服务日志未指出可以安全修改的显示/IPC根因；其无匹配日志不证明其他错误不存在。本次没有改动显示源码。
+
+上一步计划审批工具被中断/拒绝，用户随后说“继续”；这不是已批准该诊断候选或新实机轮的证明。本次继续利用现有封存数据做有限主机分析，不修改正式源码/发CI/发布候选/访问设备；HS与原恢复保护不变。下一步先重新评估可从现有日志解决的问题及候选必要性，尤其不能以错误的“所有MachMsg2上下文未采”为理由追加诊断。
+
 **新定位进展（不是根因修复）：** bvero1juw因错误LLVM选项--hex-imm输出帮助导致0/65指令断言失败，证据保留。合成NOP/RET证实本机--print-imm-hex，独立v2 b41wkx0d5 completed0。当前`.symbols`2836项及LC_FUNCTION_STARTS2790项，将3个BB56/main303 IRQ精确定位为PersistentAllocator BTree::insert入口、PrebuiltLoader::loadDependents+248依赖循环、MachOFile::hasThreadLocalVariables+8的ret（完整12字节函数）。LR前实际BL精确交叉，非nearest redacted标签，不减4；仍非完整栈/owner/持续死锁或桌面。
 
-**晚期独立slide已证明：** bhkbevb20 completed0，当前libsystem_kernel的4种不同正BSD stub338/327/331/361各有唯一MOVZ+SVC，独立得到PID56 slide0x50404000（结果与dyld相同但不是复用它）。已据实际local symbols定位主线程晚期stat64调用者为CoreFoundation的__CFBundleGrokFileType（2次）与__CFGetFileProperties（1次），紧邻匹配return均errno2/ENOENT；issetugid返回0。worker470在__pthread_exit/__pthread_terminate，最后361无return不证明卡死。一次MachMsg2记录有成功return0，其余没有紧邻匹配return，不据此宣称一直等待。
+**晚期独立slide已证明：** bhkbevb20 completed0，当前libsystem_kernel的4种不同正BSD stub338/327/331/361各有唯一MOVZ+SVC，独立得到PID56 slide0x50404000（结果与dyld相同但不是复用它）。已据实际local symbols定位主线程晚期stat64调用者为CoreFoundation的__CFBundleGrokFileType（2次）与__CFGetFileProperties（1次），紧邻匹配return均errno2/ENOENT；issetugid返回0。worker470在__pthread_exit/__pthread_terminate，最后361无return不证明卡死。原先只查phase1而漏掉phase3 continuation；sample30三条MachMsg2都存在同线程/地址/紧邻序列一致的返回，详见上方纠正，仍不据此推断peer或连续等待。
 
 **当前不可越过的数据缺口：** 这些stat64记录只保存x0用户指针，没有copyinstr路径；最终MachIPC未保存消息对象/peer，BBIPC末态eligible/matched/selected均0，不能解释为所有IPC不存在。封存磁盘raw不能恢复当时未采集的用户RAM字符串/消息头。因此不能猜补缺文件、强制stat成功、改CFBundle/TLV/allocator/IPC或宣称已找到根因。下一实机前须有能关联实际缺失路径/消息上下文的可核验运行时证据，或另一个已有证据支持的功能修复；在此之前不发布新的诊断候选或盲重启。
 
