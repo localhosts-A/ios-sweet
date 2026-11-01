@@ -1,3 +1,29 @@
+## 当前交接 — DSC整合根与恢复链主机验收通过，准备精确7文件/一次新CI（2026-11-01）
+
+新批准playful-tickling-lemur范围：仅新主机COW加入DSC、参数化三adapter/固定起点/依赖门禁、POSIX进程组有界终止及远端写入不确定性阻断，精确发布/一次新完整CI后封装一个候选。未批准实际进入Fastboot/刷入，0177spent/四权限false保持。任何已启动执行超时/异常保留pending、阻断后续写/自动restore-only；host组消失不证明远端dd静止。
+本地25workflow/fbcon suite共203cases+继承storage12=215实际通过，其中新安全suite20；预计新CI201pre+46post=247执行，尚未运行，不拿旧227或本地PASS冒充。178patch/50Python/12shell仓库检查及11workflow bash-n通过；0178全部36源保持上一CI字节，不改内核/HS/IPC。拟精确7文件：coordinator、新adapter模块/安全suite、更新Fastboot suite、workflow、docs、NOTES；用户mkadt.py/mkiosroot.sh原SHA保持不提交。
+主机新根.tmp/desktop-diagnostics-20261030/integrated-dsc-root-20261101：完整SHA33215490a4ae9103cb4da7d413c64ffc4adc33d985d9b8e5a2b297894e6808d8；与07ba相比只新增uuidtext/dsc目录和正式101685978byte DSC（272:272/0755、0644），184183旧文件catalog/data/resource字节保持（11671775738 unique bytes比对），完整16GiB虚拟sparse重放/readonly fsck0通过，原b4ee/07ba完整SHA不变。新delta SHA6fb8514328ba40b208277a0e2e04125bbf5550f1dd70c59cb335b6fd8bdab6b2，10 RAW runs/24839blocks/101740544bytes，严格前16GiB，不套旧块表。证据verification.json和integrated-dsc-{all-tests,host-test-counts,root-independent-verification-v2}；首轮检查拒绝parent folderCount+1，按真实HFS格式精确补断言后通过，不repair或放宽其他内容检查。
+消费者目录契约/GC已进一步只读核实：ctime比time()-86400，非mtime；部署前fresh核对设备时钟和正常ctime，超龄重建不伪造version/Salt/bootUUIDxattr。新候选尚未封装；实际运行接纳/自动Fastboot/PortSend接收权属仍未证，桌面未实现。下一步按批准提交这7文件及唯一新完整CI，验收后绑定新commit/run/kernel再封装一个候选，刷前另确认整轮。
+
+---
+
+## 当前交接 — 0178唯一完整CI与独立验收通过，仍未做设备试验（2026-11-01）
+
+commit664fa9313f4aea9a69cfef93ab6e450d2de35cd9；唯一CI https://github.com/localhosts-A/ios-sweet/actions/runs/41244033078 为completed/success/attempt1，观察收集bihzzwk8u completed0，两artifact已分别隔离下载。独立verify-fastboot-return-ci.py完成0：macos-15/Xcode16.4完整native build/link、181pre+46post=227实际测试执行、精确11提交blob/36最终源码/原console、17份generated IIG与41226683607逐字节相同、四字段IORPC、链接符号/marker、无atomic runtime helpers全部通过。
+Kernel SHA256：a4bbd959552c33c340476e138ec2c022023281701e645e966c85d08279497187；buildtree.tgz SHA256：d46a89bff32ef09c18de797e08d26226b7808ddca1776b836659bcc5102fbba1。证据.tmp/desktop-diagnostics-20261030/fastboot-return-ci-source-check/{source-verification,run-result}.json及fastboot-return-ci-independent-verification.log；验收UTC2026-10-31T21:48:17.737912+00:00。不重发/重跑CI，本条仅本地交接，无额外提交。
+设备未访问；沿用上一轮原厂Android/完整物理启动对+b4ee恢复闭合状态，不冒充本次fresh硬件复验。0177approved=attempts=1已耗尽、四权限false；用户两个dirty工具SHA不变、index为空。正式DSC仍只在主机，未植入根；新自动Fastboot/消费者sandbox及迁移存活/运行接纳均未硬件验证；三个新候选恢复adapter尚未生成绑定，不能把通用协调器当已可执行完整无人值守链。
+下一步仅主机核对消费者接纳前提与新单一候选的根增量/恢复绑定设计，再准备新候选；不得复用spent目录或直接进入Fastboot/刷入。实际刷前仍须确认精确候选、写入范围、单次自动返回/完整取证/原厂及b4ee恢复。PortSend接收权属未证，桌面未实现。
+
+---
+
+## 当前交接 — 0178精确11文件已提交，唯一完整CI41244033078进行中（2026-11-01）
+
+commit664fa9313f4aea9a69cfef93ab6e450d2de35cd9已推fork/port/dali-mt6991；CI https://github.com/localhosts-A/ios-sweet/actions/runs/41244033078 仅dispatch一次。24suite/183主机cases、36source独立重放/30旧源不变、3真实ARM64对象通过；预计完整CI227执行，native link/IIG/产物仍待实际终态与独立验收，未宣称CI已成功。
+后台bihzzwk8u只观察该CI与隔离收集产物，自动完成通知，不poll/重发。准备好的verify-fastboot-return-ci.py仅在收集完成后运行；当时NOTES/CI后续交接只本地改，不把两用户dirty工具或Apple/raw/DSC数据入git。
+设备原厂+b4ee已闭合，0177spent/四flagsfalse；当前没有新进入Fastboot/刷入批准。用户允许后续刷前确认完整单次方案、获准同轮自动返回/取证恢复，无需人工按键；本轮未操作设备，自动Fastboot和UUIDtext运行接纳均未硬件验证。PortSend接收权属未证、桌面未实现。
+
+---
+
 ## 当前交接 — 0178离线索引/默认off返回主机验收完成，准备提交与一次CI（2026-11-01）
 
 获批playful-tickling-lemur计划实施：tools/dali_uuidtext.py只读正式工具在b4ee根前后fullSHA一致，生成101685978bytes/2710images/4301ranges，完整SHAea59524b50ec6987467a9ee2ce502aaa636b1c80334862f187b1b371a62e665a，与独立原型及两轮现场1MiB前缀相等；未植入根。

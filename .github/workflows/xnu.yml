@@ -51,6 +51,8 @@ on:
       - "tools/test_dali_uuidtext.py"
       - "tools/dali_recovery_adt.py"
       - "tools/dali_unattended_return.py"
+      - "tools/dali_trial_adapters.py"
+      - "tools/test_dali_trial_safety.py"
       - "tools/test_dali_fastboot_return.py"
 
 concurrency:
@@ -145,6 +147,7 @@ jobs:
           python3 tools/test_dali_root_capture.py
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_uuidtext.py"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_fastboot_return.py"
+          python3 -I "$GITHUB_WORKSPACE/tools/test_dali_trial_safety.py"
           python3 tools/test_dali_boottrace.py
           python3 tools/test_dali_gui.py
           python3 tools/test_dali_hid_geometry.py

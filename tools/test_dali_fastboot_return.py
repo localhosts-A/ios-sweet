@@ -326,8 +326,22 @@ class UnattendedReturnTests(unittest.TestCase):
                      candidate_sha256={'boot': 'b' * 64}, root_base_sha256='a' * 64,
                      original_sha256={'boot_b.img': 'd' * 64}, serial='synthetic-dali',
                      observation_limit_seconds=1200, trial_started_utc=started, run_token='1' * 32)
+        # A real static dependency graph, separate from mutable state/config.
+        (pair / 'boot').write_bytes(b'synthetic boot')
+        state['candidate_sha256'] = {'boot': unattended.digest(pair / 'boot')}
+        for name in ('dali_trial_adapters.py', 'dali_unattended_return.py'):
+            source = ROOT / 'tools' / name
+            (pair / name).write_bytes(source.read_bytes())
+        dependencies = {name: unattended.digest(pair / name) for name in
+                        (*unattended.FILES, 'dali_trial_adapters.py', 'dali_unattended_return.py')}
+        (pair / 'trial-dependencies.json').write_text(json.dumps(dict(schema=1, files=dependencies)))
+        state.update(dependency_manifest_sha256=unattended.digest(pair / 'trial-dependencies.json'),
+                     root_candidate_sha256='f' * 64, root_restore_target_sha256='a' * 64,
+                     root_clean_image='/synthetic/root.img', restore_source='/synthetic/root.img')
         approval = {key: state[key] for key in ('run', 'source_commit', 'candidate_sha256',
-                    'root_base_sha256', 'original_sha256', 'serial', 'run_token', 'approved_trials')}
+                    'root_base_sha256', 'original_sha256', 'serial', 'run_token', 'approved_trials',
+                    'dependency_manifest_sha256', 'root_candidate_sha256', 'root_restore_target_sha256',
+                    'restore_source')}
         approval.update(initial_fastboot_and_flash_confirmed=True, unattended_return_authorized=True,
                         unattended_helper_sha256=helpers,
                         unattended_coordinator_sha256=unattended.digest(Path(unattended.__file__)))

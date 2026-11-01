@@ -83,6 +83,22 @@ python3 -I tools/dali_recovery_adt.py \
 
 实际用法只有在刷前确认后才允许 `--recover`；本次工具/CI交付不提供可直接执行的已授权设备目录。
 
+## 整合候选与恢复链安全
+
+`tools/dali_trial_adapters.py`提供三个薄adapter的实际阶段逻辑，复用候选内已验的device_pair、完整根capture和pinned-FD restorer，而不是第二套刷写算法。新候选的`trial-dependencies.json`绑定全部传递依赖；其完整SHA进入真人批准清单。核心候选文件也逐项回读hash。运行config、claim和state与静态依赖分域，不产生approval/config循环哈希。
+
+- 候选reboot之前，`prepare_reboot`单次持久化起点及config，并fsync/复读；协调器不能在接管时重新计时。首次根增量前须先记录pending恢复义务。
+- adapter在首个transport前核对批准、claim、token、根目标/恢复authority、当前阶段及所有依赖，然后独占发布started marker。未批准或旧spent状态原样拒绝。
+- stock阶段必须完成Android及完整物理启动对验收。capture阶段只读固定SWEET窗口及最多2MiB的console-ramoops，不读pmsg/ftrace；完整16GiB三hash并再复核本地主机文件后才发布顶层capture marker。
+- root阶段只有完整capture通过后才调用原pinned-FD算法，重新比较全部256个chunk，完整根/物理对验收后明确关闭四权限及pending。失败不发布闭合标记。
+- coordinator将每个helper放进独立POSIX进程组，超时/信号/异常有界TERM、KILL和回收；正常父进程退出但残留子进程也不能算阶段成功。永久claim阻断自动重试。
+
+**进程组退出不证明远端adb shell/su dd已停止。**已启动获批执行后，任何超时或异常都保留pending并停止自动链路，不自动执行下一写阶段或restore-only；后续人工恢复必须独立fresh确认无在途写入。无法确认就继续阻断。测试使用真实无设备子进程树及transport替身，不把它们当硬件无人值守验收。
+
+根植入只允许在另行批准的全新主机COW副本中进行：保留原baseline/persona seed/原始现场，唯一新增DSC目录及最终文件，完整逻辑文件对照、只读fsck及全16GiB sparse虚拟重放必须通过。不存在自动植入设备的开关。
+
+真实logd的UUID GC检查`ctime < time()-86400`（不是mtime），还有in-use UUID/boot-uuid xattr分支。部署前必须fresh核对正常创建的ctime与设备时钟并覆盖窗口；超龄或时钟异常就停止重新准备，不伪造version.plist、Salt、Identifier、bootUUID xattr或时间戳。静态快路径和目录契约不是运行接纳或黑屏修复证明。
+
 ## 验收边界
 
 本地ARM64对象、实际C函数回归、合成测试和完整native CI分别记录。宿主clangd按x86目标给ARM64寄存器/片段头路径的诊断不能替代真实arm64编译，也不应隐藏真正编译错误。

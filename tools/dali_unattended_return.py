@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
 import stat
 import subprocess
 import sys
@@ -36,7 +37,55 @@ def read_regular(path, limit=8 * 1024**2):
 
 
 def digest(path):
-    return hashlib.sha256(read_regular(path)).hexdigest()
+    # Images/deltas are larger than JSON/helpers; hash bounded regular files
+    # incrementally rather than applying the small-JSON limit or loading them.
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, 'O_NONBLOCK', 0))
+    try:
+        before = os.fstat(fd)
+        require(stat.S_ISREG(before.st_mode) and 0 <= before.st_size <= 256*1024**2,
+                'hash输入不是有界普通候选文件')
+        h = hashlib.sha256()
+        for offset in range(0, before.st_size, 1024**2):
+            count = min(1024**2, before.st_size-offset)
+            data = os.pread(fd, count, offset)
+            require(len(data) == count, 'hash输入短读')
+            h.update(data)
+        after = os.fstat(fd)
+        require((before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns) ==
+                (after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns), 'hash输入变化')
+        return h.hexdigest()
+    finally:
+        os.close(fd)
+
+
+def verify_dependencies(pair, state, approval):
+    """Static approved graph; runtime config/claims are deliberately not hashed here."""
+    names = state.get('candidate_sha256', {})
+    require(names and names == approval.get('candidate_sha256'), '候选绑定不符')
+    for filename, expected in names.items():
+        require(isinstance(filename, str) and re.fullmatch(r'[A-Za-z0-9_.-]+', filename) and
+                re.fullmatch('[0-9a-f]{64}', expected or '') and
+                digest(pair / filename) == expected, '候选文件变化: ' + str(filename))
+    expected = approval.get('dependency_manifest_sha256')
+    require(expected == state.get('dependency_manifest_sha256') and
+            re.fullmatch('[0-9a-f]{64}', expected or '') and
+            digest(pair / 'trial-dependencies.json') == expected, '依赖清单未绑定')
+    manifest = json.loads(read_regular(pair / 'trial-dependencies.json'))
+    require(manifest.get('schema') == 1 and isinstance(manifest.get('files'), dict) and
+            set(FILES) | {'dali_trial_adapters.py', 'dali_unattended_return.py'} <= set(manifest['files']),
+            '依赖清单不完整')
+    require(not set(manifest['files']) & {'trial-approval.json', 'trial-state.json',
+            'unattended-return.json', 'trial-dependencies.json'}, '静态/运行态哈希循环')
+    for filename, expected in manifest['files'].items():
+        require(re.fullmatch(r'[A-Za-z0-9_.-]+', filename) and
+                re.fullmatch('[0-9a-f]{64}', expected or '') and
+                digest(pair / filename) == expected, '依赖文件变化: ' + filename)
+    for field in ('root_candidate_sha256', 'root_restore_target_sha256', 'restore_source'):
+        require(state.get(field) is not None and state[field] == approval.get(field),
+                '根/恢复绑定不符: ' + field)
+    require(state['root_restore_target_sha256'] == state['root_base_sha256'] and
+            state['root_clean_image'] == state['restore_source'], '恢复authority不符')
+    return manifest
 
 
 def load_contract(candidate, approval_sha256):
@@ -82,6 +131,7 @@ def load_contract(candidate, approval_sha256):
                 digest(pair / filename) == row['sha256'], '恢复helper精确批准/hash不符: ' + stage)
     require(approval.get('unattended_coordinator_sha256') == digest(Path(__file__)),
             '协调器字节未包含在该轮刷前批准中')
+    verify_dependencies(pair, state, approval)
     return pair, state, config, start
 
 
@@ -148,28 +198,119 @@ def verify_stage(pair, stage, approval):
     return state
 
 
+def atomic_state(pair, state):
+    """Publish a durable state update without following a temporary symlink."""
+    temp = pair / '.trial-state.next'
+    write_exclusive(temp, state)
+    os.replace(temp, pair / 'trial-state.json')
+    fd = os.open(pair, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def group_exists(pgid):
+    try:
+        os.killpg(pgid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+
+
+def stop_group(process, grace=1.0):
+    """Best-effort local containment, NEVER evidence of remote write quiescence."""
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(process.pid, sig)
+        except ProcessLookupError:
+            pass
+        until = time.monotonic() + grace
+        while time.monotonic() < until:
+            process.poll()  # reap the direct child, including on normal-return cleanup
+            if not group_exists(process.pid):
+                return True
+            time.sleep(0.02)
+    process.poll()
+    return not group_exists(process.pid)
+
+
+def run_stage(argv, timeout, evidence):
+    require(os.name == 'posix', '恢复helper需要POSIX进程组')
+    process = subprocess.Popen(argv, start_new_session=True)
+    old_handlers = {}
+    def interrupted(number, frame):
+        raise InterruptedError('协调器收到终止信号 ' + str(number))
+    try:
+        for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+            old_handlers[sig] = signal.signal(sig, interrupted)
+        write_exclusive(evidence, dict(pid=process.pid, pgid=process.pid,
+                        started_utc=datetime.now(timezone.utc).isoformat(),
+                        remote_quiescence_proven=False))
+        code = process.wait(timeout=timeout)
+        require(code == 0, '恢复helper失败: ' + str(code))
+        require(not group_exists(process.pid), 'helper退出但仍有本地子进程；停止后续阶段')
+    except BaseException:
+        # Cleanup is bounded. A surviving group or a vanished group both block
+        # the next device stage; remote adb shell/dd may outlive the transport.
+        for sig in old_handlers:
+            signal.signal(sig, signal.SIG_IGN)
+        stop_group(process)
+        raise
+    finally:
+        for sig, handler in old_handlers.items():
+            signal.signal(sig, handler)
+
+
+def lock_candidate(pair):
+    import fcntl
+    fd = os.open(pair / 'trial-device.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        require(stat.S_ISREG(os.fstat(fd).st_mode), '设备锁不是普通文件')
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
 def recover(candidate, approval_sha256, execute=False):
     pair, state, config, start = load_contract(candidate, approval_sha256)
     approval = json.loads(read_regular(pair / 'trial-approval.json'))
     if not execute:
         return dict(status='validated-no-transport', stages=list(STAGES), device_accessed=False)
-    # 独占claim且没有resume/retry开关；失败保留现状，交给原有restore-only入口。
-    write_exclusive(pair / 'unattended-return-claim.json',
-                    dict(run_token=config['run_token'], approval_sha256=approval_sha256,
-                         claimed_utc=datetime.now(timezone.utc).isoformat(), retry_permitted=False))
-    require(wait_return(state['serial'], start), '窗口结束未观测目标Fastboot；不刷、不延长，恢复仍pending')
-    for stage, filename in zip(STAGES, FILES):
-        row = config['stages'][stage]
-        require(digest(pair / filename) == row['sha256'] and
-                digest(pair / 'trial-approval.json') == approval_sha256, '执行前helper/批准已变化')
-        # 各helper各自核对物理hash/完整capture/pinned恢复FD；协调器不发flash命令。
-        subprocess.run([sys.executable, '-I', str(pair / filename), str(pair)],
-                       check=True, timeout={'stock_pair': 600, 'capture': 3600, 'root_restore': 3600}[stage])
-        verify_stage(pair, stage, approval)
-        write_exclusive(pair / ('unattended-' + stage + '-complete.json'),
-                        dict(run_token=config['run_token'], stage=stage,
-                             completed_utc=datetime.now(timezone.utc).isoformat()))
-    return dict(status='closed-verified', stages=list(STAGES), desktop_verified=False)
+    lock = lock_candidate(pair)
+    claimed = False
+    try:
+        # The permanent claim blocks a fresh coordinator after crashes as well
+        # as ordinary failures. Never auto-launch a separate restore-only path.
+        write_exclusive(pair / 'unattended-return-claim.json',
+                        dict(run_token=config['run_token'], approval_sha256=approval_sha256,
+                             claimed_utc=datetime.now(timezone.utc).isoformat(), retry_permitted=False))
+        claimed = True
+        require(wait_return(state['serial'], start), '窗口结束未观测目标Fastboot；不刷、不延长，恢复仍pending')
+        for stage, filename in zip(STAGES, FILES):
+            verify_dependencies(pair, json.loads(read_regular(pair / 'trial-state.json')), approval)
+            require(digest(pair / filename) == config['stages'][stage]['sha256'] and
+                    digest(pair / 'trial-approval.json') == approval_sha256, '执行前helper/批准已变化')
+            run_stage([sys.executable, '-I', str(pair / filename), str(pair)],
+                      {'stock_pair': 600, 'capture': 3600, 'root_restore': 3600}[stage],
+                      pair / ('unattended-' + stage + '-process.json'))
+            verify_stage(pair, stage, approval)
+            write_exclusive(pair / ('unattended-' + stage + '-complete.json'),
+                            dict(run_token=config['run_token'], stage=stage,
+                                 completed_utc=datetime.now(timezone.utc).isoformat()))
+        return dict(status='closed-verified', stages=list(STAGES), desktop_verified=False)
+    except BaseException:
+        if claimed:
+            current = json.loads(read_regular(pair / 'trial-state.json'))
+            current.update(root_restore_pending=True, root_restore_verified=False,
+                           unattended_failed=True, remote_quiescence_proven=False,
+                           automatic_retry_permitted=False)
+            atomic_state(pair, current)
+        raise
+    finally:
+        os.close(lock)
 
 
 def main(argv=None):
