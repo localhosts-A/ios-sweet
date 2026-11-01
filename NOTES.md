@@ -1,4 +1,18 @@
-## 当前交接 — 主机供电观测负控已闭合；HS仍禁止、桌面未达标（2026-11-02）
+## 当前交接 — 桌面仍未实现；晚期BB调用已定位，缺失路径/IPC对象仍待实证（2026-11-02）
+
+**主目标未完成，当前没有活动后台或设备任务。** 下方273项host测试/40a7562文档提交不等桌面。当前kernel仍为源码48784e2/nativeCI41317700197，boot5188F046、GUIpresent0/成功DSI0；未收到真人实屏图标网格/Dock/UI更新/稳定120秒证据。原PWM轮closed/1次spent不重开。
+
+**新定位进展（不是根因修复）：** bvero1juw因错误LLVM选项--hex-imm输出帮助导致0/65指令断言失败，证据保留。合成NOP/RET证实本机--print-imm-hex，独立v2 b41wkx0d5 completed0。当前`.symbols`2836项及LC_FUNCTION_STARTS2790项，将3个BB56/main303 IRQ精确定位为PersistentAllocator BTree::insert入口、PrebuiltLoader::loadDependents+248依赖循环、MachOFile::hasThreadLocalVariables+8的ret（完整12字节函数）。LR前实际BL精确交叉，非nearest redacted标签，不减4；仍非完整栈/owner/持续死锁或桌面。
+
+**晚期独立slide已证明：** bhkbevb20 completed0，当前libsystem_kernel的4种不同正BSD stub338/327/331/361各有唯一MOVZ+SVC，独立得到PID56 slide0x50404000（结果与dyld相同但不是复用它）。已据实际local symbols定位主线程晚期stat64调用者为CoreFoundation的__CFBundleGrokFileType（2次）与__CFGetFileProperties（1次），紧邻匹配return均errno2/ENOENT；issetugid返回0。worker470在__pthread_exit/__pthread_terminate，最后361无return不证明卡死。一次MachMsg2记录有成功return0，其余没有紧邻匹配return，不据此宣称一直等待。
+
+**当前不可越过的数据缺口：** 这些stat64记录只保存x0用户指针，没有copyinstr路径；最终MachIPC未保存消息对象/peer，BBIPC末态eligible/matched/selected均0，不能解释为所有IPC不存在。封存磁盘raw不能恢复当时未采集的用户RAM字符串/消息头。因此不能猜补缺文件、强制stat成功、改CFBundle/TLV/allocator/IPC或宣称已找到根因。下一实机前须有能关联实际缺失路径/消息上下文的可核验运行时证据，或另一个已有证据支持的功能修复；在此之前不发布新的诊断候选或盲重启。
+
+**新本地证据（w=.tmp/desktop-diagnostics-20261030）：** `desktop-current-dyld-pc-v2/verification.json`、`desktop-current-dyld-callers.json`、`desktop-current-libkernel-bsd-v1/verification.json`、`desktop-cache-consumer-followup.md`。两成功audit分别rb有界读346518212与323211104byte，各<512MiB，原件inode/mtime/ctime保持，无16GiB重复hash/Apple执行。后者保存cache-reader-checkpoint，后续小范围读取不再重扫catalog。101MB uuidtext DSC是logd字符串缓存，不是可执行cache；launchd配置cache发送成功非桌面。43条not-in-trust-cache精确源码是root ownership回退，不为消日志放宽信任策略。
+
+无新下载、设备查询/写、完整CI、候选或HS/供电/PMIF变更；用户mkadt/mkiosroot原SHA保留、不暂存。本次仅NOTES本地交接提交和最终保护核验见 `w/desktop-current-cache-handoff.json`，不作为生产修复或新kernel。下方HS host阶段仍闭合且硬停止，持续floor/PMIF-P ownership/真实两端HS能力与序列未证；不得用更明确的符号化结果替代硬件准入。
+
+### 已闭合前一阶段 — 主机供电观测负控；HS仍禁止、桌面未达标（2026-11-02）
 
 **本阶段结束，无活动设备或后台任务。** 当前可执行kernel仍来自源码commit `48784e2b795184f5ff63b2c860e403bdb3aa151e` / native CI `41317700197`，已独立验收353测试执行/45源/17 IIG/IORPC/完整链接。后续纯文档提交不改变该kernel身份；本阶段没有新CI、候选、设备查询或启动。
 
