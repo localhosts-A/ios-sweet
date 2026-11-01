@@ -338,6 +338,41 @@ time.sleep(60)
                 c.run_stage([sys.executable,'-I','-c','import time;time.sleep(60)'],10,evidence)
             self.assertFalse(c.group_exists(json.loads(evidence.read_text())['pgid']))
 
+    def test_permission_denied_group_probe_never_proves_absence(self):
+        process=mock.Mock(pid=123456789)
+        with mock.patch.object(c.os,'killpg',side_effect=PermissionError('denied')) as kill:
+            self.assertTrue(c.group_exists(process.pid))
+            self.assertFalse(c.stop_group(process,grace=0))
+            self.assertIn(mock.call(process.pid,signal.SIGTERM),kill.call_args_list)
+            self.assertIn(mock.call(process.pid,signal.SIGKILL),kill.call_args_list)
+            process.poll.assert_called_once()
+        # A denied signal/probe may only become confirmed-gone on an explicit ESRCH.
+        with mock.patch.object(c.os,'killpg',side_effect=[PermissionError('denied signal'),
+                PermissionError('unknown group'),ProcessLookupError('gone')]) as kill:
+            self.assertTrue(c.stop_group(process,grace=1))
+            self.assertEqual(kill.call_args_list,[mock.call(process.pid,signal.SIGTERM),
+                mock.call(process.pid,0),mock.call(process.pid,0)])
+
+    def test_permission_denied_cleanup_never_allows_stage_success(self):
+        old=signal.getsignal(signal.SIGTERM)
+        real_stop=c.stop_group
+        for interrupted in (False,True):
+            process=mock.Mock(pid=123456789)
+            def wait(timeout):
+                if interrupted: signal.getsignal(signal.SIGTERM)(signal.SIGTERM,None)
+                return 0
+            process.wait.side_effect=wait
+            with tempfile.TemporaryDirectory() as t, \
+                 mock.patch.object(c.subprocess,'Popen',return_value=process), \
+                 mock.patch.object(c.os,'killpg',side_effect=PermissionError('unknown group')), \
+                 mock.patch.object(c,'stop_group',side_effect=lambda p:real_stop(p,grace=0)) as stop:
+                evidence=Path(t)/'process.json'
+                with self.assertRaises(c.StageInterrupted if interrupted else ValueError):
+                    c.run_stage(['synthetic-no-transport'],5,evidence)
+                stop.assert_called_once_with(process)
+                self.assertFalse(json.loads(evidence.read_text())['remote_quiescence_proven'])
+            self.assertEqual(signal.getsignal(signal.SIGTERM),old)
+
     def test_nonzero_helper_never_counts_as_success(self):
         with tempfile.TemporaryDirectory() as t:
             with self.assertRaisesRegex(ValueError,'helper失败'):

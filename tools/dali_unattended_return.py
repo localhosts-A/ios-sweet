@@ -224,6 +224,9 @@ def group_exists(pgid):
         return True
     except ProcessLookupError:
         return False
+    except PermissionError:
+        # EPERM is unknown/existing, never evidence that the group disappeared.
+        return True
 
 
 def stop_group(process, grace=1.0):
@@ -231,7 +234,8 @@ def stop_group(process, grace=1.0):
     for sig in (signal.SIGTERM, signal.SIGKILL):
         try:
             os.killpg(process.pid, sig)
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError):
+            # A denied signal is not success. Only a later ESRCH can prove gone.
             pass
         until = time.monotonic() + grace
         while time.monotonic() < until:

@@ -1,4 +1,23 @@
-## 当前交接 — Git metadata修正256项通过，待修正提交/新nativeCI（2026-11-01）
+## 当前交接 — 保守EPERM修正258项通过，准备新修正提交/nativeCI（2026-11-01）
+
+bbbl1t41v真实completed0：pwm-g2-eperm-regressions-v1完整28suite258项全过；原真实信号/group消失严格断言保持，新增EPERM未知/拒绝清理不放行/明确ESRCH才gone测试均过。validator180patch/53Python/12shell、11workflowbash-n通过；新CI预期256pre+97post353只是未来预期。内核6文件/sourceSHA与fdc00bec0180完全不变，生产对象复用明确相同源，不冒充Mac已验证EPERM/新native通过。准备精确3文件主机安全修正提交，再新head唯一nativeCI；两个旧失败结论保持、不刷设备。
+
+### 先前等待/失败分析（历史）
+
+
+41316486687/af10e9a/attempt1真实failure：既有ProcessTreeTests.test_termination_signal_stops_local_group_and_restores_handler在macOS/Python3.15.2发生StageInterrupted后，stop_group→group_exists→os.killpg(pgid,0)抛PermissionError EPERM，遮蔽原中断；Build与post-source均未执行，后续always打包缺未构建目录也失败。日志pwm-g2-gitfix-failed-ci-logs/failed.log。不能把它当PWM编译/metadata新测试失败，不下载/部署kernel、不盲重run。OS为何EPERM未证，不称已知瞬态/无活动。
+
+最小安全修正tools/dali_unattended_return.py：group probe EPERM返回True（未知/可能存在，绝不是gone）；TERM/KILL EPERM只继续原有限清理/检查，只有明确ESRCH可确认本地groupgone。未知到截止仍False-cleanup，不放行成功stage；所有异常仍禁止后续设备写，remote_quiescence_proven始终不能据本地进程状态变true。原SIGTERM真实子进程清理/handler恢复严格断言未删。新增永久EPERM未知、denied→ESRCH、有无中断都不许stage成功并恢复handler的合成测试；实际23项全过，pwm-local-eperm-safety-v1/test.log（78.641s）。生产清理1s/信号/本boot设备授权/捕获恢复规则均不放宽。下一步全回归/新scope修正提交/新CI，之前不动设备。
+
+### 前一CI派发（历史）
+
+
+精确4文件修正commit af10e9a861f032403ff210eb67ba708372b8b90c（af10e9a）已按持续授权推送，source/header字节不变、只修Git metadata并补实际工具测试/doc。新head只dispatch一次，初查元数据未传播未重dispatch，随后单次lookup确认唯一新run41316486687/attempt1/in_progress，https://github.com/localhosts-A/ios-sweet/actions/runs/41316486687，后台bgwryknyx负责全终态通知。不对原41314853521作rerun/取消/结论改写。
+
+当前实测256/真实Git+GNU回放/ARM64source identity/validator/workflow通过，CI预期254pre+97post351但尚未验收。已准备新的fetch-pwm-g2-gitfix-native-artifacts.py与verify-pwm-g2-gitfix-native-ci.py，严格绑定新run/newhead与当前patchhash，只AST语法通过尚未执行；旧成功专用fetch/verifier不拿来放宽失败准入。新CI成功后再取全新隔离artifact/log、核45sources/17IIG/IORPC/链接/真实351执行/kernelSHAUUID，之前不封装候选/操作设备。
+
+### metadata修正提交前（历史）
+
 
 实际完整28suite256测试全通过pwm-g2-regressions-v2（新增真实git apply带negativecontrol/全部6源字节比较）；b39eptszd完成，pwm-g2-independent-v2证明新patch GNU零fuzz/offset回放与ARM64probe。与v1逐个比对6source/headerSHA完全不变，生产2对象仍对应这些完全相同源码；只修两行Git new-file metadata，不改PWM/return语义。180patch53Python12shell、11workflowbash-n均通过；新CI预期254pre+97post351，只是未来预期，旧CI41314853521始终failure/280执行，不能改写历史。
 
@@ -4362,3 +4381,8 @@ Patch0142 CI run `39841549367` succeeded on source commit `e0c9c0da7ae19bf7ac414
 fetch-pwm-g2-native-artifacts.py严格只接受41314853521/b21bbca/attempt1/completed-success，核artifact清单/容量后将完整log与两artifact下载到两个全新隔离目录，参考不执行、Python-I且脚本在w外层；verify-pwm-g2-native-ci.py待实际结果/下载后独立比对253pre+96post=349执行顺序/计数、45精确源（旧43+2私头）、正式导出watchdog/header、17逐字节相同IIG、原4字段IORPC、console控制、linked markers/symbols、无hostprobe/atomicruntime及真实kernelSHA/UUID。两脚本仅AST语法通过，尚未运行/下载/独立验收CI，不能把预期计数/45源写成已通过。后台b81mszp48仍为主等待信号，无其他活动设备或测试任务；未poll活动日志、不重dispatch。
 
 Git提交后工作树除新NOTES交接及原用户mkadt/mkiosroot外无已跟踪代码改动；.tmp/out仍不入git。新候选/外部capture布局待完整CI验收后再建，非本步骤成果。
+
+
+### 当前等待点：bbbl1t41v（未结束）
+
+唯一后台bbbl1t41v正在执行pwm-g2-eperm-regressions-v1全28suite，期望因新增2项而258但未收到完成通知，不能把期望当通过；独立23安全项已通过，validator180/53/12与限定diff-check通过。当前没有运行中的nativeCI或设备任务，两个native run均失败已终态/冻结证据，第三CI尚未派发。收到全回归通知后再核实际计数/workflow预期、保护用户工具SHA，提交tools/dali_unattended_return.py+tools/test_dali_trial_safety.py+NOTES三文件最小修正，再为新head全新CI。后验脚本须绑定新head/run并换成新实际suite计数，不复用旧349/351预期。Kernel6源字节和fdc00bec metadata修正不变，旧/新实际raw与原厂恢复源/尾部/spent仍保护；实屏桌面目标仍未达标。
