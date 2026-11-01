@@ -1,4 +1,25 @@
-## 当前交接 — 条件G2功能255项及最新对象/回放通过，待完整nativeCI（2026-11-01）
+## 当前交接 — Git metadata修正256项通过，待修正提交/新nativeCI（2026-11-01）
+
+实际完整28suite256测试全通过pwm-g2-regressions-v2（新增真实git apply带negativecontrol/全部6源字节比较）；b39eptszd完成，pwm-g2-independent-v2证明新patch GNU零fuzz/offset回放与ARM64probe。与v1逐个比对6source/headerSHA完全不变，生产2对象仍对应这些完全相同源码；只修两行Git new-file metadata，不改PWM/return语义。180patch53Python12shell、11workflowbash-n均通过；新CI预期254pre+97post351，只是未来预期，旧CI41314853521始终failure/280执行，不能改写历史。
+
+当前修正补丁SHAfdc00bec0997f9155e9fc8dc4edef4aad1efb723dbc92c6d8597d0ed96334703。下一步只提交patch/真实Git测试/doc/当前NOTES四文件，用户原工具不暂存/不改SHA；再启动新head的一次全新nativeCI，不重复失败run、不操作设备、不承诺桌面。
+
+### 前一失败分析（历史保留）
+
+
+已补两个新头new file mode100644，0180SHAfdc00bec0997f9155e9fc8dc4edef4aad1efb723dbc92c6d8597d0ed96334703。C/header所有6文件内容与此前ARM64/host验证逐字节不变。正式PWM suite新增一项真实独立git init+git apply --check/实际应用、全部6文件与SOURCE逐字节核同，并删除metadata负控必须reject；28项已真实通过。完整新回归bv2o8x74h、当前补丁GNU回放/可达ARM64probe b39eptszd在途；不轮询任务日志。
+
+CI41314853521独立日志确认实际执行280（253pre+27post），post1failure后余suite/诊断跳过，failure-evidence.json冻结完整logSHA/skip行，不是349全过。不是硬件/驱动PMC错误，而是patch打包错误；保留失败kernel不使用，也不必为旧源码kernel下载完整归档。CI已终态，无活动设备；后续新修正提交/新精确CI不等盲rerun此run。
+
+### 前一CI里程碑（历史）
+
+
+已按2026-11-01真人持续授权精确提交/推送11文件，commit b21bbca263f6b4b003d631a995ba1850a15af8b4（b21bbca）；用户工具原SHA未改/未暂存，.tmp/out/设备原件不入git。nativeCI唯一41314853521/attempt1，https://github.com/localhosts-A/ios-sweet/actions/runs/41314853521，精确head核同，macOS13.5/DEVELOPMENT/SWEET/keep_goingtrue，dispatch一次且事前无活动run。当前queued元数据已保存pwm-g2-native-ci/run.json；watch后台b81mszp48使用gh run watch30s并覆盖所有终态，不poll任务output或活动日志。不得盲重dispatch/取消/改已运行head。
+
+当前已过255主机测试/最新ARM64对象/6文件replay+probe+CFG/180patch53Python12shell/11workflowbash-n；未来CI预期253pre+96post349，仅预期。CI尚未通过/尚未下载验核kernel或sourcearchive，未封装新candidate、未操作设备。下一步待真实完成通知后独立审计完整CI/source/native链接/测试/IIG/IORPC，再绑定机械盘全新候选与fresh设备/空间/clock/恢复门禁。旧spent1/1、actual6d9dd283、原厂+b4ee保护保持，实屏桌面/更新120s/成功DSI仍未验收。
+
+### 提交前里程碑（历史）
+
 
 真实28suite255项全通过，pwm-g2-regressions-v1/verification.json；两个当前ARM64生产对象、六文件实际补丁零fuzz/offset回放+可达probe、单CASclaim/PMC固定循环CFG均真实通过pwm-g2-{contract-arm64,independent,object-cfg}-v1。最新0180SHA7ffbb88a17c7866e36e0d997231a7ae417fb43eaaa9c27e5d6d43ba9e2c86cbd。固定实际DT+vendor支持生产ceiling2，仅真实冷clock admission得到cap2后、精确控制器健康+两端RX能力+单lane健康PWM+无降gear时写16attrs/单次SLOW0x22PMC；未知clock cap1不UIC，未optin/非Dali零clockmapping。此为条件硬件试验的工程契约，不是已测cold clock/PHY/电压或实机提速。cap1/253/早期7ff版本fixture失败等历史证据不能当新版本。
 
@@ -4334,3 +4355,10 @@ After the next user screen report, Fastboot became visible. `device_pair.py reco
 ## 2026-10-23 — Patch0142 paired trial active; awaiting USB result
 
 Patch0142 CI run `39841549367` succeeded on source commit `e0c9c0da7ae19bf7ac41489a9abb715ccc74601e`: XNU build/link, SWEET checks, packaging and KDK inspection passed. Candidate `shim/out-dali/usb-otg-role-recheck-39841549367/` exact-matches 32/32 compiled files after patches0139+0140+0141+0142; linked kernel contains both the attached-source mismatch and second-read diagnostic; payload/11-segment/ADT/HFS RAM image/init_boot/AVB checks passed. Kernel SHA256 `d55b2667585611e8eff4ff13e023d15bf5a559c13e207eec84c91811129c1b9a`; `dali-boot.img` `ddfbc184acfc2c255e356a8583335f1e9a8f90835296d47ace83422871446d39`; `dali-init_boot.img` `9bb023da8ae63981c5bde17a785fce5bf1b89cf0d0cd8621dc6b636c9512dd8d`. User said “直接刷”; fresh physical Android preflight passed model/slot/root/original sizes+hashes, backup and candidate hashes; Fastboot identity/unlock/partition-size checks passed. Candidate init_boot_b then boot_b flashed successfully (both OKAY), and trial reboot was requested; manifest state `trial_rebooted`. USB enumeration/MSC/root are not yet proven. User should test the same U-disk, send the bottom summary (`DALI USB SCAN FINAL`, final `DALI OTG FINAL`), then return to PC Fastboot. Restore original pair, reboot Android, and verify both physical original hashes immediately after the report. No userdata/GPT/U-disk writes.
+
+
+### 当前CI后验入口（2026-11-01，尚未运行）
+
+fetch-pwm-g2-native-artifacts.py严格只接受41314853521/b21bbca/attempt1/completed-success，核artifact清单/容量后将完整log与两artifact下载到两个全新隔离目录，参考不执行、Python-I且脚本在w外层；verify-pwm-g2-native-ci.py待实际结果/下载后独立比对253pre+96post=349执行顺序/计数、45精确源（旧43+2私头）、正式导出watchdog/header、17逐字节相同IIG、原4字段IORPC、console控制、linked markers/symbols、无hostprobe/atomicruntime及真实kernelSHA/UUID。两脚本仅AST语法通过，尚未运行/下载/独立验收CI，不能把预期计数/45源写成已通过。后台b81mszp48仍为主等待信号，无其他活动设备或测试任务；未poll活动日志、不重dispatch。
+
+Git提交后工作树除新NOTES交接及原用户mkadt/mkiosroot外无已跟踪代码改动；.tmp/out仍不入git。新候选/外部capture布局待完整CI验收后再建，非本步骤成果。

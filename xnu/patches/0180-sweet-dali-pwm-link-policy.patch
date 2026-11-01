@@ -3005,6 +3005,7 @@ diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
  }
  #endif /* ARM64_BOARD_CONFIG_SWEET */
 diff --git a/bsd/dev/SweetUFSPWMPolicy.h b/bsd/dev/SweetUFSPWMPolicy.h
+new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/SweetUFSPWMPolicy.h
 @@ -0,0 +1,153 @@
@@ -3162,6 +3163,7 @@ diff --git a/bsd/dev/SweetUFSPWMPolicy.h b/bsd/dev/SweetUFSPWMPolicy.h
 +
 +#endif /* SWEET_UFS_PWM_POLICY_H */
 diff --git a/bsd/dev/SweetUFSPWMClock.h b/bsd/dev/SweetUFSPWMClock.h
+new file mode 100644
 --- /dev/null
 +++ b/bsd/dev/SweetUFSPWMClock.h
 @@ -0,0 +1,56 @@

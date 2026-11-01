@@ -178,6 +178,13 @@ initialization additions and the already documented older hooks. Existing
 SCSI, QUERY, strategy, logger, normal UIC and LINK_STARTUP exception functions
 must remain byte-identical.
 
+The PWM suite also replays all six files using the native build's **Git apply**
+format in a fresh Git root, then compares every resulting file byte-for-byte.
+New private headers carry `new file mode 100644`; removing that metadata must
+fail the negative control. GNU patch replay alone is insufficient: a parent
+repository prefix can also silently skip a Git apply, so merely observing exit
+zero is not acceptance. Final native source equality remains mandatory.
+
 The CI workflow runs the PWM, clock and early-return suites before and after
 a native build, alongside the existing source and protocol gates.
 Wiring is not execution: neither local objects nor host fixtures substitute for

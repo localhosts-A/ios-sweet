@@ -5,7 +5,7 @@ complete kernel initialization, hardware return, line speed or desktop activity.
 Production ceiling2 still needs live clock admission; fixture caps are not hardware evidence.
 """
 from pathlib import Path
-import shutil,subprocess,tempfile,unittest
+import os,shutil,subprocess,tempfile,unittest
 import test_dali_gui_load_progress as source
 ROOT=Path(__file__).resolve().parents[1]
 UFS=source.UFS
@@ -288,6 +288,33 @@ class PWMHardwareTest(unittest.TestCase):
    subprocess.run([cc,'-std=gnu11','-O2','-Wall','-Wextra','-Werror','-pthread',str(p/'test.c'),'-o',str(p/'test')],check=True)
    result=subprocess.run([str(p/'test')],capture_output=True,text=True,timeout=20)
    self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+ def test_native_git_apply_creates_exact_six_files(self):
+  git=shutil.which('git');self.assertIsNotNone(git)
+  paths=('bsd/dev/sweet_ufs.c','bsd/dev/SweetUFSPWMPolicy.h','bsd/dev/SweetUFSPWMClock.h',
+   'pexpert/arm/DaliFastbootReturnPolicy.h','pexpert/arm/pe_dali_watchdog.c','osfmk/arm64/dali_watchdog.h')
+  patch=source.PWM_PATCH.read_text();env=dict(os.environ,LC_ALL='C')
+  with tempfile.TemporaryDirectory(prefix='pwm-git-apply-') as td:
+   tree=Path(td)
+   # A real Git root prevents a parent worktree prefix silently skipping every file.
+   subprocess.run([git,'init','--quiet',str(tree)],check=True,env=env)
+   for rel in paths:
+    before=source.old_fragment(rel,source.PWM_PATCH)
+    if before:
+     target=tree/rel;target.parent.mkdir(parents=True,exist_ok=True);target.write_text(before)
+   bad=patch.replace('new file mode 100644\n','')
+   self.assertNotEqual(bad,patch)
+   negative=subprocess.run([git,'-C',td,'apply','--check','--verbose','-'],input=bad,
+    capture_output=True,text=True,env=env)
+   self.assertNotEqual(negative.returncode,0,negative.stdout+negative.stderr)
+   self.assertIn('dev/null',negative.stderr)
+   for flag in ('--check',''):
+    command=[git,'-C',td,'apply','--verbose']+([flag] if flag else [])+['-']
+    result=subprocess.run(command,input=patch,capture_output=True,text=True,env=env)
+    self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+    self.assertNotRegex(result.stdout+result.stderr,r'(?i)skip|offset|fuzz|failed|error:')
+   for rel in paths:self.assertEqual((tree/rel).read_text(),source.SOURCE[rel],rel)
+   self.assertTrue((tree/'bsd/dev/SweetUFSPWMPolicy.h').is_file())
+   self.assertTrue((tree/'bsd/dev/SweetUFSPWMClock.h').is_file())
  def test_ordinary_io_and_uic_functions_unchanged(self):
   for name in ('ufs_mtk_log_uic_error','ufs_mtk_ack_uic','ufs_mtk_link_reset_event','ufs_mtk_uic',
    'ufs_scsi_on_lun_timeout','ufs_scsi','ufs_query_current_power_mode','ufs_query_fdeviceinit_flag',
