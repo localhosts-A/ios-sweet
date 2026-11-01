@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise final0180 functions; optional SWEET_LOAD_SOURCE_DIR verifies materialized sources."""
+"""Exercise final0181 functions; optional SWEET_LOAD_SOURCE_DIR verifies materialized sources."""
 from pathlib import Path
 import os
 import re
@@ -35,6 +35,52 @@ SOURCE.update({p: fixture.fragment(p, PWM_PATCH)
                          'bsd/dev/SweetUFSPWMClock.h',
                          'pexpert/arm/DaliFastbootReturnPolicy.h',
                          'pexpert/arm/pe_dali_watchdog.c', 'osfmk/arm64/dali_watchdog.h')})
+BBCTX_PATCH = ROOT/'xnu/patches/0181-sweet-bounded-backboard-context.patch'
+
+
+def apply_exact_hunks(text, path, patch):
+    """Replay every hunk at its declared line, with no offset or fuzz."""
+    blocks = patch.read_text().split('diff --git ')[1:]
+    matches = [b for b in blocks if b.startswith(f'a/{path} b/{path}\n')]
+    if len(matches) != 1:
+        raise AssertionError(path)
+    lines = matches[0].splitlines(keepends=True)
+    original = text.splitlines(keepends=True)
+    result, cursor, index = [], 0, 0
+    while index < len(lines) and not lines[index].startswith('@@ '):
+        index += 1
+    while index < len(lines):
+        match = re.match(r'^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@', lines[index])
+        if not match:
+            raise AssertionError(f'malformed hunk for {path}')
+        old_start, old_count, new_start, new_count = (int(match.group(1)), int(match.group(2) or 1),
+                                                      int(match.group(3)), int(match.group(4) or 1))
+        target = old_start - 1 if old_count else old_start
+        if target < cursor or new_start != len(result) + (target - cursor) + 1:
+            raise AssertionError(f'hunk position mismatch for {path}')
+        result.extend(original[cursor:target]); cursor = target
+        index += 1; removed = added = 0
+        while index < len(lines) and not lines[index].startswith('@@ '):
+            line = lines[index]; index += 1
+            if not line or line[0] not in ' +-':
+                raise AssertionError(f'unexpected patch line for {path}')
+            if line[0] in ' -':
+                if cursor >= len(original) or original[cursor] != line[1:]:
+                    raise AssertionError(f'hunk context mismatch for {path}')
+                cursor += 1; removed += 1
+            if line[0] in ' +':
+                result.append(line[1:]); added += 1
+        if removed != old_count or added != new_count:
+            raise AssertionError(f'hunk count mismatch for {path}')
+    result.extend(original[cursor:])
+    return ''.join(result)
+
+
+SOURCE['bsd/dev/sweet_sample.c'] = apply_exact_hunks(
+    SOURCE['bsd/dev/sweet_sample.c'], 'bsd/dev/sweet_sample.c', BBCTX_PATCH)
+for path in ('bsd/dev/SweetBBContextPolicy.h', 'bsd/dev/SweetBBContextRuntime.h',
+             'bsd/sys/SweetBBContext.h'):
+    SOURCE[path] = fixture.fragment(path, BBCTX_PATCH)
 LOCK = SOURCE['osfmk/kern/lock_mtx.c']
 SAMPLER, UFS, EXCEPTION, GUI_POLICY, IO_POLICY = (SOURCE[p] for p in PATHS)
 RW_POLICY = SOURCE['osfmk/kern/SweetRWWaitProgress.h']
@@ -291,6 +337,10 @@ static bool atomic_cas(uint32_t *p,uint32_t old,uint32_t value,int order) {
 #define os_atomic_cmpxchg(p,o,n,m) atomic_cas((p),(o),(n),MEMORY_##m)
 '''
 GUI_HELPERS = SAMPLER[SAMPLER.index('static bool sweet_load_configured;'):SAMPLER.index('\nvoid sweet_ff_trace(')]
+# The old load-registry fixtures exercise those real helpers in isolation; the
+# new recorder has its own separately compiled integration tests.
+assert GUI_HELPERS.count('#include "SweetBBContextRuntime.h"\n') == 1
+GUI_HELPERS = GUI_HELPERS.replace('#include "SweetBBContextRuntime.h"\n', '')
 GUI_MOCK = ipc.MOCK.replace('static struct process process=', 'static _Thread_local struct process process=')
 GUI_MOCK += r'''
 struct task {unsigned references;};typedef struct task *task_t;
@@ -300,6 +350,7 @@ static bool eligible=true;static unsigned task_lookups,ident_reads,collector_cal
 static task_t selected_task=&target_task;
 static task_t current_task(void) {__atomic_add_fetch(&task_lookups,1,__ATOMIC_RELAXED);return selected_task;}
 static void task_reference(task_t t) {__atomic_add_fetch(&t->references,1,__ATOMIC_RELAXED);}
+static void sweet_bbctx_trace_mach(unsigned int phase,int call,struct arm_saved_state *s){(void)phase;(void)call;(void)s;}
 struct proc_ident {int p_pid;uint64_t p_uniqueid;uint32_t p_idversion;};
 static uint64_t ident_uniqueid=123;static uint32_t ident_version=1;
 static bool irq_context;
@@ -474,6 +525,17 @@ int main(void){
         for bad in (dict(b,boot='b'),dict(b,iv=2),dict(b,u=0),dict(b,z=0),dict(b,b=1)):
             self.assertIsNone(accounting_delta(a,bad))
 
+    def test_bbcontext_replay_rejects_offset_and_context_changes(self):
+        previous = fixture.fragment('bsd/dev/sweet_sample.c', RW_PATCH)
+        self.assertEqual(apply_exact_hunks(previous, 'bsd/dev/sweet_sample.c', BBCTX_PATCH), SAMPLER)
+        with self.assertRaises(AssertionError):
+            apply_exact_hunks('\n' + previous, 'bsd/dev/sweet_sample.c', BBCTX_PATCH)
+        old_line = '    sweet_load_register(phase, state);\n'
+        self.assertEqual(previous.count(old_line), 1)
+        with self.assertRaises(AssertionError):
+            apply_exact_hunks(previous.replace(old_line, '    /* changed */\n', 1),
+                              'bsd/dev/sweet_sample.c', BBCTX_PATCH)
+
     def test_final_source_and_unchanged_old_helpers(self):
         if os.environ.get('SWEET_LOAD_SOURCE_DIR'):
             directory=Path(os.environ['SWEET_LOAD_SOURCE_DIR'])
@@ -482,7 +544,13 @@ int main(void){
         old=old_fragment(PATHS[0])
         for name in ('sweet_bbpc_trace','sweet_bbvm_enter','sweet_bbvm_leave','sweet_ff_fault_trace','sweet_ff_screen_dump','sweet_ff_dump'):
             self.assertEqual(function(SAMPLER,name),function(old,name),name)
-        self.assertEqual(function(SAMPLER,'sweet_ff_trace').replace('    sweet_load_register(phase, state);\n',''),function(old,'sweet_ff_trace'))
+        trace = function(SAMPLER,'sweet_ff_trace')
+        for addition in ('    sweet_load_register(phase, state);\n',
+                         '    /* Independent of the legacy SVC ring\'s admission and quota. */\n'
+                         '    sweet_bbctx_trace_mach(phase, call, state);\n'):
+            self.assertEqual(trace.count(addition), 1)
+            trace = trace.replace(addition, '')
+        self.assertEqual(trace, function(old,'sweet_ff_trace'))
         for name in ('ufs_scsi_on_lun_timeout','ufs_sync_cache'):
             self.assertEqual(function(UFS,name),function(old_fragment(PATHS[1]),name),name)
         logger_guard = ('\t\t/* Do not overwrite DMA memory until hardware ownership is known. */\n'
@@ -709,6 +777,9 @@ static void sweet_bbpc_prepare(unsigned int n){(void)n;}
 static void sweet_bbvm_prepare(unsigned int n){(void)n;}
 static void sweet_bbpc_begin(void){}
 static void sweet_bbvm_begin(void){}
+static void sweet_bbctx_prepare(unsigned int n){assert(n==0);}
+static void sweet_bbctx_window_begin(void){}
+static void sweet_bbctx_dump(unsigned int s){assert(s<40);}
 static void sweet_bbpc_dump(unsigned int s){assert(s<40);order[order_count++]=1;}
 static void sweet_bbvm_dump(unsigned int s){assert(s<40);order[order_count++]=2;}
 static void sweet_ff_screen_dump(unsigned int s){assert(s<40);order[order_count++]=3;}

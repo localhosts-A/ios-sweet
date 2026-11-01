@@ -46,6 +46,9 @@ on:
       - "tools/test_dali_backboard_vm_fault.py"
       - "tools/test_dali_backboard_ipc_context.py"
       - "tools/test_dali_gui_load_progress.py"
+      - "tools/test_dali_bbcontext.py"
+      - "tools/test_dali_bbcontext_policy.py"
+      - "tools/dali_bbcontext_parser.py"
       - "tools/test_dali_ufs_startup.py"
       - "tools/test_dali_ufs_pwm.py"
       - "tools/test_dali_ufs_pwm_clock.py"
@@ -168,6 +171,8 @@ jobs:
           python3 tools/test_dali_backboard_vm_fault.py
           python3 tools/test_dali_backboard_ipc_context.py
           python3 tools/test_dali_gui_load_progress.py
+          python3 tools/test_dali_bbcontext.py
+          python3 tools/test_dali_bbcontext_policy.py
           python3 tools/test_dali_ufs_early_return.py
           python3 tools/test_dali_ufs_pwm.py
           python3 tools/test_dali_ufs_pwm_clock.py
@@ -183,8 +188,11 @@ jobs:
       - name: Verify final GUI load sources
         env:
           SWEET_LOAD_SOURCE_DIR: ${{ github.workspace }}/dxb/xnu
+          SWEET_BBCTX_SOURCE_DIR: ${{ github.workspace }}/dxb/xnu
         run: |
           python3 tools/test_dali_gui_load_progress.py
+          python3 tools/test_dali_bbcontext.py
+          python3 tools/test_dali_bbcontext_policy.py
           python3 tools/test_dali_ufs_early_return.py
           python3 tools/test_dali_ufs_pwm.py
           python3 tools/test_dali_ufs_pwm_clock.py
@@ -509,6 +517,18 @@ jobs:
           grep -Fq 'A poisoned command may still own DMA; do not touch its bounce buffer.' xnu/bsd/dev/sweet_ufs.c
           grep -Fq 'Do not overwrite DMA memory until hardware ownership is known.' xnu/bsd/dev/sweet_ufs.c
           grep -Fq 'done < count && !error' xnu/bsd/dev/sweet_ufs.c
+          # The diagnostic interface must be exported by the XNU build itself.
+          grep -Fq 'SweetBBContext.h' xnu/bsd/sys/Makefile
+          cmp xnu/bsd/sys/SweetBBContext.h build/xnu.obj/EXPORT_HDRS/bsd/sys/SweetBBContext.h
+          grep -Fq '#define SWEET_BBCTX_SLOTS 8u' xnu/bsd/dev/SweetBBContextPolicy.h
+          grep -Fq 'sweet_bbctx_mach_enter(trap_no, state)' xnu/osfmk/arm64/sleh.c
+          grep -Fq 'sweet_bbctx_stat_continuation_return(error)' xnu/bsd/dev/arm/systemcalls.c
+          for symbol in sweet_bbctx_mach_enter sweet_bbctx_mach_return sweet_bbctx_stat_enter sweet_bbctx_stat_return sweet_bbctx_stat_continuation_return sweet_bbctx_namei_enter sweet_bbctx_namei_return sweet_bbctx_namei_unobserved_event; do
+            nm fakeroot/System/Library/Kernels/kernel.development.sweet | grep " _$symbol$"
+          done
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET BBCTXEND: v=1'
+          ! nm -u fakeroot/System/Library/Kernels/kernel.development.sweet | grep -E '(__atomic|__sync_)'
+          ! nm fakeroot/System/Library/Kernels/kernel.development.sweet | grep -E '(_fixture_printf|_fixture_cas)$'
           grep -Fq '#define SWEET_BBIPC_RECORDS 64u' xnu/bsd/dev/SweetBackboardIPCPolicy.h
           grep -Fq '#define SWEET_BBIPC_SELECTED 4u' xnu/bsd/dev/SweetBackboardIPCPolicy.h
           grep -Fq 'bounded BBIPC state and snapshot' xnu/bsd/dev/sweet_sample.c

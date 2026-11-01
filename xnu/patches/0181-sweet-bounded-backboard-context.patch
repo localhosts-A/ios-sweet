@@ -1,0 +1,1011 @@
+diff --git a/bsd/dev/SweetBBContextPolicy.h b/bsd/dev/SweetBBContextPolicy.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..9a1c92d228a0ad9f0912099e3f40953e050affdc
+--- /dev/null
++++ b/bsd/dev/SweetBBContextPolicy.h
+@@ -0,0 +1,344 @@
++/* Bounded diagnostic context policy, shared by XNU and host fixtures.
++ * The caller MUST hold one nonblocking recorder guard around every operation.
++ * This header does not fetch user memory, retain pointers, format logs, or do I/O.
++ */
++#ifndef SWEET_BB_CONTEXT_POLICY_H
++#define SWEET_BB_CONTEXT_POLICY_H
++#include <stdbool.h>
++#include <stddef.h>
++#include <stdint.h>
++
++#define SWEET_BBCTX_SLOTS 8u
++#define SWEET_BBCTX_PATH_MAX 192u
++#define SWEET_BBCTX_NAMEI_MAX 1024u
++#define SWEET_BBCTX_MACH_WORDS 7u
++#define SWEET_BBCTX_BSD_ENOENT 2
++
++enum sweet_bbctx_result_domain {
++    SWEET_BBCTX_RESULT_BSD = 1,
++    SWEET_BBCTX_RESULT_MACH
++};
++enum sweet_bbctx_return_kind {
++    SWEET_BBCTX_RETURN_UNOBSERVED = 0,
++    SWEET_BBCTX_RETURN_BSD_SUCCESS,
++    SWEET_BBCTX_RETURN_BSD_ERRNO,
++    SWEET_BBCTX_RETURN_BSD_RESTART,
++    SWEET_BBCTX_RETURN_BSD_JUST_RETURN,
++    SWEET_BBCTX_RETURN_BSD_OTHER_NEGATIVE,
++    SWEET_BBCTX_RETURN_MACH
++};
++
++enum sweet_bbctx_slot_state {
++    SWEET_BBCTX_FREE = 0,
++    SWEET_BBCTX_PENDING,
++    SWEET_BBCTX_COMPLETE,
++    SWEET_BBCTX_AMBIGUOUS
++};
++enum sweet_bbctx_path_state {
++    SWEET_BBCTX_PATH_UNOBSERVED = 0,
++    SWEET_BBCTX_PATH_COMPLETE,
++    SWEET_BBCTX_PATH_TRUNCATED,
++    SWEET_BBCTX_PATH_AMBIGUOUS
++};
++enum sweet_bbctx_result {
++    SWEET_BBCTX_OK = 0,
++    SWEET_BBCTX_CLOSED,
++    SWEET_BBCTX_FULL,
++    SWEET_BBCTX_REENTERED,
++    SWEET_BBCTX_EXHAUSTED,
++    SWEET_BBCTX_STALE,
++    SWEET_BBCTX_INVALID
++};
++struct sweet_bbctx_identity {
++    uint64_t uniqueid;
++    uint64_t tid;
++    uint32_t pid;
++    uint32_t idversion;
++};
++struct sweet_bbctx_record {
++    struct sweet_bbctx_identity identity;
++    uint64_t epoch;
++    uint64_t start;
++    uint64_t end;
++    uint64_t mach_words[SWEET_BBCTX_MACH_WORDS];
++    int32_t result;
++    int32_t namei_error;
++    uint32_t path_size;
++    uint32_t namei_calls;
++    enum sweet_bbctx_slot_state state;
++    enum sweet_bbctx_path_state path_state;
++    enum sweet_bbctx_return_kind return_kind;
++    bool result_known;
++    bool namei_result_known;
++    bool namei_active;
++    unsigned char path[SWEET_BBCTX_PATH_MAX];
++};
++struct sweet_bbctx_book {
++    uint64_t next_epoch;
++    uint64_t begun, completed, rejected_full, reentered, stale, retired_unknown;
++    uint64_t unpaired_count, unpaired_time;
++    struct sweet_bbctx_identity unpaired_identity;
++    int32_t unpaired_result;
++    bool has_unpaired;
++    bool open, exhausted;
++    struct sweet_bbctx_record slots[SWEET_BBCTX_SLOTS];
++    bool has_last_enoent;
++    struct sweet_bbctx_record last_enoent;
++};
++
++static inline bool
++sweet_bbctx_identity_equal(const struct sweet_bbctx_identity *a,
++    const struct sweet_bbctx_identity *b)
++{
++    return a->uniqueid == b->uniqueid && a->tid == b->tid &&
++        a->pid == b->pid && a->idversion == b->idversion;
++}
++
++/* Call only at a verified new user-SVC entry on this exact incarnation/TID.
++ * A previous unresolved attempt can no longer have its original kernel stack;
++ * retire it as UNKNOWN, not as a successful or observed return. */
++static inline void
++sweet_bbctx_retire_on_user_entry(struct sweet_bbctx_book *book,
++    const struct sweet_bbctx_identity *identity)
++{
++    if (!book || !book->open || !identity) return;
++    for (unsigned int i = 0; i < SWEET_BBCTX_SLOTS; ++i) {
++        struct sweet_bbctx_record *slot = &book->slots[i];
++        if ((slot->state == SWEET_BBCTX_PENDING || slot->state == SWEET_BBCTX_AMBIGUOUS) &&
++            sweet_bbctx_identity_equal(&slot->identity, identity)) {
++            slot->state = SWEET_BBCTX_FREE;
++            if (book->retired_unknown != UINT64_MAX) ++book->retired_unknown;
++        }
++    }
++}
++
++/* A stale/reentrant same-thread begin poisons that slot rather than joining it
++ * to a later completion. The caller must report guard-contention separately. */
++static inline enum sweet_bbctx_result
++sweet_bbctx_begin(struct sweet_bbctx_book *book,
++    const struct sweet_bbctx_identity *identity, uint64_t start,
++    const uint64_t *mach_words, uint64_t *epoch_out)
++{
++    if (epoch_out) *epoch_out = 0;
++    if (!book || !identity || !epoch_out || !identity->uniqueid || !identity->tid)
++        return SWEET_BBCTX_INVALID;
++    if (!book->open) return SWEET_BBCTX_CLOSED;
++    if (book->exhausted || book->next_epoch == UINT64_MAX) {
++        book->exhausted = true;
++        return SWEET_BBCTX_EXHAUSTED;
++    }
++    unsigned int selected = SWEET_BBCTX_SLOTS;
++    uint64_t oldest = UINT64_MAX;
++    for (unsigned int i = 0; i < SWEET_BBCTX_SLOTS; ++i) {
++        struct sweet_bbctx_record *slot = &book->slots[i];
++        if ((slot->state == SWEET_BBCTX_PENDING || slot->state == SWEET_BBCTX_AMBIGUOUS) &&
++            sweet_bbctx_identity_equal(&slot->identity, identity)) {
++            slot->state = SWEET_BBCTX_AMBIGUOUS;
++            slot->path_state = SWEET_BBCTX_PATH_AMBIGUOUS;
++            slot->namei_active = false;
++            if (book->reentered != UINT64_MAX) ++book->reentered;
++            return SWEET_BBCTX_REENTERED;
++        }
++        if (slot->state == SWEET_BBCTX_FREE) {
++            selected = i;
++            oldest = 0;
++        } else if (oldest != 0 && slot->state == SWEET_BBCTX_COMPLETE && slot->epoch < oldest) {
++            selected = i;
++            oldest = slot->epoch;
++        }
++    }
++    if (selected == SWEET_BBCTX_SLOTS) {
++        if (book->rejected_full != UINT64_MAX) ++book->rejected_full;
++        return SWEET_BBCTX_FULL;
++    }
++    struct sweet_bbctx_record fresh;
++    __builtin_memset(&fresh, 0, sizeof(fresh));
++    fresh.identity = *identity;
++    fresh.epoch = ++book->next_epoch;
++    fresh.start = start;
++    fresh.state = SWEET_BBCTX_PENDING;
++    if (mach_words) {
++        for (unsigned int i = 0; i < SWEET_BBCTX_MACH_WORDS; ++i)
++            fresh.mach_words[i] = mach_words[i];
++    }
++    book->slots[selected] = fresh;
++    if (book->begun != UINT64_MAX) ++book->begun;
++    *epoch_out = fresh.epoch;
++    return SWEET_BBCTX_OK;
++}
++
++static inline struct sweet_bbctx_record *
++sweet_bbctx_find(struct sweet_bbctx_book *book,
++    const struct sweet_bbctx_identity *identity, uint64_t epoch)
++{
++    if (!book || !identity || epoch == 0) return NULL;
++    for (unsigned int i = 0; i < SWEET_BBCTX_SLOTS; ++i) {
++        struct sweet_bbctx_record *slot = &book->slots[i];
++        if (slot->state != SWEET_BBCTX_FREE && slot->epoch == epoch &&
++            sweet_bbctx_identity_equal(&slot->identity, identity)) return slot;
++    }
++    return NULL;
++}
++
++/* A view of an ALREADY SUCCESSFUL namei kernel-buffer copy. total_bytes is the
++ * actual namei byte count INCLUDING the NUL; available is the number of non-NUL
++ * bytes copied into bounded local scratch. This function does not validate that
++ * namei really succeeded; its guarded caller must prove that exact branch.
++ * No nameidata, user pointer or kernel-buffer pointer survives this call. */
++static inline enum sweet_bbctx_result
++sweet_bbctx_namei_begin_view(struct sweet_bbctx_book *book,
++    const struct sweet_bbctx_identity *identity, uint64_t epoch,
++    const unsigned char *bytes, size_t available, size_t total_bytes)
++{
++    if (!book || !book->open) return SWEET_BBCTX_CLOSED;
++    struct sweet_bbctx_record *slot = sweet_bbctx_find(book, identity, epoch);
++    if (!slot || slot->state != SWEET_BBCTX_PENDING) return SWEET_BBCTX_STALE;
++    if (!bytes || total_bytes == 0 || total_bytes > SWEET_BBCTX_NAMEI_MAX)
++        return SWEET_BBCTX_INVALID;
++    size_t path_size = total_bytes - 1;
++    size_t expected = path_size > SWEET_BBCTX_PATH_MAX ? SWEET_BBCTX_PATH_MAX : path_size;
++    if (available != expected) return SWEET_BBCTX_INVALID;
++    if (slot->namei_calls != 0) {
++        slot->path_state = SWEET_BBCTX_PATH_AMBIGUOUS;
++        slot->namei_active = false;
++        slot->namei_result_known = false;
++        slot->path_size = 0;
++        if (slot->namei_calls != UINT32_MAX) ++slot->namei_calls;
++        if (book->reentered != UINT64_MAX) ++book->reentered;
++        return SWEET_BBCTX_REENTERED;
++    }
++    slot->namei_calls = 1;
++    slot->namei_active = true;
++    slot->path_state = path_size > SWEET_BBCTX_PATH_MAX ?
++        SWEET_BBCTX_PATH_TRUNCATED : SWEET_BBCTX_PATH_COMPLETE;
++    slot->path_size = (uint32_t)expected;
++    for (size_t i = 0; i < expected; ++i) slot->path[i] = bytes[i];
++    return SWEET_BBCTX_OK;
++}
++
++/* An early continuation or failed copy has no operand to publish. If another
++ * lookup was already seen in this stat, neither path nor namei result can be
++ * attributed uniquely, including when the failed lookup was nested. */
++static inline enum sweet_bbctx_result
++sweet_bbctx_namei_unobserved(struct sweet_bbctx_book *book,
++    const struct sweet_bbctx_identity *identity, uint64_t epoch)
++{
++    if (!book || !book->open) return SWEET_BBCTX_CLOSED;
++    struct sweet_bbctx_record *slot = sweet_bbctx_find(book, identity, epoch);
++    if (!slot || slot->state != SWEET_BBCTX_PENDING) return SWEET_BBCTX_STALE;
++    if (slot->namei_calls != 0) {
++        slot->path_state = SWEET_BBCTX_PATH_AMBIGUOUS;
++        slot->path_size = 0;
++        slot->namei_active = false;
++        slot->namei_result_known = false;
++        if (book->reentered != UINT64_MAX) ++book->reentered;
++    }
++    if (slot->namei_calls != UINT32_MAX) ++slot->namei_calls;
++    return SWEET_BBCTX_OK;
++}
++
++/* Host fixture convenience: only for fully available, trusted kernel bytes. */
++static inline enum sweet_bbctx_result
++sweet_bbctx_namei_begin(struct sweet_bbctx_book *book,
++    const struct sweet_bbctx_identity *identity, uint64_t epoch,
++    const unsigned char *bytes, size_t size)
++{
++    if (!book || !book->open) return SWEET_BBCTX_CLOSED;
++    if (!bytes || size == 0 || size > SWEET_BBCTX_NAMEI_MAX || bytes[size - 1] != 0)
++        return SWEET_BBCTX_INVALID;
++    size_t available = size - 1;
++    if (available > SWEET_BBCTX_PATH_MAX) available = SWEET_BBCTX_PATH_MAX;
++    return sweet_bbctx_namei_begin_view(book, identity, epoch, bytes, available, size);
++}
++
++static inline enum sweet_bbctx_result
++sweet_bbctx_namei_end(struct sweet_bbctx_book *book,
++    const struct sweet_bbctx_identity *identity, uint64_t epoch, int32_t error)
++{
++    if (!book || !book->open) return SWEET_BBCTX_CLOSED;
++    struct sweet_bbctx_record *slot = sweet_bbctx_find(book, identity, epoch);
++    if (!slot || slot->state != SWEET_BBCTX_PENDING || !slot->namei_active ||
++        slot->path_state == SWEET_BBCTX_PATH_AMBIGUOUS) return SWEET_BBCTX_STALE;
++    slot->namei_active = false;
++    slot->namei_error = error;
++    slot->namei_result_known = true;
++    return SWEET_BBCTX_OK;
++}
++
++/* result is the raw BSD error or Mach return, not preprocessed x0/carry.
++ * Restart and just-return stay distinct raw results; Mach value 2 is not ENOENT. */
++static inline enum sweet_bbctx_result
++sweet_bbctx_complete(struct sweet_bbctx_book *book,
++    const struct sweet_bbctx_identity *identity, uint64_t epoch, uint64_t end,
++    int32_t result, enum sweet_bbctx_result_domain domain)
++{
++    if (!book || !book->open) return SWEET_BBCTX_CLOSED;
++    if (domain != SWEET_BBCTX_RESULT_BSD && domain != SWEET_BBCTX_RESULT_MACH)
++        return SWEET_BBCTX_INVALID;
++    struct sweet_bbctx_record *slot = sweet_bbctx_find(book, identity, epoch);
++    if (!slot || slot->state != SWEET_BBCTX_PENDING) {
++        if (book->stale != UINT64_MAX) ++book->stale;
++        return SWEET_BBCTX_STALE;
++    }
++    if (slot->namei_active) {
++        slot->namei_active = false;
++        slot->namei_result_known = false;
++        slot->path_state = SWEET_BBCTX_PATH_AMBIGUOUS;
++    }
++    slot->end = end;
++    slot->result = result;
++    if (domain == SWEET_BBCTX_RESULT_MACH)
++        slot->return_kind = SWEET_BBCTX_RETURN_MACH;
++    else if (result == 0)
++        slot->return_kind = SWEET_BBCTX_RETURN_BSD_SUCCESS;
++    else if (result > 0)
++        slot->return_kind = SWEET_BBCTX_RETURN_BSD_ERRNO;
++    else if (result == -1)
++        slot->return_kind = SWEET_BBCTX_RETURN_BSD_RESTART;
++    else if (result == -2)
++        slot->return_kind = SWEET_BBCTX_RETURN_BSD_JUST_RETURN;
++    else
++        slot->return_kind = SWEET_BBCTX_RETURN_BSD_OTHER_NEGATIVE;
++    slot->result_known = true;
++    slot->state = SWEET_BBCTX_COMPLETE;
++    if (book->completed != UINT64_MAX) ++book->completed;
++    if (domain == SWEET_BBCTX_RESULT_BSD && result == SWEET_BBCTX_BSD_ENOENT) {
++        book->last_enoent = *slot;
++        book->has_last_enoent = true;
++    }
++    return SWEET_BBCTX_OK;
++}
++
++/* Safely encode at most 48 path bytes per chunk. Call only on a guarded local
++ * snapshot after dropping the recorder guard. Never emit ambiguous/unobserved
++ * bytes, and never treat a truncated prefix as a complete pathname. */
++static inline bool
++sweet_bbctx_path_hex_chunk(const struct sweet_bbctx_record *record,
++    uint32_t offset, char *out, size_t out_size, uint32_t *encoded_bytes)
++{
++    static const char digits[] = "0123456789abcdef";
++    if (encoded_bytes) *encoded_bytes = 0;
++    if (!record || !out || !encoded_bytes || record->path_size > SWEET_BBCTX_PATH_MAX ||
++        offset > record->path_size ||
++        (record->path_state != SWEET_BBCTX_PATH_COMPLETE &&
++         record->path_state != SWEET_BBCTX_PATH_TRUNCATED)) return false;
++    uint32_t n = record->path_size - offset;
++    if (n > 48u) n = 48u;
++    if (out_size < 2u * n + 1u) return false;
++    for (uint32_t i = 0; i < n; ++i) {
++        unsigned char byte = record->path[offset + i];
++        out[2u * i] = digits[byte >> 4];
++        out[2u * i + 1u] = digits[byte & 15u];
++    }
++    out[2u * n] = '\0';
++    *encoded_bytes = n;
++    return true;
++}
++
++/* Closing never waits for pending producers; those remain visibly incomplete. */
++static inline void
++sweet_bbctx_close(struct sweet_bbctx_book *book)
++{
++    if (book) book->open = false;
++}
++#endif
+diff --git a/bsd/dev/SweetBBContextRuntime.h b/bsd/dev/SweetBBContextRuntime.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..6031016677d4c04b4d1d55ffd3c8810476dd1ddd
+--- /dev/null
++++ b/bsd/dev/SweetBBContextRuntime.h
+@@ -0,0 +1,409 @@
++/* Private SWEET BB context integration; included once by sweet_sample.c after
++ * the retained-task registry. Never call while holding a sampler/recorder lock.
++ * All writes of book payload are protected by their one-attempt guard.
++ */
++#ifndef SWEET_BB_CONTEXT_RUNTIME_H
++#define SWEET_BB_CONTEXT_RUNTIME_H
++#include <sys/SweetBBContext.h>
++#include "SweetBBContextPolicy.h"
++
++_Static_assert(SWEET_BBCTX_NAMEI_MAX == MAXPATHLEN, "namei operand bound mismatch");
++_Static_assert(SWEET_BBCTX_BSD_ENOENT == ENOENT && ERESTART == -1 && EJUSTRETURN == -2,
++    "raw BSD error contract mismatch");
++
++static uint32_t sweet_bbctx_configured, sweet_bbctx_active;
++static uint32_t sweet_bbctx_stat_guard, sweet_bbctx_mach_guard;
++static uint32_t sweet_bbctx_stat_loss, sweet_bbctx_mach_loss;
++static struct sweet_bbctx_book sweet_bbctx_stat_book, sweet_bbctx_mach_book;
++static struct sweet_bbctx_book sweet_bbctx_stat_snapshot, sweet_bbctx_mach_snapshot;
++_Static_assert(4 * sizeof(struct sweet_bbctx_book) <= 16384,
++    "context books and snapshots exceed fixed allocation budget");
++
++/* Caller holds the book guard; saturation is visible and never wraps. */
++static void
++sweet_bbctx_note_unmatched(struct sweet_bbctx_book *book)
++{
++    if (book->stale != UINT64_MAX) ++book->stale;
++}
++
++/* Enabled only when the existing current-boot identity registry can be used. */
++static void
++sweet_bbctx_prepare(unsigned int requested)
++{
++    os_atomic_store(&sweet_bbctx_configured,
++        requested == 1 && sweet_load_configured && sweet_ff_enabled == 3 ? 1u : 0u,
++        release);
++}
++
++static void
++sweet_bbctx_window_begin(void)
++{
++    if (!os_atomic_load(&sweet_bbctx_configured, acquire)) return;
++    sweet_bbctx_stat_book.open = true;
++    sweet_bbctx_mach_book.open = true;
++    os_atomic_store(&sweet_bbctx_active, 1u, release);
++    printf("SWEET BBCTX CONFIG: v=1 targets=backboardd stat=338 mach=-47 slots=8 path=192\n");
++}
++
++/* Current task/proc only; the slot owns its task reference until reboot. */
++static bool
++sweet_bbctx_identity_now(struct sweet_bbctx_identity *out)
++{
++    if (!out || !os_atomic_load(&sweet_bbctx_configured, acquire) ||
++        !os_atomic_load(&sweet_bbctx_active, acquire) || ml_at_interrupt_context() ||
++        !sweet_load_admitting(os_atomic_load(&sweet_load_control, acquire)) ||
++        !(os_atomic_load(&sweet_load_ready, acquire) & 1u)) return false;
++    const struct sweet_load_slot *slot = &sweet_load_slots[0];
++    if (slot->task == TASK_NULL || slot->task != current_task()) return false;
++    proc_t p = current_proc();
++    if (p == PROC_NULL) return false;
++    struct proc_ident ident = proc_ident(p);
++    if (ident.p_pid != slot->pid || ident.p_uniqueid != slot->uniqueid ||
++        ident.p_idversion != slot->version) return false;
++    out->uniqueid = ident.p_uniqueid;
++    out->pid = (uint32_t)ident.p_pid;
++    out->idversion = ident.p_idversion;
++    out->tid = thread_tid(current_thread());
++    return out->uniqueid != 0 && out->tid != 0;
++}
++
++/* The slot is found by full incarnation and TID; the token is never inferred
++ * across a dropped producer event. All callers hold the matching guard. */
++static uint64_t
++sweet_bbctx_pending_epoch(struct sweet_bbctx_book *book,
++    const struct sweet_bbctx_identity *identity)
++{
++    uint64_t epoch = 0;
++    for (unsigned int i = 0; i < SWEET_BBCTX_SLOTS; ++i) {
++        struct sweet_bbctx_record *slot = &book->slots[i];
++        if (slot->state == SWEET_BBCTX_PENDING &&
++            sweet_bbctx_identity_equal(&slot->identity, identity)) {
++            if (epoch != 0) return 0;
++            epoch = slot->epoch;
++        }
++    }
++    return epoch;
++}
++
++static bool
++sweet_bbctx_try_guard(uint32_t *guard, uint32_t *loss)
++{
++    if (os_atomic_cmpxchg(guard, 0u, 1u, acquire)) return true;
++    /* Sticky: a missed producer cannot be assigned to a future transaction. */
++    os_atomic_store(loss, 1u, release);
++    return false;
++}
++
++static void
++sweet_bbctx_unlock(uint32_t *guard)
++{
++    os_atomic_store(guard, 0u, release);
++}
++
++uint64_t
++sweet_bbctx_stat_enter(void)
++{
++    struct sweet_bbctx_identity identity;
++    if (!sweet_bbctx_identity_now(&identity) ||
++        !sweet_bbctx_try_guard(&sweet_bbctx_stat_guard, &sweet_bbctx_stat_loss)) return 0;
++    uint64_t epoch = 0;
++    if (os_atomic_load(&sweet_bbctx_active, acquire) &&
++        !os_atomic_load(&sweet_bbctx_stat_loss, acquire)) {
++        sweet_bbctx_retire_on_user_entry(&sweet_bbctx_stat_book, &identity);
++        (void)sweet_bbctx_begin(&sweet_bbctx_stat_book, &identity,
++            mach_absolute_time(), NULL, &epoch);
++    }
++    sweet_bbctx_unlock(&sweet_bbctx_stat_guard);
++    return epoch;
++}
++
++void
++sweet_bbctx_stat_return(uint64_t epoch, int error)
++{
++    struct sweet_bbctx_identity identity;
++    if (epoch == 0 || !sweet_bbctx_identity_now(&identity) ||
++        !sweet_bbctx_try_guard(&sweet_bbctx_stat_guard, &sweet_bbctx_stat_loss)) return;
++    if (os_atomic_load(&sweet_bbctx_active, acquire) &&
++        !os_atomic_load(&sweet_bbctx_stat_loss, acquire))
++        (void)sweet_bbctx_complete(&sweet_bbctx_stat_book, &identity, epoch,
++            mach_absolute_time(), error, SWEET_BBCTX_RESULT_BSD);
++    sweet_bbctx_unlock(&sweet_bbctx_stat_guard);
++}
++
++/* Store a raw continuation result separately: identity is not an epoch and no
++ * field here claims that this return belongs to a particular pending record. */
++static void
++sweet_bbctx_save_unpaired(struct sweet_bbctx_book *book,
++    const struct sweet_bbctx_identity *identity, int32_t result)
++{
++    sweet_bbctx_note_unmatched(book);
++    if (book->unpaired_count != UINT64_MAX) ++book->unpaired_count;
++    book->unpaired_identity = *identity;
++    book->unpaired_time = mach_absolute_time();
++    book->unpaired_result = result;
++    book->has_unpaired = true;
++}
++
++void
++sweet_bbctx_stat_continuation_return(int error)
++{
++    struct sweet_bbctx_identity identity;
++    if (!sweet_bbctx_identity_now(&identity) ||
++        !sweet_bbctx_try_guard(&sweet_bbctx_stat_guard, &sweet_bbctx_stat_loss)) return;
++    if (os_atomic_load(&sweet_bbctx_active, acquire) &&
++        !os_atomic_load(&sweet_bbctx_stat_loss, acquire))
++        sweet_bbctx_save_unpaired(&sweet_bbctx_stat_book, &identity, error);
++    sweet_bbctx_unlock(&sweet_bbctx_stat_guard);
++}
++
++/* namei already performed the only user copy; bytes are live kernel memory.
++ * First find an eligible epoch, then copy at most 192 bytes before reacquiring
++ * the guard. A failed or changed epoch is rejected, never attached by pointer. */
++uint64_t
++sweet_bbctx_namei_enter(const char *bytes, size_t total_bytes)
++{
++    struct sweet_bbctx_identity identity;
++    if (!bytes || total_bytes == 0 || total_bytes > SWEET_BBCTX_NAMEI_MAX ||
++        !sweet_bbctx_identity_now(&identity) ||
++        !sweet_bbctx_try_guard(&sweet_bbctx_stat_guard, &sweet_bbctx_stat_loss)) return 0;
++    uint64_t epoch = 0;
++    if (os_atomic_load(&sweet_bbctx_active, acquire) &&
++        !os_atomic_load(&sweet_bbctx_stat_loss, acquire))
++        epoch = sweet_bbctx_pending_epoch(&sweet_bbctx_stat_book, &identity);
++    sweet_bbctx_unlock(&sweet_bbctx_stat_guard);
++    if (epoch == 0) return 0;
++    unsigned char local[SWEET_BBCTX_PATH_MAX];
++    size_t n = total_bytes - 1;
++    if (n > sizeof(local)) n = sizeof(local);
++    if (n != 0) memcpy(local, bytes, n);
++    if (!sweet_bbctx_try_guard(&sweet_bbctx_stat_guard, &sweet_bbctx_stat_loss)) return 0;
++    enum sweet_bbctx_result result = SWEET_BBCTX_CLOSED;
++    if (os_atomic_load(&sweet_bbctx_active, acquire) &&
++        !os_atomic_load(&sweet_bbctx_stat_loss, acquire))
++        result = sweet_bbctx_namei_begin_view(&sweet_bbctx_stat_book, &identity,
++            epoch, local, n, total_bytes);
++    sweet_bbctx_unlock(&sweet_bbctx_stat_guard);
++    return result == SWEET_BBCTX_OK ? epoch : 0;
++}
++
++void
++sweet_bbctx_namei_unobserved_event(void)
++{
++    struct sweet_bbctx_identity identity;
++    if (!sweet_bbctx_identity_now(&identity) ||
++        !sweet_bbctx_try_guard(&sweet_bbctx_stat_guard, &sweet_bbctx_stat_loss)) return;
++    if (os_atomic_load(&sweet_bbctx_active, acquire) &&
++        !os_atomic_load(&sweet_bbctx_stat_loss, acquire)) {
++        uint64_t epoch = sweet_bbctx_pending_epoch(&sweet_bbctx_stat_book, &identity);
++        if (epoch != 0)
++            (void)sweet_bbctx_namei_unobserved(&sweet_bbctx_stat_book, &identity, epoch);
++    }
++    sweet_bbctx_unlock(&sweet_bbctx_stat_guard);
++}
++
++void
++sweet_bbctx_namei_return(uint64_t epoch, int error)
++{
++    struct sweet_bbctx_identity identity;
++    if (epoch == 0 || !sweet_bbctx_identity_now(&identity) ||
++        !sweet_bbctx_try_guard(&sweet_bbctx_stat_guard, &sweet_bbctx_stat_loss)) return;
++    if (os_atomic_load(&sweet_bbctx_active, acquire) &&
++        !os_atomic_load(&sweet_bbctx_stat_loss, acquire))
++        (void)sweet_bbctx_namei_end(&sweet_bbctx_stat_book, &identity, epoch, error);
++    sweet_bbctx_unlock(&sweet_bbctx_stat_guard);
++}
++
++/* Normal SVC entry/return carry a stack token; continuation deliberately has
++ * no token and is captured independently rather than matched by TID. */
++uint64_t
++sweet_bbctx_mach_enter(int call, struct arm_saved_state *state)
++{
++    if (call != -47 || !state || !is_saved_state64(state) ||
++        !PSR64_IS_USER64(get_saved_state_cpsr(state))) return 0;
++    struct sweet_bbctx_identity identity;
++    if (!sweet_bbctx_identity_now(&identity) ||
++        !sweet_bbctx_try_guard(&sweet_bbctx_mach_guard, &sweet_bbctx_mach_loss)) return 0;
++    uint64_t epoch = 0;
++    if (os_atomic_load(&sweet_bbctx_active, acquire) &&
++        !os_atomic_load(&sweet_bbctx_mach_loss, acquire)) {
++        sweet_bbctx_retire_on_user_entry(&sweet_bbctx_mach_book, &identity);
++        uint64_t words[SWEET_BBCTX_MACH_WORDS];
++        for (unsigned int i = 0; i < SWEET_BBCTX_MACH_WORDS; ++i)
++            words[i] = get_saved_state_reg(state, i + 1);
++        (void)sweet_bbctx_begin(&sweet_bbctx_mach_book, &identity,
++            mach_absolute_time(), words, &epoch);
++    }
++    sweet_bbctx_unlock(&sweet_bbctx_mach_guard);
++    return epoch;
++}
++
++void
++sweet_bbctx_mach_return(uint64_t epoch, int call, struct arm_saved_state *state)
++{
++    if (call != -47 || !state || !is_saved_state64(state) ||
++        !PSR64_IS_USER64(get_saved_state_cpsr(state))) return;
++    struct sweet_bbctx_identity identity;
++    if (!sweet_bbctx_identity_now(&identity) ||
++        !sweet_bbctx_try_guard(&sweet_bbctx_mach_guard, &sweet_bbctx_mach_loss)) return;
++    if (os_atomic_load(&sweet_bbctx_active, acquire) &&
++        !os_atomic_load(&sweet_bbctx_mach_loss, acquire)) {
++        int32_t result = (int32_t)(uint32_t)get_saved_state_reg(state, 0);
++        if (epoch)
++            (void)sweet_bbctx_complete(&sweet_bbctx_mach_book, &identity, epoch,
++                mach_absolute_time(), result, SWEET_BBCTX_RESULT_MACH);
++        else
++            sweet_bbctx_save_unpaired(&sweet_bbctx_mach_book, &identity, result);
++    }
++    sweet_bbctx_unlock(&sweet_bbctx_mach_guard);
++}
++
++static void
++sweet_bbctx_trace_mach(unsigned int phase, int call, struct arm_saved_state *state)
++{
++    if (phase == 3) sweet_bbctx_mach_return(0, call, state);
++}
++
++/* Only the existing normal sampler formats or prints. All producer guards are
++ * released first. A record >255 bytes or a round >7900 bytes is discarded. */
++static unsigned int sweet_bbctx_round_lines;
++static bool
++sweet_bbctx_emit(const char *line, int n, unsigned int *used)
++{
++    if (!line || !used || n <= 0 || n > 255 || *used > 7900u ||
++        (unsigned int)n > 7900u - *used) return false;
++    *used += (unsigned int)n;
++    ++sweet_bbctx_round_lines;
++    printf("%s", line);
++    return true;
++}
++
++static void
++sweet_bbctx_dump_record(unsigned int sample, char kind,
++    const struct sweet_bbctx_record *record, bool paths, bool trustworthy,
++    unsigned int *used, unsigned int *dropped)
++{
++    char line[256];
++    int n = snprintf(line, sizeof(line),
++        "SWEET BBCTX: v=1 s=%u k=%c p=%u id=0x%llx iv=0x%x th=0x%llx e=0x%llx "
++        "q=%u vld=%u b=0x%llx z=0x%llx rk=%u r=%d kn=%u ps=%u pn=%u nc=%u nk=%u ne=%d\n",
++        sample, kind, record->identity.pid, (unsigned long long)record->identity.uniqueid,
++        record->identity.idversion, (unsigned long long)record->identity.tid,
++        (unsigned long long)record->epoch, (unsigned int)record->state,
++        trustworthy ? 1u : 0u, (unsigned long long)record->start, (unsigned long long)record->end,
++        (unsigned int)record->return_kind, record->result, record->result_known ? 1u : 0u,
++        (unsigned int)record->path_state, record->path_size, record->namei_calls,
++        record->namei_result_known ? 1u : 0u, record->namei_error);
++    if (n <= 0 || (unsigned int)n >= sizeof(line) || !sweet_bbctx_emit(line, n, used)) ++*dropped;
++    if (kind == 'M') {
++        n = snprintf(line, sizeof(line),
++            "SWEET BBCTXM: v=1 s=%u e=0x%llx hex=%llx,%llx,%llx,%llx,%llx,%llx,%llx\n",
++            sample, (unsigned long long)record->epoch,
++            (unsigned long long)record->mach_words[0],
++            (unsigned long long)record->mach_words[1],
++            (unsigned long long)record->mach_words[2],
++            (unsigned long long)record->mach_words[3],
++            (unsigned long long)record->mach_words[4],
++            (unsigned long long)record->mach_words[5],
++            (unsigned long long)record->mach_words[6]);
++        if (n <= 0 || (unsigned int)n >= sizeof(line) || !sweet_bbctx_emit(line, n, used)) ++*dropped;
++    }
++    if (paths && (record->path_state == SWEET_BBCTX_PATH_COMPLETE ||
++        record->path_state == SWEET_BBCTX_PATH_TRUNCATED)) {
++        uint32_t offset = 0;
++        do {
++            char hex[97]; uint32_t bytes = 0;
++            if (!sweet_bbctx_path_hex_chunk(record, offset, hex, sizeof(hex), &bytes)) {
++                ++*dropped; break;
++            }
++            n = snprintf(line, sizeof(line),
++                "SWEET BBCTXP: v=1 s=%u e=0x%llx off=%u n=%u ps=%u hex=%s\n",
++                sample, (unsigned long long)record->epoch, offset, bytes,
++                record->path_state, hex);
++            if (n <= 0 || (unsigned int)n >= sizeof(line) || !sweet_bbctx_emit(line, n, used)) ++*dropped;
++            offset += bytes;
++        } while (offset < record->path_size);
++    }
++}
++
++/* Counters describe the snapshot, not events that arrive after it. A missing
++ * snapshot has no counter line; consumers must treat stat=0/mach=0 as unknown. */
++static void
++sweet_bbctx_dump_counts(unsigned int sample, char kind,
++    const struct sweet_bbctx_book *book, unsigned int *used, unsigned int *dropped)
++{
++    char line[256];
++    int n = snprintf(line, sizeof(line),
++        "SWEET BBCTXC: v=1 s=%u k=%c begun=%llu done=%llu full=%llu re=%llu stale=%llu retired=%llu exhausted=%u open=%u\n",
++        sample, kind, (unsigned long long)book->begun,
++        (unsigned long long)book->completed, (unsigned long long)book->rejected_full,
++        (unsigned long long)book->reentered, (unsigned long long)book->stale,
++        (unsigned long long)book->retired_unknown,
++        book->exhausted ? 1u : 0u, book->open ? 1u : 0u);
++    if (n <= 0 || (unsigned int)n >= sizeof(line) ||
++        !sweet_bbctx_emit(line, n, used)) ++*dropped;
++    if (book->has_unpaired) {
++        const struct sweet_bbctx_identity *id = &book->unpaired_identity;
++        n = snprintf(line, sizeof(line),
++            "SWEET BBCTXU: v=1 s=%u k=%c n=%llu p=%u id=0x%llx iv=0x%x th=0x%llx t=0x%llx r=%d link=unknown\n",
++            sample, kind, (unsigned long long)book->unpaired_count, id->pid,
++            (unsigned long long)id->uniqueid, id->idversion, (unsigned long long)id->tid,
++            (unsigned long long)book->unpaired_time, book->unpaired_result);
++        if (n <= 0 || (unsigned int)n >= sizeof(line) ||
++            !sweet_bbctx_emit(line, n, used)) ++*dropped;
++    }
++}
++
++static void
++sweet_bbctx_dump(unsigned int sample)
++{
++    if (!os_atomic_load(&sweet_bbctx_configured, acquire) || sample >= 40) return;
++    if (sample == 39) os_atomic_store(&sweet_bbctx_active, 0u, release);
++    bool stat_ok = os_atomic_cmpxchg(&sweet_bbctx_stat_guard, 0u, 1u, acquire);
++    if (stat_ok) {
++        if (sample == 39) sweet_bbctx_close(&sweet_bbctx_stat_book);
++        sweet_bbctx_stat_snapshot = sweet_bbctx_stat_book;
++        sweet_bbctx_unlock(&sweet_bbctx_stat_guard);
++    }
++    bool mach_ok = os_atomic_cmpxchg(&sweet_bbctx_mach_guard, 0u, 1u, acquire);
++    if (mach_ok) {
++        if (sample == 39) sweet_bbctx_close(&sweet_bbctx_mach_book);
++        sweet_bbctx_mach_snapshot = sweet_bbctx_mach_book;
++        sweet_bbctx_unlock(&sweet_bbctx_mach_guard);
++    }
++    unsigned int used = 0, dropped = 0;
++    sweet_bbctx_round_lines = 0;
++    uint32_t stat_loss = os_atomic_load(&sweet_bbctx_stat_loss, acquire);
++    uint32_t mach_loss = os_atomic_load(&sweet_bbctx_mach_loss, acquire);
++    char line[256];
++    int n = snprintf(line, sizeof(line),
++        "SWEET BBCTXS: v=1 s=%u stat=%u mach=%u sloss=%u mloss=%u final=%u\n",
++        sample, stat_ok ? 1u : 0u, mach_ok ? 1u : 0u,
++        stat_loss, mach_loss, sample == 39 ? 1u : 0u);
++    if (n <= 0 || (unsigned int)n >= sizeof(line) || !sweet_bbctx_emit(line, n, &used)) ++dropped;
++    if (stat_ok) {
++        sweet_bbctx_dump_counts(sample, 'S', &sweet_bbctx_stat_snapshot, &used, &dropped);
++        for (unsigned int i = 0; i < SWEET_BBCTX_SLOTS; ++i) {
++            struct sweet_bbctx_record *r = &sweet_bbctx_stat_snapshot.slots[i];
++            if (r->state != SWEET_BBCTX_FREE)
++                sweet_bbctx_dump_record(sample, 'S', r,
++                    i == sample % SWEET_BBCTX_SLOTS,
++                    stat_loss == 0, &used, &dropped);
++        }
++        if (sweet_bbctx_stat_snapshot.has_last_enoent)
++            sweet_bbctx_dump_record(sample, 'E', &sweet_bbctx_stat_snapshot.last_enoent,
++                true, stat_loss == 0, &used, &dropped);
++    }
++    if (mach_ok) {
++        sweet_bbctx_dump_counts(sample, 'M', &sweet_bbctx_mach_snapshot, &used, &dropped);
++        for (unsigned int i = 0; i < SWEET_BBCTX_SLOTS; ++i) {
++            struct sweet_bbctx_record *r = &sweet_bbctx_mach_snapshot.slots[i];
++            if (r->state != SWEET_BBCTX_FREE)
++                sweet_bbctx_dump_record(sample, 'M', r, false, mach_loss == 0, &used, &dropped);
++        }
++    }
++    /* Explicit round end and emitted line/byte counts permit loss detection;
++     * this extra line remains <=255 bytes outside the 7900-byte payload. */
++    printf("SWEET BBCTXEND: v=1 s=%u lines=%u bytes=%u dropped=%u\n",
++        sample, sweet_bbctx_round_lines, used, dropped);
++}
++#endif /* SWEET_BB_CONTEXT_RUNTIME_H */
+diff --git a/bsd/dev/arm/systemcalls.c b/bsd/dev/arm/systemcalls.c
+index ef981f6275c30e1c8ace1c1bad05bc2ba5777556..70f1045eb917e36167cfc5e1c82681417ff914ae 100644
+--- a/bsd/dev/arm/systemcalls.c
++++ b/bsd/dev/arm/systemcalls.c
+@@ -17,6 +17,7 @@
+ #include <pexpert/pexpert.h>
+ #if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
+ #include <os/atomic_private.h>
++#include <sys/SweetBBContext.h>
+ extern uint64_t sweet_boot_counter_ms(void);
+ static unsigned int sweet_pid1_syscalls;
+ static uint64_t sweet_persona_syscalls;
+@@ -109,6 +110,7 @@ unix_syscall(
+ 	boolean_t sweet_init_trace = FALSE;
+ 	uint64_t sweet_persona_call = 0;
+ 	boolean_t sweet_persona_trace = FALSE;
++	uint64_t sweet_bbctx_epoch = 0;
+ #endif
+ 
+ 	uthread_reset_proc_refcount(uthread);
+@@ -209,6 +211,11 @@ unix_syscall(
+ 	}
+ #endif /* CONFIG_DEBUG_SYSCALL_REJECTION */
+ 
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++	/* Only after normalized arguments and rejection filters; no extra user copy. */
++	if (syscode == 338 && callp == &sysent[syscode])
++		sweet_bbctx_epoch = sweet_bbctx_stat_enter();
++#endif
+ 	AUDIT_SYSCALL_ENTER(code, proc, uthread);
+ 	error = (*(callp->sy_call))(proc, &uthread->uu_arg[0], &(uthread->uu_rval[0]));
+ 	AUDIT_SYSCALL_EXIT(code, proc, uthread, error);
+@@ -251,6 +258,10 @@ skip_syscall:
+ 	assertf(prior == NULL, "thread_set_allocation_name(\"%s\") not cleared", kern_allocation_get_name(prior));
+ #endif /* DEBUG || DEVELOPMENT */
+ 
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++	if (sweet_bbctx_epoch != 0)
++		sweet_bbctx_stat_return(sweet_bbctx_epoch, error);
++#endif
+ 	arm_prepare_syscall_return(callp, state, uthread, error);
+ 
+ 	uthread->uu_flag &= ~UT_NOTCANCELPT;
+@@ -311,6 +322,10 @@ unix_syscall_return(int error)
+ 	/*
+ 	 * Get index into sysent table
+ 	 */
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++	if (code == 338)
++		sweet_bbctx_stat_continuation_return(error);
++#endif
+ 	arm_prepare_syscall_return(callp, regs, uthread, error);
+ #if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
+     sweet_ff_trace(2, code, regs);
+diff --git a/bsd/dev/sweet_sample.c b/bsd/dev/sweet_sample.c
+index fe1a11e981b3f04d015006b3366054656bf52b42..2f6f1aeb5f59463350355521795801bb2e645c9d 100644
+--- a/bsd/dev/sweet_sample.c
++++ b/bsd/dev/sweet_sample.c
+@@ -409,6 +409,8 @@ sweet_load_register(unsigned int phase, struct arm_saved_state *state)
+     os_atomic_or(&sweet_load_ready, 1u << kind, release);
+ }
+ 
++#include "SweetBBContextRuntime.h"
++
+ static void
+ sweet_load_dump(unsigned int sample)
+ {
+@@ -454,6 +456,8 @@ void
+ sweet_ff_trace(unsigned int phase, int call, struct arm_saved_state *state)
+ {
+     sweet_load_register(phase, state);
++    /* Independent of the legacy SVC ring's admission and quota. */
++    sweet_bbctx_trace_mach(phase, call, state);
+     if (!sweet_ff_svc_mode(sweet_ff_enabled))
+         return;
+     proc_t p = current_proc();
+@@ -682,6 +686,7 @@ sweet_sample_thread(__unused void *arg, __unused wait_result_t wr)
+     sweet_bbvm_begin();
+     sweet_bbipc_begin();
+     sweet_load_begin();
++    sweet_bbctx_window_begin();
+ #endif
+ 	(void)tsleep(&chan, PZERO, "sweetsmp", delay_seconds * hz);
+ 	for (int i = 0; i < 40; i++) {
+@@ -690,6 +695,7 @@ sweet_sample_thread(__unused void *arg, __unused wait_result_t wr)
+         sweet_bbpc_dump((unsigned int)i);
+         sweet_bbvm_dump((unsigned int)i);
+         sweet_load_dump((unsigned int)i);
++        sweet_bbctx_dump((unsigned int)i);
+ #endif
+ 		if (heartbeat == 1)
+ 			printf("SWEET BOOTHEART: sample=%d\n", i);
+@@ -732,6 +738,9 @@ sweet_sample_start(void)
+     (void)PE_parse_boot_argn("sweetload", &enabled, sizeof(enabled));
+     sweet_load_prepare(enabled);
+     enabled = 0;
++    (void)PE_parse_boot_argn("sweetbbctx", &enabled, sizeof(enabled));
++    sweet_bbctx_prepare(enabled);
++    enabled = 0;
+     (void)PE_parse_boot_argn("sweetloadrw", &enabled, sizeof(enabled));
+     sweet_load_rw_prepare(enabled);
+     if (sweet_ff_enabled != 0 || sweet_ff_fault_enabled != 0)
+diff --git a/bsd/sys/Makefile b/bsd/sys/Makefile
+index b45172491d723e4a9c992b009fcb58e7ecc4f211..dbddf94d7b293bc1e2240008abb4272ffff8e3fd 100644
+--- a/bsd/sys/Makefile
++++ b/bsd/sys/Makefile
+@@ -230,6 +230,7 @@ PRIVATE_KERNELFILES = \
+ 	code_signing.h \
+ 
+ XNU_ONLY_EXPORTS = \
++	SweetBBContext.h \
+ 	bsdtask_info.h \
+ 	file_internal.h \
+ 	filedesc.h \
+diff --git a/bsd/sys/SweetBBContext.h b/bsd/sys/SweetBBContext.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..69c6d3f4e1a67f30686484b2809d30b7a59cf712
+--- /dev/null
++++ b/bsd/sys/SweetBBContext.h
+@@ -0,0 +1,17 @@
++/* Private SWEET diagnostic hooks. They must not change syscall/namei results. */
++#ifndef _SYS_SWEET_BB_CONTEXT_H_
++#define _SYS_SWEET_BB_CONTEXT_H_
++#include <stdint.h>
++#include <stddef.h>
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++struct arm_saved_state;
++uint64_t sweet_bbctx_mach_enter(int, struct arm_saved_state *);
++void sweet_bbctx_mach_return(uint64_t, int, struct arm_saved_state *);
++uint64_t sweet_bbctx_stat_enter(void);
++void sweet_bbctx_stat_return(uint64_t, int);
++void sweet_bbctx_stat_continuation_return(int);
++uint64_t sweet_bbctx_namei_enter(const char *, size_t);
++void sweet_bbctx_namei_unobserved_event(void);
++void sweet_bbctx_namei_return(uint64_t, int);
++#endif
++#endif /* _SYS_SWEET_BB_CONTEXT_H_ */
+diff --git a/bsd/vfs/vfs_lookup.c b/bsd/vfs/vfs_lookup.c
+index 94b43830882641219f20cb06b42da5bdb324d175..b7e3d7b25affa4e175f1747b91933cbba314912e 100644
+--- a/bsd/vfs/vfs_lookup.c
++++ b/bsd/vfs/vfs_lookup.c
+@@ -94,6 +94,9 @@
+ #include <security/mac_framework.h>
+ #endif
+ #include <os/atomic_private.h>
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++#include <sys/SweetBBContext.h>
++#endif
+ 
+ #include <sys/paths.h>
+ 
+@@ -187,6 +190,9 @@ namei(struct nameidata *ndp)
+ 	vnode_t usedvp_dp = NULLVP;
+ 	int32_t old_count = 0;
+ 	bool dp_has_iocount = false;
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++	uint64_t sweet_bbctx_namei_epoch = 0;
++#endif
+ 
+ #if DIAGNOSTIC
+ 	if (!vfs_context_ucred(ctx) || !p) {
+@@ -206,6 +212,9 @@ namei(struct nameidata *ndp)
+ 	 */
+ 	if (ndp->ni_flag & NAMEI_CONTLOOKUP) {
+ 		int rdonly, vbusyflags, keep_going, wantparent;
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++		sweet_bbctx_namei_unobserved_event();
++#endif
+ 
+ 		rdonly = cnp->cn_flags & RDONLY;
+ 		vbusyflags = ((cnp->cn_flags & CN_NBMOUNTLOOK) != 0) ? LK_NOWAIT : 0;
+@@ -264,9 +273,16 @@ retry_copy:
+ 		goto retry_copy;
+ 	}
+ 	if (error) {
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++		sweet_bbctx_namei_unobserved_event();
++#endif
+ 		goto error_out;
+ 	}
+ 	assert(bytes_copied <= MAXPATHLEN);
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++	/* Initial kernel-copied operand only; may later be rewritten by namei. */
++	sweet_bbctx_namei_epoch = sweet_bbctx_namei_enter(cnp->cn_pnbuf, bytes_copied);
++#endif
+ 	ndp->ni_pathlen = (u_int)bytes_copied;
+ 	bytes_copied = 0;
+ 
+@@ -493,6 +509,10 @@ retry_copy:
+ 				}
+ 			}
+ 
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++			if (sweet_bbctx_namei_epoch != 0)
++				sweet_bbctx_namei_return(sweet_bbctx_namei_epoch, 0);
++#endif
+ 			return 0;
+ 		}
+ 
+@@ -529,6 +549,12 @@ out_drop:
+ 		vnode_put(ndp->ni_vp);
+ 	}
+ error_out:
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++	if (sweet_bbctx_namei_epoch != 0) {
++		sweet_bbctx_namei_return(sweet_bbctx_namei_epoch, error);
++		sweet_bbctx_namei_epoch = 0;
++	}
++#endif
+ 	if (startdir_with_usecount) {
+ 		vnode_rele(startdir_with_usecount);
+ 		startdir_with_usecount = NULLVP;
+diff --git a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
+index 375efc88b004876c8a182017bf633d7c6859c517..b731cde38c2cc943801f45bdde62584442e0e6fa 100644
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -1658,6 +1658,7 @@ handle_kernel_abort(arm_saved_state_t *state, uint32_t esr, vm_offset_t fault_ad
+ extern void syscall_trace(struct arm_saved_state * regs);
+ 
+ #if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++#include <sys/SweetBBContext.h>
+ extern void sweet_ff_trace(unsigned int, int, struct arm_saved_state *);
+ #endif
+ 
+@@ -1670,6 +1671,7 @@ handle_svc(arm_saved_state_t *state)
+ #if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
+     int sweet_ff_call = trap_no < 0 ? trap_no :
+         (unsigned short)(trap_no == 0 ? get_saved_state_reg(state, 0) : trap_no);
++    uint64_t sweet_bbctx_mach_epoch = 0;
+ #endif
+ 
+ #define handle_svc_kprintf(x...) /* kprintf("handle_svc: " x) */
+@@ -1704,7 +1706,13 @@ handle_svc(arm_saved_state_t *state)
+ 
+ 		/* Counting perhaps better in the handler, but this is how it's been done */
+ 		thread->syscalls_mach++;
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++		sweet_bbctx_mach_epoch = sweet_bbctx_mach_enter(trap_no, state);
++#endif
+ 		mach_syscall(state);
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++		sweet_bbctx_mach_return(sweet_bbctx_mach_epoch, trap_no, state);
++#endif
+ 	} else {
+ 		/* Counting perhaps better in the handler, but this is how it's been done */
+ 		thread->syscalls_unix++;

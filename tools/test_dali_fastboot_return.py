@@ -311,7 +311,9 @@ in_irq=false;preempt=1;assert(!sweet_log_fastboot_drain(100));puts("PASS");}
                          'pexpert/arm/DaliFastbootReturnSMC.h', 'osfmk/arm64/dali_watchdog.h',
                          'bsd/dev/sweet_sample.c', 'bsd/dev/sweet_ufs.c'):
                 if path == 'bsd/dev/sweet_sample.c':
-                    expected = fragment(path, SAMPLER_OVERLAY)
+                    expected = (Path(source_dir) / path).read_text()
+                    self.assertEqual(hashlib.sha256(expected.encode()).hexdigest(),
+                                     'e840cb0a27353b54245022157f6b9b93c6e1e0c67d2aa906df03f6abbde307fc')
                 elif path in ('bsd/dev/sweet_ufs.c', 'pexpert/arm/pe_dali_watchdog.c',
                               'pexpert/arm/DaliFastbootReturnPolicy.h', 'osfmk/arm64/dali_watchdog.h'):
                     expected = fragment(path, ROOT/'xnu/patches/0180-sweet-dali-pwm-link-policy.patch')
@@ -319,7 +321,12 @@ in_irq=false;preempt=1;assert(!sweet_log_fastboot_drain(100));puts("PASS");}
                     expected = fragment(path)
                 self.assertEqual((Path(source_dir) / path).read_text(), expected, path)
                 if path == 'bsd/dev/sweet_sample.c':
-                    self.assertEqual(function(expected, 'sweet_sample_thread'), function(sampler, 'sweet_sample_thread'))
+                    thread = function(expected, 'sweet_sample_thread')
+                    for addition in ('    sweet_bbctx_window_begin();\n',
+                                     '        sweet_bbctx_dump((unsigned int)i);\n'):
+                        self.assertEqual(thread.count(addition), 1)
+                        thread = thread.replace(addition, '')
+                    self.assertEqual(thread, function(sampler, 'sweet_sample_thread'))
                     self.assertEqual(expected.count('dali_fastboot_return_poll();'), 1)
 
 
