@@ -1,4 +1,87 @@
-## 当前交接 — 保守EPERM修正258项通过，准备新修正提交/nativeCI（2026-11-01）
+## 当前交接 — 主机供电观测负控已闭合；HS仍禁止、桌面未达标（2026-11-02）
+
+**本阶段结束，无活动设备或后台任务。** 当前可执行kernel仍来自源码commit `48784e2b795184f5ff63b2c860e403bdb3aa151e` / native CI `41317700197`，已独立验收353测试执行/45源/17 IIG/IORPC/完整链接。后续纯文档提交不改变该kernel身份；本阶段没有新CI、候选、设备查询或启动。
+
+**实际新验证：** 两个私有文件仅在 `.tmp/desktop-diagnostics-20261030/`（下文w）：`hs-host-contract-overlay/bsd/dev/SweetUFSHSAdmission.h` 与 `test-hs-power-observations.py`。实际分类器15项全过，含C11/C++17严格编译；初稿C++ enum的 `{0}` 诊断已用显式字段初始化修正，未关闭告警。bm9f6hnx3已真实completed0，现有28 suites /258项再次全过，独立逐日志重计数后合计29 suites /273项主机测试执行。不是新nativeCI或硬件测试。
+
+**关键负控：** AP请求、完成gear及PMIC programmed selector三者合成值均650000uV、target idle/ON observed时，实际函数仍返回唯一 `LIFETIME_FLOOR_UNPROVEN`。无“允许HS”结果、floor证明参数、MMIO/SMC/UIC/PMIF/bootarg或生产接线。650000uV仅是DT最大控制器时钟准备要求，不是已证HS-G1安全阈值；programmed selector/ON不是ADC实测电压，也不能证明持续floor。
+
+**权威本地证据：** `w/hs-power-host-only-closure.json`，逐个绑定两文件/测试日志/实际分类输出hash、45份生产源及原UFS/0180/用户工具保护。聚焦15项见 `w/hs-power-observations-v1/`，完整28 suite见 `w/hs-power-existing-regressions-v1/verification.json`，阶段说明见 `w/hs-power-host-milestone.md`。header SHA256 `f201e65780af1f3238f81f23b992f8f484372c2e6d614427720f2169d245fa1a`。较早focused回执的全回归pending只是历史时点，最终以本host closure为准。私有材料不强行纳入生产构建或提交；本次交接提交只选择NOTES，原用户mkadt.py/mkiosroot.sh的SHA不变且不暂存。最终文档commit与工作树核验另见 `w/hs-power-handoff-commit.json`，不将其当新kernel版本。
+
+**硬停止点：** 持续VCORE floor的ownership/保持/竞争/重置、次级PMIF-P的独立通道ownership/有限锁与访问/fault-lockout、真实local/peer HS能力及模式/series/termination/切换序列仍未闭合。SID8实际走P总线0x1c018000，不能扩大现有primary白名单冒充支持。本阶段不自动扩成PMIF/DVFS/HS驱动，不继续下载或硬件查询，不发完整CI或新boot“看看”；未来必须先有这些可核验契约，不能清除mandatory blocker凑进度。本阶段是观测分类负控，不是硬件修复、提速或桌面成功。
+
+**上一轮安全/桌面状态：** actual394f8de6.../boot5188F046，PWM双方仅G1、安全skip、GUI present0/成功DSI0；原厂启动对+b4ee根及全部256chunk恢复已独立闭合，四权限false/1次spent。SBLastRestoreIdentifier与SBLastSystemVersion本轮已落盘，不套旧缺失定位。不重开spent、不改GPT/未备份尾部/原厂恢复源或封存raw；实屏图标网格/Dock、真实UI更新、稳定120秒及同boot提交/成功DSI仍待验证。
+
+### 已有轮次和收尾记录（历史）
+
+
+bhekzyk7q completed0，pwm-g2-user-pc-symbolication.json直接从本轮394f8de6actual读取cache，3个不同Mach trap10/12/14独立证明dyld slide0x50404000；当前已录libsystemkernel trap种类不足3，因此该image仍未独立slide解析，不猜/不套旧0x1dce4000。3个IRQ样本全为backboardd56/main303，PC分别落在dyld未滑地址0x1a4648764、0x1a461fc08、0x1a461c130；nearestnlist多为redacted，不当完整函数名/调用栈，不减4。结束原始actual完整SHA与inode元数据保持，抽取startup小日志期间没有写原件。
+
+所有设备、监视、原始现场审计任务现均结束。本轮currentSB偏好两键已落盘、3个离散BBPC仍dyld、后续PortReceive/None/parked线程快照不证明持续卡死；UFS累计服务慢但未分离硬件/软件原因。下一动作仅主机读取精确ufs_mtk_device_reset/host_reset/start_host/take_over_host与固定vendor的HS低档/PHY/clock-scale/FASTAUTO前提。旧猜测ufs_dali_host_reset/ufs_dali_cold_init两名不存在，已通过源码函数表定位真实名，未改源/未下发硬件。缺少本轮local/peer HS max与PHY实际前提，不能从PWM1直接跳HS，也不复用本轮已spent许可。
+
+### 已核封存现场与恢复结果（历史）
+
+
+bpmqovm60 completed0，pwm-g2-frozen-result/verification.json：actual394f8de6...前后完整16GiBhash与inode元数据不变，DSC101685978byte/ea59524b.../272:272/0644/ctime02:54:21保持。logd.0.log两次记录实际kernelUUIDA1825D53-1893-3880-9464-CB6707FD8D9C，timesync含boot5188F046；runtime-kernel-identity.json独立绑定，非仅candidate推导。
+
+关键变化：com.apple.springboard.plist273byte/SHA9f999fef59ef91ab7f2fba42ab18cb636e2ff36e4a5a8843c310d6a83b05b156，已增加SBLastRestoreIdentifier与SBLastSystemVersion20H392，前者与本轮实际marker C893B001-A353-49D0-B0AD-F324A13D7AFE相同。旧boot171byte缺两键的观察不再适用于本轮；说明磁盘状态有进展，不能说setter卡在旧位置，也不等UI已出现。
+
+fsck-f-n实际exit8且NO WRITE：hardlink计数错误/bitmap underallocation/header filecount应184226而184225、directorycount应137262而137260。不同于旧轮9目录计数/17freeblock差，不能挪用旧数字或判GUI因果；原件未repair。唯一后台bhekzyk7q从本轮actualcache做独立slide/3个PC符号化，结束完整hash复核，不并发第二次全盘扫描。下一步结合其结果和当前启动日志确定下一修复，不越过PWMcap或盲切HS。
+
+### 恢复及前一观察（历史）
+
+
+bdf6dh63s completed0，权威pwm-g2-recovery-closure.json：完整actual394f8de6dcf4c8d878b9f93240352ac72ff8bd96414ee17b452b5bafb72ed0d0 /17179869184bytes、三hash一致、全部256×64MiB独立重读对照；实际恢复chunk=[0, 11, 13, 107, 119, 186, 187, 188]，恢复bytes=536870912，完整b4ee=b4ee77882c02dc0074da4dba0a229e682f2ab437cdd23b7f02c6012ebd8683bd。原厂物理boot对readback及主机恢复源hash/同token三阶段完成顺序均通过；closed_utc=2026-11-01T16:12:26.141637+00:00，四权限false/rootpendingfalse/1/1spent，原actual未repair。主执行bggng4hni与两个监视均已结束，不重开旧入口、不再发送设备命令。
+
+本轮功能结果仍是clock准入499.2MHz、双方PWM能力1安全skip，GUIpresent0/成功DSI0，无真人实屏证据，桌面未达标。后续仅封存现场主机只读核验（audit-pwm-g2-frozen-result.py）：本轮实际kernelUUID/logd、timesync/DSC/偏好及fsck-n，不将恢复成功当桌面。
+
+### 前一里程碑（历史）
+
+
+bggng4hni真实completed0；精确新pair状态closed，root_restore_verifiedtrue/rootpendingfalse、四权限false、approved=attempts1/1且spent，三阶段complete同token已核。closed_utc=2026-11-01T16:12:26.141637+00:00；各阶段完成={"stock_pair": "2026-11-01T15:39:49.248718+00:00", "capture": "2026-11-01T16:05:57.304480+00:00", "root_restore": "2026-11-01T16:12:26.472395+00:00"}。这些尚不是独立完整恢复验收；audit-pwm-g2-recovery-closure.py现在只读最终root.raw、固定b4ee恢复源和小回执，独立重新核全16GiB/256chunk动态差异/原厂物理读回，等待实际审计结果。无新增设备命令、不重跑spent，不将恢复成功当桌面。新boot5188F046两端PWMmax1安全skip、present/DSI0结论不变。
+
+### 前一阶段（历史）
+
+
+顶层actual-capture-verified.json已发布，精确run41317700197/head48784e2及state绑定核同；完整17179869184bytes三hash与state均为394f8de6dcf4c8d878b9f93240352ac72ff8bd96414ee17b452b5bafb72ed0d0。此次仅核小回执和状态，没有重复读取/hash原始现场。stage回执：{"unattended-capture-complete.json": {"stage": "capture", "completed_utc": "2026-11-01T16:05:57.304480+00:00"}, "unattended-root_restore-started.json": {"stage": "root_restore", "started_utc": "2026-11-01T16:05:59.987244+00:00"}, "unattended-root_restore-complete.json": null}。当前root_restore_pending=True、root_restore_verified=False，不凭取证通过宣称根恢复完成；主链bggng4hni/被动Monitor b5uoybzw1继续，不重跑、不额外ADB/恢复。完整closed和主任务终态后才运行独立256chunk恢复审计。PWM两端G1/无提档/GUI及DSI0结论不变，桌面未达标。
+
+### 前一里程碑（历史）
+
+
+b8qgdtvyt completed0，只读已发布有限日志；新SWEET4198400byte，boot5188F046-579B-4024-B9EB-04699B68E33E与pretrial2C0D004B分离，432loadrecords/36samples。实际coldclock mux0x81830605/status0xe8/派生499200000Hz，clockcap2准入；真实PA初态mode0x55/RX1TX1/active1各/connected2各/term0各，但local maxPWM=1、peer maxPWM=1，decisionSKIP0/target0，无提档SET/PMC成功记录。依已核生产路径此分支无配置写，不能称本轮G2提速；不能越过receiver能力硬设G2。GUIpresent0/成功DSI0，桌面目标仍未达标。token匹配本轮，pstore0byte不作第二份boot或无活动证据。nativeMachOUUID独立运行确认仍待冻结FS日志，不把bootUUID与MachOUUID混同。
+
+15:40:07Z被动state originals_verified，原厂物理对阶段已验；主链bggng4hni继续完整16GiB现场三hash/恢复，root_restore_pendingtrue。此结果只来自已完成小日志，不读活动raw/不额外ADB；新trial1/1已spent，不能自动下一轮或硬切HS。下一动作在取证/恢复期间只做已发布新log与固定源的主机分析，恢复complete后再独立256chunk/完整hash审计。
+
+### 同轮原厂回刷/固定窗口记录（历史）
+
+
+被动Monitor bwmzd6rnd于15:39:37.723426Z报告state=originals_flashed_readback_pending；approved/attempts1/1/root_restore_pendingtrue/root_restore_verifiedfalse/无unattended_failed。这只证明本轮原厂对回刷阶段状态，不当Android已启动/物理对已验/根已恢复，也不推断PWM/GUI/DSI。主链bggng4hni继续负责后续验证、有限日志、完整16GiB取证三hash与b4ee恢复，绝不另起ADB/恢复/重跑。b8qgdtvyt仍等待完成posttrial小日志发表；bwmzd6rnd到期可只读续监视，活动raw不读/hash。
+
+### 本轮固定窗口/启动记录（历史）
+
+
+当前主执行bggng4hni唯一；最新已观测trial_rebooted，trial_started_utc2026-11-01T15:20:38.449660+00:00，固定窗口截止15:40:38.449660Z，不因任何工具/对话重置。尝试已1/1消费，root恢复pending，不能重跑入口。被动Monitor bwmzd6rnd在途；新增只读等待b8qgdtvyt最多3600秒，每30秒只读本地状态/完成publication marker，失败/缺失/过时明确终止；posttrial-log-capture.json发布后才对已完成4MiB SWEET和有限pstore做SHA核验/副本/同boot解析，绝不读/hash活动root.raw，不发ADB。预/后bootUUID分离、无新boot严格拒绝，新增PWM clock/init/result记录保存，不把未知当0。
+
+已读sealed runner/physical_pair/restore脚本确认pair由路径参数与state绑定，原恢复源绝对路径固定b4ee、64MiB动态256块对照且仅前16GiB，外部candidate不改变算法；没有改这些在途文件。独立关闭审计audit-pwm-g2-recovery-closure.py只准备未执行；等待主链完成及closed markers后再读最终raw。当前无新GUI/DSI/实屏证据，不推断未观测的kernel boot或桌面。未收到真人实屏反馈。
+
+### 本轮启动记录（历史，精确scope仍适用）
+
+
+已按真实持续授权将新scope12827c391252e43a5fac957ae6b6b5d3765b07bf21de5920561c85e5c87570cf绑定为1次，approvalSHA b16607399f5240e4e360447047f24c10bc52f65f82d4cdea1182126a0265c33b；未伪称新的AskUserQuestion。此前离线与fresh只读门禁均通过。唯一launcher launch-pwm-g2-exact-trial.py已exec canonical外部pair/run-trial-once.py，后台bggng4hni在途，runtime-console.log私有排他创建保存真实stdout/stderr；只启动这一次，不重跑。pair=/run/media/baka/机械/ios-dali-pwm-g2-41317700197-20261101/candidate，run41317700197/head48784e2，kernel18ccd548.../A1825D53-1893-3880-9464-CB6707FD8D9C。实际刷写/启动阶段等只读状态事件，不能把launcher开始当已刷/已桌面。
+
+被动Monitor bwmzd6rnd最长30分钟，仅本地trial-state和posttrial-root文件大小，每30秒/变化时报告，完全无ADB/无raw内容读取/无控制动作；超时可续同一只读监视不重启设备链。唯一执行内已有完整原厂对→有限日志+完整16GiB三hash→256块对照b4ee恢复。任何在途写不确定或run异常即停止，不因本地进程消失/任务通知自行发恢复命令；不能扩成第二轮。旧spent/原厂源/backup/raw/尾部/GPT仍保护。
+
+已进入设备操作阶段，不再声称device_accessedfalse；当前未取得同boot实屏/GUI/DSI成功证据，桌面未达标。下一步等真实状态/执行完成后审计同轮恢复与日志，活动raw不读不hash。
+
+### nativeCI及候选准备（历史）
+
+
+精确3文件NOTES/coordinator/23项safety-suite修正commit 48784e2b795184f5ff63b2c860e403bdb3aa151e已推送，原用户两个工具SHA未改/不暂存；kernel6源与metadata patch fdc00bec保持不变。新head只dispatch一次，元数据初次未传播未重复派发，单次lookup已确认唯一41317700197/attempt1/in_progress，https://github.com/localhosts-A/ios-sweet/actions/runs/41317700197。唯一后台bv6rzjmx6跟踪全部终态，不轮询活动log/任务output。
+
+当前28suite258真实通过，353=256pre+97post只是本轮CI预期，已准备精确run/head/当前proof的fetch-pwm-g2-eperm-native-artifacts.py与verify-pwm-g2-eperm-native-ci.py，AST通过但未执行。必须真实成功后才下载新隔离产物/独立验收45源/17IIG/IORPC/native完整链接与kernelSHAUUID；不能把此前两个失败run转成通过、不能复用其kernel。当前无新候选/设备动作，原厂/b4ee/actual/尾部/spent保护保持，桌面未达标。
+
+### 安全修正提交前（历史）
+
 
 bbbl1t41v真实completed0：pwm-g2-eperm-regressions-v1完整28suite258项全过；原真实信号/group消失严格断言保持，新增EPERM未知/拒绝清理不放行/明确ESRCH才gone测试均过。validator180patch/53Python/12shell、11workflowbash-n通过；新CI预期256pre+97post353只是未来预期。内核6文件/sourceSHA与fdc00bec0180完全不变，生产对象复用明确相同源，不冒充Mac已验证EPERM/新native通过。准备精确3文件主机安全修正提交，再新head唯一nativeCI；两个旧失败结论保持、不刷设备。
 
@@ -4386,3 +4469,22 @@ Git提交后工作树除新NOTES交接及原用户mkadt/mkiosroot外无已跟踪
 ### 当前等待点：bbbl1t41v（未结束）
 
 唯一后台bbbl1t41v正在执行pwm-g2-eperm-regressions-v1全28suite，期望因新增2项而258但未收到完成通知，不能把期望当通过；独立23安全项已通过，validator180/53/12与限定diff-check通过。当前没有运行中的nativeCI或设备任务，两个native run均失败已终态/冻结证据，第三CI尚未派发。收到全回归通知后再核实际计数/workflow预期、保护用户工具SHA，提交tools/dali_unattended_return.py+tools/test_dali_trial_safety.py+NOTES三文件最小修正，再为新head全新CI。后验脚本须绑定新head/run并换成新实际suite计数，不复用旧349/351预期。Kernel6源字节和fdc00bec metadata修正不变，旧/新实际raw与原厂恢复源/尾部/spent仍保护；实屏桌面目标仍未达标。
+
+
+### 本轮G1限制与恢复等待点（新）
+
+当前已发布证据足以排除“PWM gear提升进入桌面”这一路径在本机本轮生效：冷clock准入成功但local/peer最大PWM均1，逻辑安全skip，无SET/PMC提档，GUIpresent/成功DSI0，实屏无真人反馈。不能把clockcap2/CI通过当G2运行，不越过两端cap，不将本机软件POR默认当测量。returnedread新585515008bytes/1068.323018s只是软件服务口径；后续主机路线评估须分清物理HS前置、软件/调度成本与实际GUI阻塞，当前不创建新的HS候选/不做额外设备查询或诊断刷机。
+
+主链bggng4hni仍唯一进行完整16GiB取证+恢复，续监视b5uoybzw1有效，已发布小日志分析b8qgdtvyt完成。原厂对已readback verified，但根恢复未完成；所有raw内容读取/独立关闭审计继续等最终closed和主任务成功。没有停在用户许可/存储资源上，也没有第二次启动或自动新增trial。
+
+
+### 采集sidecar已发表、adapter额外本地复核中
+
+仅stat/root.raw.json已发布小sidecar与静态adapter，不读raw内容、不发设备命令。root.raw17179869184bytes；sidecarstatusverified/prefix17179869184，remote_before/local/remote_after均394f8de6dcf4c8d878b9f93240352ac72ff8bd96414ee17b452b5bafb72ed0d0。顶层actual-capture-verified.json及capture-complete尚未发表，不能提前称adapter整阶段验收/根恢复完成。静态已封adapter在helper后执行file_sha(raw)额外完整本地复核才发布顶层回执；此时不并发重复hash、不改程序/超时、不重试。主执行bggng4hni、只读Monitor b5uoybzw1继续，rootpendingtrue；恢复独立审计仍等完整closed。自动goalcheck不当真人新授权。
+
+
+### 当前唯一后台：bpmqovm60封存HFS只读审计
+
+唯一后台bpmqovm60正执行本轮冻结HFS只读audit（前后完整hash、有限DSC/logd/timesync/偏好、fsck-f-n），尚无完成通知，不读取其在途输出。所有设备/恢复/监视任务已结束，独立恢复closure已通过。待该audit完成后再运行已准备symbolicate-pwm-g2-user-pcs.py，避免机械盘并行全盘读取；必须从本轮actual和trap独立计算slide，不套旧轮资产验收。
+
+同CI源码syscalls.master确认最后采样worker470的331=__disable_threadsignal、361=bsdthread_terminate，368=workq_kernreturn；Mach -47=mach_msg2_trap。单个361 entry没有后续return不构成卡死证据，因为该syscall用于线程终止。记录的SVC172条并非完整1494事件trace，末主线程PortReceive/uwNOT_APPLICABLE也不能推出消息的peer/连续等待或缺失服务。暂无依据修改IPC/syscall或强制HS；下一修复须由当前封存证据和精确源码进一步支撑。
