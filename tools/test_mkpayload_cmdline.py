@@ -64,6 +64,32 @@ class PayloadCommandLineTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'NUL'):
             mkpayload.build(self.kernel, self.tree, 'rootrw=0\0rootrw=1')
 
+    def test_dali_pwm_optin_preserves_return_and_input_bounds(self):
+        # Exact current601-byte argument fixture, not a device identity or boot proof.
+        old = ('debug=0xc cpus=1 keepsyms=1 sweettouch=0 sweetkeys=0 sweetbattery=0 '
+               'rd=ufsroot0 ufsroot=unixnu_data sweetlog=1 ufslogsecs=30 '
+               'unentitled_ios_sim_launch=1 ignition_level=1 launchd_unsecure_cache=1 '
+               'wdt=-1 ufsrw=1 rootrw=1 sweetsample=- sweetsampledelay=30 '
+               'sweetsampleinterval=30 sweethfsdiag=1 sweethfsblock=3059250 '
+               'sweetheartbeat=1 sweettasktrace=1 daligui=1 sweetfb_noconsole=1 '
+               'sweetfb_hz=10 sweethidswipe=60 sweetfftrace=3 sweetffscreen=0 '
+               'sweetfffault=0 serial=0 daliwdtlease=1140 sweetguiexec=1 '
+               'sweethidwait=1200 sweetffpc=1 sweetbbvm=1 sweetbbipc=1 '
+               'sweetload=1 ufswait=1 dalifastboot=1 sweetloadrw=1')
+        self.assertEqual(len(old.encode()), 601)
+        before = old.split()
+        self.assertEqual(before.count('sweetffscreen=0'), 1)
+        after = [word for word in before if word != 'sweetffscreen=0'] + ['ufspwm=1']
+        self.assertEqual(set(before) - set(after), {'sweetffscreen=0'})
+        self.assertEqual(set(after) - set(before), {'ufspwm=1'})
+        for required in ('sweettouch=0', 'sweetkeys=0', 'serial=0', 'dalifastboot=1',
+                         'daliwdtlease=1140', 'sweetsample=-', 'sweetsampledelay=30',
+                         'sweetsampleinterval=30', 'sweetheartbeat=1', 'sweethidwait=1200'):
+            self.assertEqual(after.count(required), 1)
+        proposed = ' '.join(after)
+        self.assertEqual(len(proposed.encode()), 594)
+        self.assertEqual(self.packed_command(proposed), proposed)
+
     def test_cli_leaves_existing_output_untouched(self):
         output = self.root / 'payload'
         output.write_bytes(b'preserve existing artifact')

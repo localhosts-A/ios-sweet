@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Execute final0178 UFS functions, including real polling/blocking and DMA callers."""
+"""Execute final0180 UFS functions, preserving real polling/blocking and DMA callers."""
 from pathlib import Path
 import os
 import shutil
@@ -245,7 +245,7 @@ int main(void){
         logger_guard = ('\t\t/* Do not overwrite DMA memory until hardware ownership is known. */\n'
                         '\t\tif (su.dali && su.command_poisoned) {\n\t\t\terror = ETIMEDOUT;\n\t\t}\n')
         self.assertEqual(UFS.count(strategy_guard),1); self.assertEqual(UFS.count(logger_guard),1)
-        normalized = source.without_fastboot_log_hooks(UFS)
+        normalized = source.without_fastboot_log_hooks(source.without_pwm_init_hooks(UFS))
         begin = normalized.index('#if DEVELOPMENT\n/* Completed logger publications only:')
         end = normalized.index('static void\nsweet_log_thread(', begin)
         normalized = normalized[:begin] + normalized[end:]

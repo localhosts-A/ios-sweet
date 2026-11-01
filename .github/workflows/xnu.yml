@@ -47,6 +47,9 @@ on:
       - "tools/test_dali_backboard_ipc_context.py"
       - "tools/test_dali_gui_load_progress.py"
       - "tools/test_dali_ufs_startup.py"
+      - "tools/test_dali_ufs_pwm.py"
+      - "tools/test_dali_ufs_pwm_clock.py"
+      - "tools/test_dali_ufs_early_return.py"
       - "tools/dali_uuidtext.py"
       - "tools/test_dali_uuidtext.py"
       - "tools/dali_recovery_adt.py"
@@ -165,6 +168,9 @@ jobs:
           python3 tools/test_dali_backboard_vm_fault.py
           python3 tools/test_dali_backboard_ipc_context.py
           python3 tools/test_dali_gui_load_progress.py
+          python3 tools/test_dali_ufs_early_return.py
+          python3 tools/test_dali_ufs_pwm.py
+          python3 tools/test_dali_ufs_pwm_clock.py
           python3 tools/test_dali_ufs_startup.py
 
       - name: Build
@@ -179,6 +185,9 @@ jobs:
           SWEET_LOAD_SOURCE_DIR: ${{ github.workspace }}/dxb/xnu
         run: |
           python3 tools/test_dali_gui_load_progress.py
+          python3 tools/test_dali_ufs_early_return.py
+          python3 tools/test_dali_ufs_pwm.py
+          python3 tools/test_dali_ufs_pwm_clock.py
           python3 tools/test_dali_ufs_startup.py
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_fastboot_return.py"
 

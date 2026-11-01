@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise final0179 functions; optional SWEET_LOAD_SOURCE_DIR verifies materialized sources."""
+"""Exercise final0180 functions; optional SWEET_LOAD_SOURCE_DIR verifies materialized sources."""
 from pathlib import Path
 import os
 import re
@@ -29,6 +29,12 @@ RW_PATHS = ('osfmk/kern/thread.h', 'osfmk/kern/Makefile', 'osfmk/kern/lock_rw.c'
             'osfmk/kern/exception.c', 'bsd/dev/sweet_sample.c',
             'osfmk/kern/SweetLoadProgress.h', 'osfmk/kern/SweetRWWaitProgress.h')
 SOURCE.update({p: fixture.fragment(p, RW_PATCH) for p in RW_PATHS})
+PWM_PATCH = ROOT/'xnu/patches/0180-sweet-dali-pwm-link-policy.patch'
+SOURCE.update({p: fixture.fragment(p, PWM_PATCH)
+               for p in ('bsd/dev/sweet_ufs.c', 'bsd/dev/SweetUFSPWMPolicy.h',
+                         'bsd/dev/SweetUFSPWMClock.h',
+                         'pexpert/arm/DaliFastbootReturnPolicy.h',
+                         'pexpert/arm/pe_dali_watchdog.c', 'osfmk/arm64/dali_watchdog.h')})
 LOCK = SOURCE['osfmk/kern/lock_mtx.c']
 SAMPLER, UFS, EXCEPTION, GUI_POLICY, IO_POLICY = (SOURCE[p] for p in PATHS)
 RW_POLICY = SOURCE['osfmk/kern/SweetRWWaitProgress.h']
@@ -45,6 +51,46 @@ def function(source, name):
     while depth:
         depth += (source[end] == '{')-(source[end] == '}'); end += 1
     return source[match.start():end]+'\n'
+
+
+def without_pwm_init_hooks(text):
+    """Remove only0180's declared init additions, preserving full-file comparison."""
+    for include in ('#include "SweetUFSPWMPolicy.h"\n', '#include "SweetUFSPWMClock.h"\n'):
+        assert text.count(include) == 1
+        text = text.replace(include, '')
+    begin = text.index('\n/* MT6991 exact fixed address contract from actual Dali DT.')
+    end = text.index('static int\nufs_mtk_dme_rmw(', begin)
+    text = text[:begin] + text[end:]
+    call = '''\tif (!error) {
+        uint32_t pwm_requested = 0;
+        (void)PE_parse_boot_argn("ufspwm", &pwm_requested, sizeof(pwm_requested));
+        /* Reached only after the exact Dali stopped-host cold takeover succeeded. */
+        uint32_t pwm_cap = SWEET_PWM_PLATFORM_CAP;
+        if (pwm_requested == 1 && su.dali && pwm_cap > 1)
+            pwm_cap = ufs_pwm_clock_cap();
+        error = ufs_dali_prepare_pwm(pwm_requested, su.dali, pwm_cap);
+    }
+'''
+    assert text.count(call) == 1
+    text = text.replace(call, '')
+    prelude = '''    /* Check the link/init latch before ramoops or any other possible MMIO. */
+    int pwm_error = ufs_pwm_reentry_error();
+    if (pwm_error) return pwm_error;
+    uint32_t pwm_requested = 0;
+    (void)PE_parse_boot_argn("ufspwm", &pwm_requested, sizeof(pwm_requested));
+    bool pwm_guard = pwm_requested == 1 && SWEET_PWM_PLATFORM_CAP > 1;
+    pwm_error = ufs_pwm_root_enter(pwm_guard);
+    if (pwm_error) return pwm_error;
+'''
+    early_abort = '''            if (pwm_guard && su.dali && !su.ready)
+                dali_fastboot_return_root_failure(); /* No UFS lock/drain, one armed reset. */
+'''
+    for addition in (prelude, '            ufs_pwm_root_leave(pwm_guard, error);\n',
+                     '    ufs_pwm_root_leave(pwm_guard, 0);\n', early_abort,
+                     'extern void dali_fastboot_return_root_failure(void);\n'):
+        assert text.count(addition) == 1
+        text = text.replace(addition, '')
+    return text
 
 
 def old_fragment(path, patch=BASE_PATCH):

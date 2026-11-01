@@ -1,4 +1,83 @@
-## 当前交接 — 0179主机范围完成：212测试/5对象/43文件验收；未发布或刷机，桌面未达标（2026-11-01）
+## 当前交接 — 条件G2功能255项及最新对象/回放通过，待完整nativeCI（2026-11-01）
+
+真实28suite255项全通过，pwm-g2-regressions-v1/verification.json；两个当前ARM64生产对象、六文件实际补丁零fuzz/offset回放+可达probe、单CASclaim/PMC固定循环CFG均真实通过pwm-g2-{contract-arm64,independent,object-cfg}-v1。最新0180SHA7ffbb88a17c7866e36e0d997231a7ae417fb43eaaa9c27e5d6d43ba9e2c86cbd。固定实际DT+vendor支持生产ceiling2，仅真实冷clock admission得到cap2后、精确控制器健康+两端RX能力+单lane健康PWM+无降gear时写16attrs/单次SLOW0x22PMC；未知clock cap1不UIC，未optin/非Dali零clockmapping。此为条件硬件试验的工程契约，不是已测cold clock/PHY/电压或实机提速。cap1/253/早期7ff版本fixture失败等历史证据不能当新版本。
+
+validator实际180patch/53Python/12shell PASS；workflow当前预期需刷新；无新nativeCI/commit/设备动作截至本记录。两次新v1fixture计数告警按实际不变量修好后v2通过，无降-Werror。下一步收束workflow/source hash/技术契约与交接，再按持续授权一组精确提交、一次完整nativeCI；不能在nativeCI独立验收前封装/操作设备。机械盘绑定新候选并fresh核空间，旧spent/原厂/b4ee/actual仍保护，桌面未达标。
+
+### 前一主机里程碑（历史）
+
+
+正式0180已为5文件（含窄early-root失败返回）；当前SHA 3d58cf038588c249ec459842ce59d8b296d5f92b0d49b84560b0e4fd10730ce0。27suite/243实际测试已通过，pwm-early-return-regressions-v1/verification.json；两个真实ARM64对象通过pwm-early-return-arm64-v2/verification.json，无额外include绕过、不等完整native链接或实机SMC。旧2文件718d/237项/313预期CI计数只属历史。实际DT内层offset64、mt8183兼容串确为MT6991复用，clock固定参考与273..499.2MHz范围已核；机械盘容量和基本小文件语义已满足，两个旧阻断不可再当现状。SweetUFSPWMClock.h纯策略4项实际通过但尚未接正式补丁或MMIO。生产cap1不变，桌面GUIpresent0/成功DSI0。下一动作：只读两快照时钟接线、固定PA_NO_ADAPT3/timeout属性和明确SLOW0x22模式及完整失败注入测试；没有新CI/提交/设备运行。
+
+### 前一里程碑（历史，不代表当前源码）
+
+## 当前交接 — 0180主机237项通过；真人提供机械盘且NTFS3语义通过，仍补平台与早退返回依据（2026-11-01）
+
+**最新存储资源：** 真人在AskUserQuestion自填/run/media/baka/机械/。实际/dev/sdb1/NTFS3/rw+acl，free672892723200bytes；全新小目录ios-dali-storage-probe-l7alnsbu以4129byte合成数据核0700/0600+uid、O_NOFOLLOW、hardlink独占发布/重复拒绝、atomic rename回读、file+dir fsync、flock均通过，external-evidence-storage-probe.json。空间门禁已解除，不能继续把旧“无其他18GiB挂载”当当前阻断。不是16GiB传输/断电验证；未来新candidate须绑定这个规范路径与全新capture目录、fresh重验，不修改旧spent候选、不迁移覆盖原件。设备仍未操作。
+
+**最新平台/返回发现：** 限定补固定f089d58的ufshcd-pltfrm.c，Git blob/bytes/SHA保存在新隔离ufs-pwm-linux-platform-reference-f089d58，未执行下载代码。默认host PWM cap=G4、SLOW_MODE而非当前SLOWAUTO；这是通用软件cap不是MT6991现时clock/PHY实测，不能直接提生产cap。旧PHY参考of_match只列mt8183，须以实际DT核匹配，不能仅因文件名推定不适用/适用。真实IOKitBSDInit.cpp:814–817在rootdev错误后panic，正常sampler主动返回不能覆盖earlyfatal。早期ramoops只是内存日志、不创建返回线程。已有dali-reference/dtb/mt6991.dtb直接fdtget报BADMAGIC，待核容器/offset而非当设备树缺失。
+
+**当前代码与实证：** 正式本地0180仅sweet_ufs.c与私有SweetUFSPWMPolicy.h；补丁SHA718d01226b97297ba987f4ad84732a0fdda40417a72fac261703d7abe01044ec。首错误errno+uncertain同word原子发布、不覆盖，knownfailed/unknown两类都禁止本boot重新init；真实root入口前置检查在ramoops前，单次CASclaim/已ready释放/32线程覆盖。新repo suite24项，最终全26suite237项真实PASS（pwm-link-regressions-v3/verification.json）；不是旧计数或nativeCI。GUI/startup/Fastboot显式0180 final-source，完整旧文件归一化仍严比，原普通UIC/SCSI/QUERY/strategy/logger/等待未改。
+
+**对象/源码验证：** bpnl68b87 completed0，pwm-link-arm64-v2与pwm-link-independent-v2核最新ARM64生产对象+不入kernel的hostprobe/无atomicruntime、repo补丁逐字节相同的2文件full-context零fuzz/offset，原source和CI归档未变。pwm-link-object-cfg-v1实际CFG：claim无环/单CASAL，PMC唯一循环有50001倒计数、共享500ms完成/阶段30sdeadline，调用仅time/idle/delay；不证明外部callee/MMIO必返回。validator180patch/51Python/12shell及11workflow bash-n PASS。workflow预期未来235pre+78post=313执行，**实际新nativeCI=0**；首次预期pre236的计数断言失败已按实际235纠正，不隐去。参数真实pack测试601→594，只去sweetffscreen0、加ufspwm1，输入禁用/serial0/返回预算保持。
+
+**负控发现与修正：** 旧全部235回归通过后，额外host负控发现UPMS先成功、UCCS到来时UPMCRS变坏仍可用旧成功；已改为UPMS仍asserted就重验本端成功，错误sticky，新增专门用例，全套重跑236再补参数测试至237。旧v1/v2/v3与失败log均保留。不要复用下方历史22项或v1对象SHA代表最新源码。
+
+**当前阻断/下一步：** 生产cap仍固定G1且未证时零新增UIC/SET，无bootarg/DTS提档绕过；双方能力不是MT6991当前clock/PHY上限证明，必要NO_ADAPT/timeout属性也未闭合。新fatal在sampler前，既有主动PSCI依赖sampler且drain失败不复位，只有有限WDT/marker尚不能证明失败场景会回Fastboot；不能套正常轮返回实证。原第三项取证容量已由上方真人提供机械盘及实测解除；工作卷本身仍约7.46GB，不能继续当全局空间阻断。**不因权限等待；平台与earlyfatal覆盖这两项技术门禁仍禁止发布/CI/封装/设备新轮，不得用重开spent或盲调高gear绕过。** 用户2026-11-01持续批准提交和设备操作/无需再问仍有效。
+
+**设备安全状态：** CI41291696409新RW轮已独立原厂启动对+完整b4ee根恢复closed/pendingfalse/verifiedtrue/四权限false/1/1spent；actual6d9dd283...原件不repair，GUIpresent0/成功DSI0/无实屏桌面验收。当前全部后台结束，index空，HEAD仍f6396b5...；本地9文件改动待保留但不发布cap1诊断候选，用户mkadt/mkiosroot原SHA不变。新主机范围docs/dali-ufs-pwm.md；权威闭合回执pwm-link-host-foundation-closure.json。
+
+---
+
+## 历史主机过程 — 以下22项/尚未接线等是较早阶段，不覆盖上方237项最新状态（2026-11-01）
+
+**最新实现里程碑：** 仅w/pwm-link-host-overlay/bsd/dev的小独立源（无可写硬链）和私有header；pwm-link-host-core-v1/verification.json真实22tests=7policy+15实际UIC/PMC/root-entry（W1C事件、双完成任意先后、PWR_LOCAL/各失败、deadline、晚到拒接、合成cap真实root重入/已ready/32线程单次claim），完整UFS只精确剥离声明新增后等于原e1decf46...。v1硬件fixture有7个-Werror计数未引用失败，保留log，v2 11/v3 12/v4 15真实通过，不删skip或关告警。生产cap固定1/不存在bootargDTS绕过，cap3只临时fixture头，启用生产也零新增UIC/SET；不是硬件提速证明。
+
+bxruuvt0g/b1xsya8gz均completed0：pwm-link-arm64-v1真实UFS ARM64对象、pwm-link-independent-v1 host-only分支probe对象（不入patch/Makefile/kernel）、无atomic runtimehelper，完整上下文2文件草案0180-draft.patch独立零fuzz/零offset回放。源码SHA1d42e2bc...e7c7581c、policy SHA f996d5ef...8ced69f6、draftSHA96a243c2...21d27f；原RW源/CI归档不变。ARM64 claim为单casal无回环，PMC有固定50001poll与共享500ms/阶段30s上限；完整CFG审计尚pending。不把局部对象替代native链接。
+
+**尚未完成/下一步：** 显式区分completed-failed/uncertain的失败诊断（当前均保守终止），正式repo0180 patch及测试overlay接线/新overlay全项目回归尚未做，早期fatal返回独立于sampler的证明未闭合；平台更高PWM档/必要前置属性仍未证、取证18GiB容量仍不足。下一继续主机补这些，不提交cap1基础当诊断候选，不nativeCI/封装/刷机；原root恢复closed/四权限false不变。当前无活动后台，无新增git patch/tests改动（仅NOTES及原用户两工具dirty），不重跑stager/独立验收旧输出目录；新迭代用新证据目录。
+
+**最新计划范围：** ExitPlanMode实际批准playful-tickling-lemur.md的PWM主机整合。cold LINK_STARTUP后缺PA速率协商是待补功能，不是已证黑屏根因；独立Explore/Plan都确认当前STOP部署：MT6991更高PWM档/必要PA_NO_ADAPT等平台前置未证、普通UIC只UCCS不能当PMC完成、early init fatal重入和返回覆盖须单独验证。当前工作卷free7463526400/TMP8349089792bytes，其他挂载无18GiB，不能刷新轮/为不可部署候选消耗nativeCI；不删证据/TMP/备份。下一仅独立小overlay实现默认关闭私有policy/PMC真实函数host tests和ARM64对象，平台cap固定1未证则启用也零新增UIC/SET；新本bootfatal锁存先于rootdev的ramoops/MMIO检查，防重入reset，不能偷换DMApoison。既有普通UIC/SCSI/QUERY/strategy/logger/等待及root边界字节不改。0180编号已查空。PlanMode两只读agent均完成，无活动设备任务；不能因用户持续授权绕过技术门禁。
+
+**最新恢复验收：** bye1pfr3a/bql48gtat均真实completed0；闭合UTC10:35:29.530184Z。b859b8r4b真实completed0，rw-wait-recovery-closure.json已独立核新actual完整16GiB三SHA6d9dd283a6168719b8777ed302d70dad7cec3609b890d51e9bccfbf03f2dbd9c、实际全部256chunk逐一对照，恢复8chunks[0,11,13,107,119,186,187,188]/536870912bytes，完整b4ee原厂根/物理启动对/三阶段token与完成marker及四权限false全部通过；pendingfalse/verifiedtrue，原现场未repair。唯一设备链已结束，不重跑任何spent入口；用户另有下述真实持续授权，未来新候选仍需精确绑定而非重置旧轮。
+
+**当前主机结果/下一步：** beoi2u8qn真实completed0：rw-wait-frozen-result/verification.json核新actual前后完整SHA相同，DSC正式101685978bytes/ea59524b.../272:272/0644/正常ctime02:54:21精确保留，不等消费快路径。logd.0.log新记录实际kernel UUID011C8C0F-368F-3C9C-B760-64D38104DBDB（两处），timesync112bytes含本boot2C0D004B；这补充小console未直接打印UUID的限制，slide仍按精确装载契约推导。marker新36byte UUID/SHA9543b200...489105，SpringBoard偏好171bytes/SHAe80395c6...仍未见实际SBLastRestoreIdentifier/SBLastSystemVersion，不能据此定位setter等待。fsck -f -n真实exit8：hardlink、9个目录itemcount、xattr应16/14、ACL应6/5、underallocation、free应1109711/header1109728差17；未repair，不能套旧差15或把freecount差当漏分配块数/运行因果。bxygo27m4/bubfcj7sz/b1fpc26dl随后均completed0：新51资产每根3333419024bytes全SHA同clean/末尾原件SHA不变；新dyld3trap与libsystem9trap独立同slide0x1dce4000，7IRQ依次dyld/ObjC/CF，最后workerCFDataIncreaseLength实际export+16/IOKit LR实际188byte函数，主CF函数1656bytes，不沿用旧FeatureFlags末态/nlist不冒充栈。三组证据rw-wait-{frozen-assets-verification,user-pc-symbolication}.json、rw-wait-init-function-analysis/verification.json。下一仅主机收敛长读取服务：精确ADT13MHz，5840返回read/600039424bytes累计1067.386s、平均182.77ms，strategy服务1067.479s、聚合lockwait37148s不是墙钟；rw-wait-returned-read-timing.json。CMD_SPIN50微秒/SLEEP200微秒，计时含缓存维护/硬件poll/睡眠调度，不能直接归为硬件吞吐或盲调预算。当前无活动后台/设备任务，不为一条诊断刷机。无设备命令/无新试验。以下pending是恢复过程历史，不能覆盖独立closed。
+
+**最新真人持续授权（2026-11-01）：** 用户明确“对了，提交和操作设备我全批准了，无需问我”。后续为本项目进入真实桌面所需提交/推送/CI/候选设备操作不再逐项询问；这是新的真实用户批准，不是自动goal/hook。仍主机证据优先、整合修复/必要诊断、完整验收；每个新轮保留精确版本/哈希/范围及该真人授权依据，不复活本轮或旧轮spent1/1，不伪称新AskUserQuestion。当前唯一bye1pfr3a取证恢复先闭合；不改GPT/未备份尾部/原厂恢复源/无关分区，不竞态恢复，在途写不确定仍停自动后续阶段。以下旧历史“需单独批准”只反映当时范围，不再用它重复询问已预授权项目内操作。
+
+最新真实AskUserQuestion选择“批准一次定位运行及恢复”，精确scope SHA1986c53c4931afedd13b349daa9ba46574de05e4f5533007a54dc1dc7a2a8f5d / core453d003f...09fdba0，CI41291696409/f6396b5...。覆盖fresh只读门禁、前16GiB101740544byte根增量、临时boot_b/init_boot_b、低4bit返回标记+一次PSCIcold、1080/1140/1200固定返回窗口、同轮原厂对/限定日志/完整16GiB三hash现场/pinnedb4ee完整恢复；不增轮，不写GPT/未备份尾部，远端在途写不确定停自动后续阶段，不在超时现场再要求按键/二次确认。本轮明确定位不保证桌面，不以自动通知扩大授权。
+
+b1cq3069z fresh只读已completed0：精确Android身份/槽b/root、root未挂载、原厂物理启动对完整SHA、host及设备完整b4ee16GiB SHA、设备/host时钟和DSCctime/空间全部通过。回执rw-wait-fresh-readonly-preflight.json，authorizer据此记录实际新trial-approval.json；approval SHA0ec2c4a335dd6bb8e94d7392a827bf9239eac44b6a607dc232f1dde8a1bce42e，rw-wait-actual-approval-receipt.json。新候选权限已按真人授权启用，仅此单轮，不再是“零批准”状态；旧spent候选仍封存closed。新轮是否pending/恢复以实时state为准，不能拿旧closed冒充新轮闭合。
+
+当前唯一设备后台bye1pfr3a执行新candidate/run-trial-once.py --execute（上列approval SHA），主日志rw-wait-authorized-single-trial.log；**禁止重复启动、另启capture/restore或重置固定起点**。bzf3b23sc已正常30分钟到期，续接bql48gtat仅被动本地state/file-size/完成marker观察，无transport/不读raw；没有重启bye1pfr3a或重置试验。固定起点09:52:10.179070Z/after1080返回意图10:10:10.179070Z/试验终点10:12:10.179070Z不变。10:10:49 restoring_originals、10:10:51 originals_flashed_readback_pending、10:11:16 originals_verified；已独立核对stock_pair完成marker/token、Fastboot目标dali/slotb/尺寸、Android完成/root及完整物理原厂启动对SHA均通过。reset原因字段为空，不能断言具体复位机制或真人未按键。10:31:15被动事件root.raw.json已发布；独立核其status verified/完整17179869184bytes/target一致/remote-before-local-remote-after三SHA均6d9dd283a6168719b8777ed302d70dad7cec3609b890d51e9bccfbf03f2dbd9c，raw stat完整且非symlink。仅核已发布sidecar不读raw内容；其SHAe1c90169...c3ab9。随后10:31:57.523524Z原链capture-complete已发布，独立核顶层actual-capture-verified/sidecar/state三SHA及token/完成marker全部相同，adapter额外fullhash已过；root_restore-started已发布，state仍originals_verified/pendingtrue/verifiedfalse/无failed。现在只等同链pinnedb4ee全256比较/恢复与物理对/全根验收，不另起恢复，不能用旧closed覆盖。audit-rw-wait-recovery-closure.py已准备且AST通过但未执行，必须等唯一执行链完成及本轮closed/三stage完成marker，才只读已发布actual与b4ee逐一比较256chunks/完整SHA及物理对回执；顶层actual-capture-verified.json是实际回执位置，不用错误trial子路径或旧closure。
+
+posttrial-log-capture.json已发布，analyze-rw-wait-published-logs.py真实exit0，4198400byte SWEET/空pstore的hash通过。新boot2C0D004B-10E7-4066-9DB3-5FD91C827ACF与旧pretrial分离，461load行/36samples/0reject/0duplicate，GUIpresent0/成功DSI0，桌面未达标。rw_status为MATCHED3/UNPUBLISHED51/INACTIVE29；sample34 SpringBoard TID219/376/469的site1有效匹配同event0xfffffe16790926b9/caller0xfffffe00077bc998，各gn42/10/2。sample35主线程与376变INACTIVE且gn52/32，末主线程hint16而非旧轮RWWrite8；不证明连续等待/死锁或owner。befwthftg主机验核已completed0：rw-wait-kernel-provenance/verification.json绑定精确CI内核SHA/UUID、逐字节重建payload/原段VA、native归档完整SHA和6源相同；按确定装载/链接重定位契约推导slide0，caller映射_hfs_lock_global+0x100（hfs_vfsutils.c:1235全局锁独占获取的返回位置）。UUID/slide非runtime直接打印，记录中明确区分；caller不减4，无owner/持续死锁证明，不套旧内核或盲改锁。证据rw-wait-runtime-evidence.json/runtime-logs，仅已发布小日志，不读活动raw。无真人实屏桌面证据；合成输入不是实体触摸。
+
+---
+
+## 历史交接 — 新RW候选主机验收完成，设备零批准/四权限false；桌面未达标（2026-11-01）
+
+本段新增真人批准仅“批准主机候选准备”：新CI41291696409/f6396b5...、新目录/token，复用已验封装/根/恢复链；不接设备不刷，实际运行仍须最终精确单轮确认。新目录shim/out-dali/ufs-41291696409/candidate-rw-provenance-20261101，bzyhvii2q生成completed0，host全局ADB/Fastboot trap未触发，candidate四权限false/零批准零尝试，observer_only=true/desktop_fix_proven=false。未新建或修改16GiB根：复用33215490...目标与6fb85143...delta；DSC正常ctime02:54:21仍在host窗口，future设备时钟必须fresh核对，不能伪造时间。命令行预期601<=607，只比已验DSC配置新增sweetloadrw=1。
+
+真实生成入口5负控+2dryrun通过，与实际candidate代码逐字节相同，证据rw-wait-generated-entrypoints-host-tests.json。独立验收v1 b1tcdyz8d failed1：GKI/LZ4/CPIO/payload/AVB/全16GiB虚拟根hash先通过，之后因旧41226683607模板无run_token字段而KeyError，未生成verification.json/未触发transport。旧模板早于auto-return，不能假定有token；v2显式验证新32lowerhex非零token，旧模板若有才比较，真实spent41272623933的token仍必须存在且严格不等。bteyramhw现已completed0，v2完整主机验收PASS：GKIv4/64KiB独立LZ4/CPIO/payload重建/AVB/ADT返回token/新CI内核/全16GiB虚拟根/13core与全部deps/7真实入口未授权零transport且state字节不变；实际cmdline601bytes，delta10RAW/24839blocks/101740544bytes，根目标仍33215490...。所有后台已结束，-v1失败证据保留，不重跑旧设备入口。
+
+封存rw-wait-host-candidate-closure.json；core manifest SHA453d003fd2539105f5a4125bb16468a3a04e9ac93d1b1ce2bba23aad609fdba0，deps SHAd9149c1a41b146e3a582d28740320cd47bdc4b4f6e338e851e0f636450eb3fe6。boot SHA ddfbc184...446d39；新init_boot SHA c4558ce310858c4477831fc70855a80b4ccda9a12c9810fae934f2d914b36c29；kernel仍e9bf12bd...e4d8733。旧已封存41272623933候选13core/state前后SHA全部相同；原镜像未写/未挂载，设备未访问。范围草案rw-wait-proposed-single-trial-scope.json SHA1986c53c4931afedd13b349daa9ba46574de05e4f5533007a54dc1dc7a2a8f5d明确proposed_only_not_device_authorization，未生成approval或启用权限；包括fresh门禁、一次运行/原厂启动对/限定日志/完整16GiB三hash现场/pinnedb4ee全恢复，异常在途写不确定即停自动链。DSC按host时钟最迟起点2026-11-02T01:34:21Z，设备时钟仍必须fresh核对，不伪造ctime。此候选仅定位，不能保证进入桌面；任何实际试验仍必须真人对精确新范围批准，自动goal/任务通知不是授权。
+
+无设备/新试验授权，旧1/1耗尽/恢复closed/四权限false保持。以下nativeCI验收已完成，不重跑；桌面仍未验收。
+
+---
+
+## 历史交接 — 0179唯一完整CI41291696409及独立验收通过；未封装/刷机，桌面未达标（2026-11-01）
+
+真人已批准精确五文件提交/推送及一次完整CI（不含候选封装/设备操作）。commit f6396b5bbe0abcaa212e26ae66e0fb1780d67114，parent a29d621...；patch SHA仍daff8b72...。NOTES旧历史段落发现一处真实serial在原HEAD已存在，当前版本只脱敏该处、保存私有前后hash回执，不改写历史或声称旧记录已删除。首次两次gitHTTPS连接超时exit128均在dispatch前；API核实远端仍a29，无dispatch标记。工作curl使用IPv6而DNS也给出不可达IPv4，命令级curloptResolve指定已验IPv6后原git push成功，没有改变DNS/代理/git配置或用API重建提交。
+
+唯一manual_dispatch CI41291696409：https://github.com/localhosts-A/ios-sweet/actions/runs/41291696409 ，已真实success/attempt1；未重发或rerun。head/branch/event/attempt均核对，rw-wait-publication.json绑定source-batch回执和单次dispatch门禁。b7a02n0fa观察、bipdzzqa4隔离下载均completed0，无活动后台。verify-rw-wait-native-ci.py实际独立验收PASS，证据rw-wait-native-ci-source-check/{source-verification,run-result}.json及rw-wait-native-ci-verification.log：macos-15/Xcode16.4、完整native link、210pre+54post=264次真实测试执行、43源与主机逐字节相同、17份IIG与前CI完全相同、four-field IORPC/header SHA保持、native导出头精确、新外部helper/旧恢复GUI符号和marker齐全、无atomic runtime helper且host-only探针未入kernel。新内核SHA256 e9bf12bde1f1a70d7d2a2fc17c46b59ffdb7914bf67378779e0951112e4d8733，UUID011C8C0F-368F-3C9C-B760-64D38104DBDB；这是新产物身份，不套到旧boot运行日志。完整产物仅隔离在rw-wait-native-ci-artifacts/{xnu-kernel,xnu-buildtree}，未执行其中脚本/Apple文件。
+
+本交接更新留本地，不为交接额外commit/CI。设备旧试验1/1耗尽、四权限false、原厂+b4ee恢复closed保持；无新候选或设备批准。原用户两工具不动。GUI present0/成功DSI0，未有实屏桌面验收。
+
+---
+
+## 历史交接 — 0179主机范围完成：212测试/5对象/43文件验收；未发布或刷机，桌面未达标（2026-11-01）
 
 ExitPlanMode已批准SpringBoard写锁来源的主机最小观测：仅源码/host测试/独立回放/局部ARM64对象/交接，明确不提交、不推送、不CI、不封装可部署候选、不操作设备/根镜像。0179补丁当前7文件，私有新树rw-wait-host-source，原source/xnu和CI归档保持。实际registry在sweet_sample.c而非sweet_ufs.c；每线程32byte单写者全原子record，默认sweetloadrw=0，两个exclusive等待点assert_wait成功后发布，block返回无条件clear。仅登记task+当前proc三元身份相符并非IRQ时捕获；新LOADRW独立行不改原LOADT，event只比较不解引用，无owner/用户VM/新锁/日志热路径。
 
