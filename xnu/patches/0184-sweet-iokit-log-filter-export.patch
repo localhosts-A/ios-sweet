@@ -1,8 +1,12 @@
 --- a/iokit/Kernel/IOUserClient.cpp
 +++ b/iokit/Kernel/IOUserClient.cpp
-@@ -2650,4 +2650,30 @@
- 	IOLog("IOK %s: %s %.240s -> %s\n", name, what, text, result);
- 	OSSafeReleaseNULL(ser);
+@@ -2663,8 +2663,34 @@
+ static void
+ sweet_iolog_status(const char *what, uint32_t value)
+ {
+ 	char name[32];
+ 	if (sweet_iolog(name, sizeof(name)))
+ 		IOLog("IOK %s: %s %u\n", name, what, value);
  }
 +
 +/* Filter-only companion for graphics sources; do not consume IOK log quota. */
