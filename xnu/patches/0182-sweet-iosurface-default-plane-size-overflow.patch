@@ -1,0 +1,44 @@
+diff --git a/iokit/Kernel/arm/SweetSurface.cpp b/iokit/Kernel/arm/SweetSurface.cpp
+index b28fcaa452f4a5cb602268ea9102d8e9d953b562..d079e2f6823fe5283ff6bb7b14f5a79af9eeb2e1 100644
+--- a/iokit/Kernel/arm/SweetSurface.cpp
++++ b/iokit/Kernel/arm/SweetSurface.cpp
+@@ -320,6 +320,7 @@
+ sweet_surface_layout(SweetSurface *s, OSDictionary *props)
+ {
+ 	uint64_t end;
++	bool defaultPlaneSizeOverflow = false;
+
+ 	s->width = sweet_dict_u32(props, "IOSurfaceWidth", 0);
+ 	s->height = sweet_dict_u32(props, "IOSurfaceHeight", 0);
+@@ -365,8 +366,20 @@
+ 			p->bytesPerRow = sweet_dict_u32(pd, "IOSurfacePlaneBytesPerRow",
+ 			    sweet_row_bytes(p->width, p->elementWidth, p->bytesPerElement));
+ 			p->offset = sweet_dict_u32(pd, "IOSurfacePlaneOffset", (uint32_t)next);
+-			p->size = sweet_dict_u32(pd, "IOSurfacePlaneSize",
+-			    p->bytesPerRow * sweet_div_up(p->height, p->elementHeight));
++			OSNumber *planeSizeNumber = OSDynamicCast(OSNumber, pd->getObject("IOSurfacePlaneSize"));
++			if (planeSizeNumber != NULL) {
++				/* Preserve the legacy OSNumber conversion for explicit values. */
++				p->size = planeSizeNumber->unsigned32BitValue();
++			} else {
++				/* The legacy default multiplied in uint32_t before storing IOSurfacePlaneSize. */
++				uint64_t defaultSize = (uint64_t)p->bytesPerRow *
++				    sweet_div_up(p->height, p->elementHeight);
++				if (defaultSize > UINT32_MAX) {
++					/* Preserve legacy wrapped geometry for later error precedence. */
++					defaultPlaneSizeOverflow = true;
++				}
++				p->size = (uint32_t)defaultSize;
++			}
+ 			next = round_page((uint64_t)p->offset + p->size);
+ 			if ((uint64_t)p->offset + p->size > end) {
+ 				end = (uint64_t)p->offset + p->size;
+@@ -384,7 +397,7 @@
+ 		return kIOReturnNoMemory;
+ 	}
+ 	s->allocSize = (uint32_t)alloc;
+-	return kIOReturnSuccess;
++	return defaultPlaneSizeOverflow ? kIOReturnNoMemory : kIOReturnSuccess;
+ }
+
+ /* Per-client mapping of one surface. */
