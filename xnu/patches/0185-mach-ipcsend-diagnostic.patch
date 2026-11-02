@@ -21,17 +21,17 @@
 +static struct sweet_ipcsend_ring sweet_ipcsend_ring;
 +
 +/* Shared ring core is single-try, bounded and never waits or logs. */
-+static void
++static int
 +sweet_ipcsend_record(uint32_t target, uint32_t phase, uint64_t token,
 +    uint64_t tid, int32_t receiver_pid, uint32_t msgcount, uint32_t qlimit,
-+    uint32_t fullwaiters, int32_t wait_result)
++    uint32_t fullwaiters_flag, int32_t wait_result)
 +{
 +    const struct sweet_ipcsend_record record = {
 +        .token = token, .tid = tid, .target = target, .phase = phase,
-+        .msgcount = msgcount, .qlimit = qlimit, .fullwaiters = fullwaiters,
++        .msgcount = msgcount, .qlimit = qlimit, .fullwaiters_flag = fullwaiters_flag,
 +        .receiver_pid = receiver_pid, .wait_result = wait_result,
 +    };
-+    (void)sweet_ipcsend_ring_append(&sweet_ipcsend_ring, &record);
++    return sweet_ipcsend_ring_append(&sweet_ipcsend_ring, &record);
 +}
 +
 +void
@@ -54,10 +54,10 @@
 +    for (uint32_t i = 0; i < snapshot.count; ++i) {
 +        const struct sweet_ipcsend_record *r = &snapshot.records[i];
 +        printf("SWEET IPCSENDR: v=1 s=%u target=%u phase=%u token=0x%llx tid=0x%llx "
-+            "receiver=%d count=%u limit=%u waiters=%u wr=%d\n", sample,
++            "receiver=%d count=%u limit=%u fullwaiters_flag=%u wr=%d\n", sample,
 +            r->target, r->phase, (unsigned long long)r->token,
 +            (unsigned long long)r->tid, r->receiver_pid, r->msgcount,
-+            r->qlimit, r->fullwaiters, r->wait_result);
++            r->qlimit, r->fullwaiters_flag, r->wait_result);
 +    }
 +}
 +#endif
@@ -73,33 +73,32 @@
 +		uint32_t sweet_target = sweet_load_rw_target(current_task());
 +		uint64_t sweet_token = sweet_target ? mach_absolute_time() : 0;
 +		pid_t sweet_receiver = sweet_target ? ipc_port_get_receiver_task_locked(port, NULL) : -1;
-+		bool sweet_entered_wait = false;
++		bool sweet_entry_recorded = false;
 +#endif
  
  		/*
  		 * We have to wait for space to be granted to us.
-@@ -454,6 +511,15 @@
+@@ -454,6 +511,14 @@
  			TIMEOUT_URGENCY_USER_NORMAL,
  			deadline,
  			TIMEOUT_NO_LEEWAY);
 +#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
 +		if (sweet_target != 0 && wresult == THREAD_WAITING) {
-+			sweet_entered_wait = true;
-+			sweet_ipcsend_record(sweet_target, SWEET_IPCSEND_ENTRY,
++			sweet_entry_recorded = sweet_ipcsend_record(sweet_target, SWEET_IPCSEND_ENTRY,
 +			    sweet_token, thread_tid(cur_thread), sweet_receiver,
 +			    mqueue->imq_msgcount, mqueue->imq_qlimit,
-+			    port->ip_fullwaiters ? 1u : 0u, wresult);
++			    port->ip_fullwaiters ? 1u : 0u, wresult) == 0;
 +		}
 +#endif
  
  		ip_mq_unlock(port);
  		turnstile_update_inheritor_complete(send_turnstile,
-@@ -466,6 +532,15 @@
+@@ -466,6 +531,15 @@
  		/* Call turnstile complete with interlock held */
  		ip_mq_lock(port);
  		turnstile_complete((uintptr_t)port, port_send_turnstile_address(port), NULL, TURNSTILE_SYNC_IPC);
 +#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
-+		if (sweet_entered_wait) {
++		if (sweet_entry_recorded) {
 +			pid_t receiver = ipc_port_get_receiver_task_locked(port, NULL);
 +			sweet_ipcsend_record(sweet_target, SWEET_IPCSEND_EXIT,
 +			    sweet_token, thread_tid(cur_thread), receiver,
@@ -140,9 +139,16 @@
  }
  
  void sweet_ff_trace(unsigned int, int, struct arm_saved_state *);
+--- a/osfmk/kern/Makefile
++++ b/osfmk/kern/Makefile
+@@ -124,3 +124,4 @@
+ 	SweetLoadProgress.h \
+ 	SweetRWWaitProgress.h \
++	SweetIPCSendTrace.h \
+ 	sched_hygiene.h \
 --- /dev/null
 +++ b/osfmk/kern/SweetIPCSendTrace.h
-@@ -0,0 +1,88 @@
+@@ -0,0 +1,89 @@
 +#ifndef _KERN_SWEET_IPC_SEND_TRACE_H_
 +#define _KERN_SWEET_IPC_SEND_TRACE_H_
 +#include <sys/types.h>
@@ -156,7 +162,8 @@
 +
 +struct sweet_ipcsend_record {
 +    uint64_t token, tid;
-+    uint32_t target, phase, msgcount, qlimit, fullwaiters;
++    /* ip_fullwaiters may be sticky; this scalar is a flag, not a count. */
++    uint32_t target, phase, msgcount, qlimit, fullwaiters_flag;
 +    int32_t receiver_pid, wait_result;
 +};
 +struct sweet_ipcsend_snapshot {
@@ -229,5 +236,5 @@
 +}
 +
 +void sweet_ipcsend_close(void);
-+void sweet_ipcsend_dump(unsigned int sample);
++void sweet_ipcsend_dump(unsigned int sample, unsigned int final);
 +#endif

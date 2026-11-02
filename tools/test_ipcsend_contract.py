@@ -19,6 +19,7 @@ sample = (source_root / 'bsd/dev/sweet_sample.c').read_text()
 header = (source_root / 'osfmk/kern/SweetIPCSendTrace.h').read_text()
 progress = (source_root / 'osfmk/kern/SweetLoadProgress.h').read_text()
 port_header = (source_root / 'osfmk/ipc/ipc_port.h').read_text()
+kern_makefile = (source_root / 'osfmk/kern/Makefile').read_text()
 
 # Bind the instrumentation to the real XNU interfaces and target-gated build.
 assert '#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)' in mq
@@ -28,6 +29,8 @@ assert 'sweet_load_rw_target(current_task())' in mq
 assert 'uint32_t\nsweet_load_rw_target(void *task)' in sample
 assert 'ipc_port_get_receiver_task_locked(port, NULL)' in mq
 assert 'extern pid_t ipc_port_get_receiver_task_locked(ipc_port_t port, uintptr_t *task);' in port_header
+xnu_only_exports = kern_makefile[kern_makefile.index('XNU_ONLY_EXPORTS ='):kern_makefile.index('INSTALL_MI_LIST')]
+assert 'SweetIPCSendTrace.h' in xnu_only_exports
 
 # Entry is captured only on the actual wait-armed branch and before port unlock.
 wait_arm = mq.index('wresult = waitq_assert_wait64_leeway(', mq.index('ipc_mqueue_send_locked('))
@@ -48,7 +51,7 @@ record_start = header.index('struct sweet_ipcsend_record')
 record = header[record_start:header.index('};', record_start)]
 for forbidden in ('task_t', 'ipc_port_t', 'ipc_kmsg_t', 'void *', 'address', 'payload'):
     assert forbidden not in record
-for required in ('token', 'tid', 'target', 'phase', 'msgcount', 'qlimit', 'fullwaiters', 'receiver_pid', 'wait_result'):
+for required in ('token', 'tid', 'target', 'phase', 'msgcount', 'qlimit', 'fullwaiters_flag', 'receiver_pid', 'wait_result'):
     assert required in record
 assert 'os_atomic_inc((ptr), relaxed)' in header
 assert 'os_atomic_load((ptr), relaxed)' in header
@@ -67,7 +70,14 @@ assert '++ring->used;' in header
 assert 'snapshot->used = ring->used;' in header
 assert 'record->target == 0' in header
 assert 'sweet_target != 0 && wresult == THREAD_WAITING' in mq
-assert 'if (sweet_entered_wait)' in mq
+assert 'sweet_entry_recorded = sweet_ipcsend_record(sweet_target, SWEET_IPCSEND_ENTRY,' in mq
+assert '== 0;' in mq[entry:unlock_after_entry]
+assert 'if (sweet_entry_recorded)' in mq
+assert 'sweet_entered_wait' not in mq
+assert 'static int\nsweet_ipcsend_record(' in mq
+assert 'return sweet_ipcsend_ring_append(&sweet_ipcsend_ring, &record);' in mq
+assert 'ip_fullwaiters may be sticky; this scalar is a flag, not a count.' in header
+assert 'fullwaiters_flag=%u' in mq
 
 # Compile the host fixture against the exact header materialized for this XNU.
 compiler = shutil.which('clang') or shutil.which('cc')

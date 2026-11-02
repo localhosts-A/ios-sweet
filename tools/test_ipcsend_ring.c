@@ -28,7 +28,7 @@ make_record(unsigned phase, uint64_t token)
 {
     return (struct sweet_ipcsend_record){
         .token = token, .tid = 0x136, .target = 1, .phase = phase,
-        .msgcount = 64, .qlimit = 64, .fullwaiters = 1,
+        .msgcount = 64, .qlimit = 64, .fullwaiters_flag = 1,
         .receiver_pid = 26, .wait_result = (int32_t)phase,
     };
 }
