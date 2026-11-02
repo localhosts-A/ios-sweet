@@ -139,6 +139,14 @@ uint32_t unpack(uint32_t p,uint32_t f) { return sweet_fb_unpack_pixel(p,f); }
         self.assertIn('return 2;', text)  # busy means retry, never spin
         self.assertIn('kIOMemoryKernelUserShared', text)
 
+    def test_iokit_entry_diagnostics_are_bounded_and_filtered(self):
+        patch = (ROOT / 'xnu/patches/0183-sweet-iokit-graphics-entry-diagnostics.patch').read_text(encoding='latin-1')
+        for marker in ['SWEET FB: %s sel-entry %u', '< 4',
+                       'SWEET SURF: %s client-init result=%u',
+                       'open-entry-type', 'open-reject', 'matching-legacy-unsupported',
+                       'sweet_iolog_status']:
+            self.assertIn(marker, patch)
+
 
 if __name__ == '__main__':
     unittest.main()

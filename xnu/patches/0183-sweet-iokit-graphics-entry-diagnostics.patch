@@ -1,0 +1,182 @@
+--- a/iokit/Kernel/IOUserClient.cpp
++++ b/iokit/Kernel/IOUserClient.cpp
+@@ -77,6 +77,10 @@
+ #define REF64(x)    ((io_user_reference_t)((UInt64)(x)))
+ #define REF32(x)    ((int)(x))
+ 
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++static void sweet_iolog_status(const char *what, uint32_t value);
++#endif
++
+ enum{
+ 	kIOUCAsync0Flags          = 3ULL,
+ 	kIOUCAsync64Flag          = 1ULL,
+@@ -2346,6 +2350,9 @@
+ 		return kIOReturnBadArgument;
+ 	}
+ 	if (main_port != main_device_port) {
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++		sweet_iolog_status("matching-reject", kIOReturnNotPrivileged);
++#endif
+ 		return kIOReturnNotPrivileged;
+ 	}
+ 
+@@ -2651,6 +2658,14 @@
+ 	}
+ 	IOLog("IOK %s: %s %.240s -> %s\n", name, what, text, result);
+ 	OSSafeReleaseNULL(ser);
++}
++
++static void
++sweet_iolog_status(const char *what, uint32_t value)
++{
++	char name[32];
++	if (sweet_iolog(name, sizeof(name)))
++		IOLog("IOK %s: %s %u\n", name, what, value);
+ }
+ #endif
+ 
+@@ -2710,6 +2725,9 @@
+ 	io_string_t matching,
+ 	io_iterator_t *existing )
+ {
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	sweet_iolog_status("matching-legacy-unsupported", kIOReturnUnsupported);
++#endif
+ 	return kIOReturnUnsupported;
+ }
+ 
+@@ -2800,6 +2818,9 @@
+ 	io_string_t matching,
+ 	io_service_t *service )
+ {
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	sweet_iolog_status("matching-legacy-unsupported", kIOReturnUnsupported);
++#endif
+ 	return kIOReturnUnsupported;
+ }
+ 
+@@ -4351,22 +4372,37 @@
+ 	bool           disallowAccess = false;
+ 
+ 	CHECK( IOService, _service, service );
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	sweet_iolog_status("open-entry-type", connect_type);
++#endif
+ 
+ 	if (!owningTask) {
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++		sweet_iolog_status("open-reject", kIOReturnBadArgument);
++#endif
+ 		return kIOReturnBadArgument;
+ 	}
+ 	assert(owningTask == current_task());
+ 	if (owningTask != current_task()) {
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++		sweet_iolog_status("open-reject", kIOReturnBadArgument);
++#endif
+ 		return kIOReturnBadArgument;
+ 	}
+ 
+ #if CONFIG_MACF
+ 	if (mac_iokit_check_open_service(kauth_cred_get(), service, connect_type) != 0) {
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++		sweet_iolog_status("open-reject", kIOReturnNotPermitted);
++#endif
+ 		return kIOReturnNotPermitted;
+ 	}
+ #endif
+ 	do{
+ 		if (properties) {
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++			sweet_iolog_status("open-reject", kIOReturnUnsupported);
++#endif
+ 			return kIOReturnUnsupported;
+ 		}
+ #if 0
+--- a/iokit/Kernel/arm/SweetSurface.cpp
++++ b/iokit/Kernel/arm/SweetSurface.cpp
+@@ -40,6 +40,8 @@
+ #include <libkern/c++/OSUnserialize.h>
+ #include <sys/proc.h>
+ 
++extern "C" bool sweet_iolog_process(char *name, size_t len);
++
+ enum {
+ 	kSweetSurfaceCreate             = 0,
+ 	kSweetSurfaceLookup             = 4,
+@@ -72,6 +74,7 @@
+ static uint32_t      sweet_surface_users[SWEET_SURFACE_MAX_ID];
+ static uint32_t      sweet_surface_next_id = 1;
+ static uint32_t      sweet_surface_creates_logged;
++static volatile UInt32 sweet_surface_init_logs;
+ static uint64_t      sweet_surface_wired;       /* bytes of buffer surfaces */
+ #define SWEET_SURFACE_WIRED_MAX         (1536ull << 20)
+ 
+@@ -498,13 +501,24 @@
+ bool
+ IOSurfaceRootUserClient::initWithTask(task_t owningTask, void *securityID, UInt32 type)
+ {
+-	if (!IOUserClient::initWithTask(owningTask, securityID, type)) {
+-		return false;
+-	}
+-	fTask = owningTask;
+-	fLock = IOLockAlloc();
+-	fRefs = OSArray::withCapacity(16);
+-	return fLock != NULL && fRefs != NULL;
++	bool ready = IOUserClient::initWithTask(owningTask, securityID, type);
++	if (ready) {
++		fTask = owningTask;
++		fLock = IOLockAlloc();
++		fRefs = OSArray::withCapacity(16);
++		ready = fLock != NULL && fRefs != NULL;
++	}
++	char name[32];
++	if (sweet_iolog_process(name, sizeof(name))) {
++		UInt32 count;
++		do {
++			count = OSAddAtomic(0, &sweet_surface_init_logs);
++			if (count >= 4) break;
++		} while (!OSCompareAndSwap(count, count + 1, &sweet_surface_init_logs));
++		if (count < 4)
++			IOLog("SWEET SURF: %s client-init result=%u\n", name, ready ? 1 : 0);
++	}
++	return ready;
+ }
+ 
+ void
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -54,6 +54,8 @@
+ #include <pexpert/pexpert.h>
+ #include <kern/clock.h>
+ #include <sys/proc.h>
++
++extern "C" bool sweet_iolog_process(char *name, size_t len);
+ #include <libkern/OSAtomic.h>
+ 
+ static volatile UInt32 sweet_dali_gui_frame_ready;
+@@ -593,12 +595,23 @@
+ }
+ 
+ static uint64_t sweet_fb_logged;        /* selectors already logged (< 64) */
++static volatile UInt32 sweet_fb_entry_logs;
+ 
+ IOReturn
+ IOMobileFramebufferUserClient::externalMethod(uint32_t selector, IOExternalMethodArguments *args,
+     __unused IOExternalMethodDispatch *dispatch, __unused OSObject *target,
+     __unused void *reference)
+ {
++	char name[32];
++	if (sweet_iolog_process(name, sizeof(name))) {
++		UInt32 count;
++		do {
++			count = OSAddAtomic(0, &sweet_fb_entry_logs);
++			if (count >= 4) break;
++		} while (!OSCompareAndSwap(count, count + 1, &sweet_fb_entry_logs));
++		if (count < 4)
++			IOLog("SWEET FB: %s sel-entry %u\n", name, selector);
++	}
+ 	IOReturn ret = kIOReturnSuccess;
+ 	uint64_t out[2] = { 0, 0 };
+ 	uint32_t outCount = 0;
