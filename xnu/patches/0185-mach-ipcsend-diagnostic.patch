@@ -1,0 +1,233 @@
+--- a/osfmk/ipc/ipc_mqueue.c
++++ b/osfmk/ipc/ipc_mqueue.c
+@@ -83,6 +83,12 @@
+ #include <kern/task.h>
+ #include <kern/thread.h>
+ #include <kern/waitq.h>
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++#include <machine/atomic.h>
++#include <os/atomic_private.h>
++#include <kern/SweetLoadProgress.h>
++#include <kern/SweetIPCSendTrace.h>
++#endif
+ 
+ #include <ipc/port.h>
+ #include <ipc/ipc_mqueue.h>
+@@ -390,6 +396,51 @@
+  *		MACH_SEND_TIMED_OUT	Caller still has message.
+  *		MACH_SEND_INTERRUPTED	Caller still has message.
+  */
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++static struct sweet_ipcsend_ring sweet_ipcsend_ring;
++
++/* Shared ring core is single-try, bounded and never waits or logs. */
++static void
++sweet_ipcsend_record(uint32_t target, uint32_t phase, uint64_t token,
++    uint64_t tid, int32_t receiver_pid, uint32_t msgcount, uint32_t qlimit,
++    uint32_t fullwaiters, int32_t wait_result)
++{
++    const struct sweet_ipcsend_record record = {
++        .token = token, .tid = tid, .target = target, .phase = phase,
++        .msgcount = msgcount, .qlimit = qlimit, .fullwaiters = fullwaiters,
++        .receiver_pid = receiver_pid, .wait_result = wait_result,
++    };
++    (void)sweet_ipcsend_ring_append(&sweet_ipcsend_ring, &record);
++}
++
++void
++sweet_ipcsend_close(void)
++{
++    sweet_ipcsend_ring_close(&sweet_ipcsend_ring);
++}
++
++void
++sweet_ipcsend_dump(unsigned int sample, unsigned int final)
++{
++    struct sweet_ipcsend_snapshot snapshot;
++    if (final) sweet_ipcsend_close();
++    if (sweet_ipcsend_ring_drain(&sweet_ipcsend_ring, &snapshot) != 0) {
++        printf("SWEET IPCSEND: v=1 s=%u busy=1\n", sample);
++        return;
++    }
++    printf("SWEET IPCSEND: v=1 s=%u n=%u total=%u lost=%u cap=%u\n", sample,
++        snapshot.count, snapshot.used, snapshot.lost, SWEET_IPCSEND_CAPACITY);
++    for (uint32_t i = 0; i < snapshot.count; ++i) {
++        const struct sweet_ipcsend_record *r = &snapshot.records[i];
++        printf("SWEET IPCSENDR: v=1 s=%u target=%u phase=%u token=0x%llx tid=0x%llx "
++            "receiver=%d count=%u limit=%u waiters=%u wr=%d\n", sample,
++            r->target, r->phase, (unsigned long long)r->token,
++            (unsigned long long)r->tid, r->receiver_pid, r->msgcount,
++            r->qlimit, r->fullwaiters, r->wait_result);
++    }
++}
++#endif
++
+ mach_msg_return_t
+ ipc_mqueue_send_locked(
+ 	ipc_mqueue_t            mqueue,
+@@ -418,6 +469,12 @@
+ 		thread_t cur_thread = current_thread();
+ 		struct turnstile *send_turnstile = TURNSTILE_NULL;
+ 		uint64_t deadline;
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++		uint32_t sweet_target = sweet_load_rw_target(current_task());
++		uint64_t sweet_token = sweet_target ? mach_absolute_time() : 0;
++		pid_t sweet_receiver = sweet_target ? ipc_port_get_receiver_task_locked(port, NULL) : -1;
++		bool sweet_entered_wait = false;
++#endif
+ 
+ 		/*
+ 		 * We have to wait for space to be granted to us.
+@@ -454,6 +511,15 @@
+ 			TIMEOUT_URGENCY_USER_NORMAL,
+ 			deadline,
+ 			TIMEOUT_NO_LEEWAY);
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++		if (sweet_target != 0 && wresult == THREAD_WAITING) {
++			sweet_entered_wait = true;
++			sweet_ipcsend_record(sweet_target, SWEET_IPCSEND_ENTRY,
++			    sweet_token, thread_tid(cur_thread), sweet_receiver,
++			    mqueue->imq_msgcount, mqueue->imq_qlimit,
++			    port->ip_fullwaiters ? 1u : 0u, wresult);
++		}
++#endif
+ 
+ 		ip_mq_unlock(port);
+ 		turnstile_update_inheritor_complete(send_turnstile,
+@@ -466,6 +532,15 @@
+ 		/* Call turnstile complete with interlock held */
+ 		ip_mq_lock(port);
+ 		turnstile_complete((uintptr_t)port, port_send_turnstile_address(port), NULL, TURNSTILE_SYNC_IPC);
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++		if (sweet_entered_wait) {
++			pid_t receiver = ipc_port_get_receiver_task_locked(port, NULL);
++			sweet_ipcsend_record(sweet_target, SWEET_IPCSEND_EXIT,
++			    sweet_token, thread_tid(cur_thread), receiver,
++			    mqueue->imq_msgcount, mqueue->imq_qlimit,
++			    port->ip_fullwaiters ? 1u : 0u, wresult);
++		}
++#endif
+ 		ip_mq_unlock(port);
+ 
+ 		/* Call cleanup after dropping the interlock */
+--- a/bsd/dev/sweet_sample.c
++++ b/bsd/dev/sweet_sample.c
+@@ -302,6 +302,9 @@
+ #include <machine/atomic.h>
+ #include <machine/machine_routines.h>
+ #include <kern/SweetLoadProgress.h>
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++#include <kern/SweetIPCSendTrace.h>
++#endif
+ 
+ extern bool sweet_ufs_load_eligible(void);
+ extern void sweet_ufs_load_begin(void);
+@@ -420,4 +423,7 @@
+     if (sample == SWEET_LOAD_SAMPLES - 1) {
+         os_atomic_or(&sweet_load_control, SWEET_LOAD_CLOSED, acq_rel);
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++        sweet_ipcsend_close();
++#endif
+         sweet_ufs_load_close();
+     }
+@@ -447,6 +453,9 @@
+         }
+     }
+     sweet_ufs_load_dump(sample);
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++    sweet_ipcsend_dump(sample, sample == SWEET_LOAD_SAMPLES - 1);
++#endif
+ }
+ 
+ void sweet_ff_trace(unsigned int, int, struct arm_saved_state *);
+--- /dev/null
++++ b/osfmk/kern/SweetIPCSendTrace.h
+@@ -0,0 +1,88 @@
++#ifndef _KERN_SWEET_IPC_SEND_TRACE_H_
++#define _KERN_SWEET_IPC_SEND_TRACE_H_
++#include <sys/types.h>
++#include <stdint.h>
++#include <string.h>
++
++/* One bounded lifetime capture across all 40 load samples. */
++#define SWEET_IPCSEND_CAPACITY 128u
++#define SWEET_IPCSEND_ENTRY 1u
++#define SWEET_IPCSEND_EXIT 2u
++
++struct sweet_ipcsend_record {
++    uint64_t token, tid;
++    uint32_t target, phase, msgcount, qlimit, fullwaiters;
++    int32_t receiver_pid, wait_result;
++};
++struct sweet_ipcsend_snapshot {
++    struct sweet_ipcsend_record records[SWEET_IPCSEND_CAPACITY];
++    uint32_t count, used, lost;
++};
++struct sweet_ipcsend_ring {
++    volatile uint32_t guard, closed;
++    struct sweet_ipcsend_record records[SWEET_IPCSEND_CAPACITY];
++    uint32_t count, used, lost;
++};
++
++#ifndef SWEET_IPCSEND_CAS
++#define SWEET_IPCSEND_CAS(expected, desired, ptr) OSCompareAndSwap((expected), (desired), (ptr))
++#define SWEET_IPCSEND_INC(ptr) os_atomic_inc((ptr), relaxed)
++#define SWEET_IPCSEND_LOAD(ptr) os_atomic_load((ptr), relaxed)
++#define SWEET_IPCSEND_CLOSED(ptr) os_atomic_load((ptr), acquire)
++#define SWEET_IPCSEND_CLOSE(ptr) os_atomic_store((ptr), 1u, release)
++#endif
++
++/* Nonblocking one-shot producer guard; all 128 records cover the full run. */
++static inline void
++sweet_ipcsend_ring_close(struct sweet_ipcsend_ring *ring)
++{
++    if (ring) SWEET_IPCSEND_CLOSE(&ring->closed);
++}
++
++static inline int
++sweet_ipcsend_ring_append(struct sweet_ipcsend_ring *ring,
++    const struct sweet_ipcsend_record *record)
++{
++    if (!ring || !record || record->target == 0 ||
++        SWEET_IPCSEND_CLOSED(&ring->closed)) return 1;
++    if (!SWEET_IPCSEND_CAS(0, 1, &ring->guard)) {
++        SWEET_IPCSEND_INC(&ring->lost);
++        return -1;
++    }
++    int result = 0;
++    if (SWEET_IPCSEND_CLOSED(&ring->closed)) {
++        result = 1;
++    } else if (ring->used == SWEET_IPCSEND_CAPACITY) {
++        SWEET_IPCSEND_INC(&ring->lost);
++        result = -1;
++    } else {
++        ring->records[ring->count++] = *record;
++        ++ring->used;
++    }
++    (void)SWEET_IPCSEND_CAS(1, 0, &ring->guard);
++    return result;
++}
++
++/* Sample snapshot retries a fixed number of one-shot guard attempts only. */
++static inline int
++sweet_ipcsend_ring_drain(struct sweet_ipcsend_ring *ring,
++    struct sweet_ipcsend_snapshot *snapshot)
++{
++    if (!ring || !snapshot) return -1;
++    unsigned int tries;
++    for (tries = 0; tries < 128; ++tries) {
++        if (SWEET_IPCSEND_CAS(0, 1, &ring->guard)) break;
++    }
++    if (tries == 128) return -1;
++    snapshot->count = ring->count;
++    snapshot->used = ring->used;
++    for (uint32_t i = 0; i < ring->count; ++i) snapshot->records[i] = ring->records[i];
++    ring->count = 0;
++    snapshot->lost = SWEET_IPCSEND_LOAD(&ring->lost);
++    (void)SWEET_IPCSEND_CAS(1, 0, &ring->guard);
++    return 0;
++}
++
++void sweet_ipcsend_close(void);
++void sweet_ipcsend_dump(unsigned int sample);
++#endif

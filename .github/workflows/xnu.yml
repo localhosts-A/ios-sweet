@@ -49,6 +49,8 @@ on:
       - "tools/test_dali_bbcontext.py"
       - "tools/test_dali_bbcontext_policy.py"
       - "tools/test_dali_surface_layout.py"
+      - "tools/test_ipcsend_contract.py"
+      - "tools/test_ipcsend_ring.c"
       - "tools/dali_bbcontext_parser.py"
       - "tools/test_dali_ufs_startup.py"
       - "tools/test_dali_ufs_pwm.py"
@@ -193,11 +195,13 @@ jobs:
           SWEET_BBCTX_SOURCE_DIR: ${{ github.workspace }}/dxb/xnu
           SWEET_SURFACE_SOURCE_DIR: ${{ github.workspace }}/dxb/xnu
           SWEET_SURFACE_SOURCE_REQUIRED: "1"
+          SWEET_IPCSEND_SOURCE_DIR: ${{ github.workspace }}/dxb/xnu
         run: |
           python3 tools/test_dali_gui_load_progress.py
           python3 tools/test_dali_bbcontext.py
           python3 tools/test_dali_bbcontext_policy.py
           python3 -I tools/test_dali_surface_layout.py
+          python3 -I tools/test_ipcsend_contract.py
           python3 tools/test_dali_ufs_early_return.py
           python3 tools/test_dali_ufs_pwm.py
           python3 tools/test_dali_ufs_pwm_clock.py

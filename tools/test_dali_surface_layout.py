@@ -16,6 +16,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 PATCH = ROOT / 'xnu/patches/0182-sweet-iosurface-default-plane-size-overflow.patch'
+LATER_PATCH = ROOT / 'xnu/patches/0183-sweet-iokit-graphics-entry-diagnostics.patch'
 RELATIVE_SOURCE = Path('iokit/Kernel/arm/SweetSurface.cpp')
 BASELINE_SHA256 = '94f76068e255cf7e9a4ce2e16f8bbf1a36b816c05f3988d6956066333e82e3f8'
 
@@ -113,16 +114,26 @@ class SurfaceLayoutPatchTests(unittest.TestCase):
         shutil.copyfile(cls.source_path, cls.baseline_path)
         if cls.baseline_path.is_symlink() or cls.baseline_path.stat().st_nlink != 1:
             raise AssertionError('temporary source copy must be an independent regular file')
+        surface_only = '--include=' + RELATIVE_SOURCE.as_posix()
+        # Patch replay is numeric: 0182 precedes 0183, which also edits this file.
+        # Reverse only 0183's SweetSurface hunk, then recover the exact 0182 baseline.
+        subprocess.run(['git', 'apply', '--reverse', surface_only, '--check', str(LATER_PATCH)],
+                       cwd=cls.xnu, check=True)
+        subprocess.run(['git', 'apply', '--reverse', surface_only, str(LATER_PATCH)],
+                       cwd=cls.xnu, check=True)
         subprocess.run(['git', 'apply', '--reverse', '--check', str(PATCH)], cwd=cls.xnu, check=True)
         subprocess.run(['git', 'apply', '--reverse', str(PATCH)], cwd=cls.xnu, check=True)
         cls.baseline_text = cls.baseline_path.read_text()
         digest = hashlib.sha256(cls.baseline_path.read_bytes()).hexdigest()
         if digest != BASELINE_SHA256:
-            raise AssertionError(f'wrong CI baseline after reverse patch: {digest}')
+            raise AssertionError(f'wrong CI baseline after reversing 0183 and 0182: {digest}')
         subprocess.run(['git', 'apply', '--check', str(PATCH)], cwd=cls.xnu, check=True)
         subprocess.run(['git', 'apply', str(PATCH)], cwd=cls.xnu, check=True)
+        subprocess.run(['git', 'apply', surface_only, '--check', str(LATER_PATCH)],
+                       cwd=cls.xnu, check=True)
+        subprocess.run(['git', 'apply', surface_only, str(LATER_PATCH)], cwd=cls.xnu, check=True)
         if cls.baseline_path.read_text() != cls.candidate_text:
-            raise AssertionError('0182 forward replay does not exactly recreate materialized source')
+            raise AssertionError('0182/0183 forward replay does not exactly recreate materialized source')
         cls.base_layout = _function(cls.baseline_text, 'sweet_surface_layout', ('IOReturn',))
         cls.new_layout = _function(cls.candidate_text, 'sweet_surface_layout', ('IOReturn',))
         cls.helpers = '\n'.join(_function(cls.candidate_text, name, returns) for name, returns in (
