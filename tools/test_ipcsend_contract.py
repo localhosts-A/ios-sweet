@@ -23,6 +23,7 @@ kern_makefile = (source_root / 'osfmk/kern/Makefile').read_text()
 
 # Bind the instrumentation to the real XNU interfaces and target-gated build.
 assert '#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)' in mq
+assert '#include <sys/types.h>' not in header
 assert '#define SWEET_IPCSEND_CAPACITY 128u' in header
 assert 'sweet_load_rw_target(void *);' in progress
 assert 'sweet_load_rw_target(current_task())' in mq

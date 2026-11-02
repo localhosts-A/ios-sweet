@@ -148,12 +148,10 @@
  	sched_hygiene.h \
 --- /dev/null
 +++ b/osfmk/kern/SweetIPCSendTrace.h
-@@ -0,0 +1,89 @@
+@@ -0,0 +1,87 @@
 +#ifndef _KERN_SWEET_IPC_SEND_TRACE_H_
 +#define _KERN_SWEET_IPC_SEND_TRACE_H_
-+#include <sys/types.h>
 +#include <stdint.h>
-+#include <string.h>
 +
 +/* One bounded lifetime capture across all 40 load samples. */
 +#define SWEET_IPCSEND_CAPACITY 128u
