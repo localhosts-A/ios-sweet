@@ -249,8 +249,9 @@ assert(fwrite(captured,1,captured_len,stdout)==captured_len);
         directory = os.environ.get('SWEET_BBCTX_SOURCE_DIR')
         if not directory:
             self.skipTest('pre-build: no materialized XNU source tree')
+        # sweet_sample.c includes the final 0185 Mach trace sampling hooks.
         expected = {
-            'bsd/dev/sweet_sample.c': 'e840cb0a27353b54245022157f6b9b93c6e1e0c67d2aa906df03f6abbde307fc',
+            'bsd/dev/sweet_sample.c': '474e38cf9b76e0413a0eaebe45fd270033641fae913af0c2afd13affc8b56a81',
             'bsd/dev/arm/systemcalls.c': '236d1c88f4b21c3bfa6ebf6515b48ea47514c119f1aed2886b26fbadcedd71f6',
             'bsd/vfs/vfs_lookup.c': 'f358de08b87531aaac31b049722284d93519f6932615cbc9d059db3e7d7b18b7',
             'osfmk/arm64/sleh.c': 'af9ea337637806b4dad91ba65da83ec809e1ba01f4b8351323eb0f63aa191c3b',

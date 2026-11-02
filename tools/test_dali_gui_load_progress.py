@@ -36,15 +36,27 @@ SOURCE.update({p: fixture.fragment(p, PWM_PATCH)
                          'pexpert/arm/DaliFastbootReturnPolicy.h',
                          'pexpert/arm/pe_dali_watchdog.c', 'osfmk/arm64/dali_watchdog.h')})
 BBCTX_PATCH = ROOT/'xnu/patches/0181-sweet-bounded-backboard-context.patch'
+IPCSEND_PATCH = ROOT/'xnu/patches/0185-mach-ipcsend-diagnostic.patch'
 
 
 def apply_exact_hunks(text, path, patch):
     """Replay every hunk at its declared line, with no offset or fuzz."""
-    blocks = patch.read_text().split('diff --git ')[1:]
+    patch_text = patch.read_text()
+    blocks = patch_text.split('diff --git ')[1:]
     matches = [b for b in blocks if b.startswith(f'a/{path} b/{path}\n')]
-    if len(matches) != 1:
+    if len(matches) == 1:
+        lines = matches[0].splitlines(keepends=True)
+    elif not blocks:
+        marker = f'--- a/{path}\n'
+        start = patch_text.find(marker)
+        if start < 0:
+            raise AssertionError(path)
+        ends = [i for i in (patch_text.find('\n--- a/', start + len(marker)),
+                            patch_text.find('\n--- /dev/null', start + len(marker))) if i >= 0]
+        end = min(ends) + 1 if ends else len(patch_text)
+        lines = patch_text[start:end].splitlines(keepends=True)
+    else:
         raise AssertionError(path)
-    lines = matches[0].splitlines(keepends=True)
     original = text.splitlines(keepends=True)
     result, cursor, index = [], 0, 0
     while index < len(lines) and not lines[index].startswith('@@ '):
@@ -66,7 +78,10 @@ def apply_exact_hunks(text, path, patch):
                 raise AssertionError(f'unexpected patch line for {path}')
             if line[0] in ' -':
                 if cursor >= len(original) or original[cursor] != line[1:]:
-                    raise AssertionError(f'hunk context mismatch for {path}')
+                    actual = original[cursor] if cursor < len(original) else '<eof>'
+                    raise AssertionError(
+                        f'hunk context mismatch for {path} at line {cursor + 1}: '
+                        f'expected {line[1:]!r}, got {actual!r}')
                 cursor += 1; removed += 1
             if line[0] in ' +':
                 result.append(line[1:]); added += 1
@@ -78,6 +93,8 @@ def apply_exact_hunks(text, path, patch):
 
 SOURCE['bsd/dev/sweet_sample.c'] = apply_exact_hunks(
     SOURCE['bsd/dev/sweet_sample.c'], 'bsd/dev/sweet_sample.c', BBCTX_PATCH)
+for path in ('bsd/dev/sweet_sample.c', 'osfmk/kern/Makefile'):
+    SOURCE[path] = apply_exact_hunks(SOURCE[path], path, IPCSEND_PATCH)
 for path in ('bsd/dev/SweetBBContextPolicy.h', 'bsd/dev/SweetBBContextRuntime.h',
              'bsd/sys/SweetBBContext.h'):
     SOURCE[path] = fixture.fragment(path, BBCTX_PATCH)
@@ -525,9 +542,11 @@ int main(void){
         for bad in (dict(b,boot='b'),dict(b,iv=2),dict(b,u=0),dict(b,z=0),dict(b,b=1)):
             self.assertIsNone(accounting_delta(a,bad))
 
-    def test_bbcontext_replay_rejects_offset_and_context_changes(self):
+    def test_bbcontext_and_ipcsend_replay_reject_offsets_and_context_changes(self):
         previous = fixture.fragment('bsd/dev/sweet_sample.c', RW_PATCH)
-        self.assertEqual(apply_exact_hunks(previous, 'bsd/dev/sweet_sample.c', BBCTX_PATCH), SAMPLER)
+        replayed = apply_exact_hunks(previous, 'bsd/dev/sweet_sample.c', BBCTX_PATCH)
+        replayed = apply_exact_hunks(replayed, 'bsd/dev/sweet_sample.c', IPCSEND_PATCH)
+        self.assertEqual(replayed, SAMPLER)
         with self.assertRaises(AssertionError):
             apply_exact_hunks('\n' + previous, 'bsd/dev/sweet_sample.c', BBCTX_PATCH)
         old_line = '    sweet_load_register(phase, state);\n'
