@@ -1,0 +1,33 @@
+--- a/iokit/Kernel/IOUserClient.cpp
++++ b/iokit/Kernel/IOUserClient.cpp
+@@ -2650,4 +2650,30 @@
+ 	IOLog("IOK %s: %s %.240s -> %s\n", name, what, text, result);
+ 	OSSafeReleaseNULL(ser);
+ }
++
++/* Filter-only companion for graphics sources; do not consume IOK log quota. */
++extern "C" bool
++sweet_iolog_process(char *name, size_t len)
++{
++	if (!sweet_iolog_parsed) {
++		if (!PE_parse_boot_argn("sweetiolog", sweet_iolog_names, sizeof(sweet_iolog_names))) {
++			strlcpy(sweet_iolog_names, "backboardd,SpringBoard", sizeof(sweet_iolog_names));
++		}
++		sweet_iolog_parsed = 1;
++	}
++	proc_selfname(name, (int)len);
++	size_t n = strlen(name);
++	for (const char *t = sweet_iolog_names; *t;) {
++		const char *end = strchr(t, ',');
++		size_t tl = end ? (size_t)(end - t) : strlen(t);
++		if (tl == n && n > 0 && strncmp(t, name, n) == 0) {
++			return true;
++		}
++		if (!end) {
++			break;
++		}
++		t = end + 1;
++	}
++	return false;
++}
+ #endif

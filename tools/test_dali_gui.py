@@ -141,11 +141,15 @@ uint32_t unpack(uint32_t p,uint32_t f) { return sweet_fb_unpack_pixel(p,f); }
 
     def test_iokit_entry_diagnostics_are_bounded_and_filtered(self):
         patch = (ROOT / 'xnu/patches/0183-sweet-iokit-graphics-entry-diagnostics.patch').read_text(encoding='latin-1')
+        helper = (ROOT / 'xnu/patches/0184-sweet-iokit-log-filter-export.patch').read_text(encoding='latin-1')
         for marker in ['SWEET FB: %s sel-entry %u', '< 4',
                        'SWEET SURF: %s client-init result=%u',
                        'open-entry-type', 'open-reject', 'matching-legacy-unsupported',
                        'sweet_iolog_status']:
             self.assertIn(marker, patch)
+        self.assertIn('sweet_iolog_process(char *name, size_t len)', helper)
+        self.assertIn('do not consume IOK log quota', helper)
+        self.assertNotIn('sweet_iolog_lines++', helper)
 
 
 if __name__ == '__main__':
