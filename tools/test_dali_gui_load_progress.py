@@ -37,6 +37,7 @@ SOURCE.update({p: fixture.fragment(p, PWM_PATCH)
                          'pexpert/arm/pe_dali_watchdog.c', 'osfmk/arm64/dali_watchdog.h')})
 BBCTX_PATCH = ROOT/'xnu/patches/0181-sweet-bounded-backboard-context.patch'
 IPCSEND_PATCH = ROOT/'xnu/patches/0185-mach-ipcsend-diagnostic.patch'
+IPCSEND_CONTEXT_PATCH = ROOT/'xnu/patches/0186-sweet-ipcsend-context-scalars.patch'
 
 
 def apply_exact_hunks(text, path, patch):
@@ -95,6 +96,8 @@ SOURCE['bsd/dev/sweet_sample.c'] = apply_exact_hunks(
     SOURCE['bsd/dev/sweet_sample.c'], 'bsd/dev/sweet_sample.c', BBCTX_PATCH)
 for path in ('bsd/dev/sweet_sample.c', 'osfmk/kern/Makefile'):
     SOURCE[path] = apply_exact_hunks(SOURCE[path], path, IPCSEND_PATCH)
+SOURCE['bsd/dev/sweet_sample.c'] = apply_exact_hunks(
+    SOURCE['bsd/dev/sweet_sample.c'], 'bsd/dev/sweet_sample.c', IPCSEND_CONTEXT_PATCH)
 for path in ('bsd/dev/SweetBBContextPolicy.h', 'bsd/dev/SweetBBContextRuntime.h',
              'bsd/sys/SweetBBContext.h'):
     SOURCE[path] = fixture.fragment(path, BBCTX_PATCH)
@@ -546,6 +549,7 @@ int main(void){
         previous = fixture.fragment('bsd/dev/sweet_sample.c', RW_PATCH)
         replayed = apply_exact_hunks(previous, 'bsd/dev/sweet_sample.c', BBCTX_PATCH)
         replayed = apply_exact_hunks(replayed, 'bsd/dev/sweet_sample.c', IPCSEND_PATCH)
+        replayed = apply_exact_hunks(replayed, 'bsd/dev/sweet_sample.c', IPCSEND_CONTEXT_PATCH)
         self.assertEqual(replayed, SAMPLER)
         with self.assertRaises(AssertionError):
             apply_exact_hunks('\n' + previous, 'bsd/dev/sweet_sample.c', BBCTX_PATCH)

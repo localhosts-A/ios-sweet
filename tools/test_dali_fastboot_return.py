@@ -313,7 +313,7 @@ in_irq=false;preempt=1;assert(!sweet_log_fastboot_drain(100));puts("PASS");}
                 if path == 'bsd/dev/sweet_sample.c':
                     expected = (Path(source_dir) / path).read_text()
                     self.assertEqual(hashlib.sha256(expected.encode()).hexdigest(),
-                                     '474e38cf9b76e0413a0eaebe45fd270033641fae913af0c2afd13affc8b56a81')
+                                     '766a96a35bf41796efc3ea6541b9af4d324532d6e99610cd9ab5dcd619dcfd1d')
                 elif path in ('bsd/dev/sweet_ufs.c', 'pexpert/arm/pe_dali_watchdog.c',
                               'pexpert/arm/DaliFastbootReturnPolicy.h', 'osfmk/arm64/dali_watchdog.h'):
                     expected = fragment(path, ROOT/'xnu/patches/0180-sweet-dali-pwm-link-policy.patch')

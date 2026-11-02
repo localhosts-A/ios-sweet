@@ -29,7 +29,8 @@ make_record(unsigned phase, uint64_t token)
     return (struct sweet_ipcsend_record){
         .token = token, .tid = 0x136, .target = 1, .phase = phase,
         .msgcount = 64, .qlimit = 64, .fullwaiters_flag = 1,
-        .receiver_pid = 26, .wait_result = (int32_t)phase,
+        .receiver_pid = 26, .receiver_name = 0x241, .msg_id = 725,
+        .option = 0x40000001, .timeout = 1500, .wait_result = (int32_t)phase,
     };
 }
 
@@ -69,6 +70,8 @@ main(void)
     assert(out.records[0].phase == SWEET_IPCSEND_ENTRY);
     assert(out.records[1].phase == SWEET_IPCSEND_EXIT);
     assert(out.records[1].wait_result == 2 && out.records[1].receiver_pid == 26);
+    assert(out.records[0].receiver_name == 0x241 && out.records[1].msg_id == 725);
+    assert(out.records[0].option == 0x40000001 && out.records[1].timeout == 1500);
 
     /* Periodic drains never reset the 128-record lifetime cap. */
     unsigned captured = 0;

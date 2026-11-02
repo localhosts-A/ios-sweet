@@ -1,0 +1,107 @@
+diff --git a/bsd/dev/sweet_sample.c b/bsd/dev/sweet_sample.c
+index 113b4ba..3d8be8a 100644
+--- a/bsd/dev/sweet_sample.c
++++ b/bsd/dev/sweet_sample.c
+@@ -312,6 +312,19 @@ extern void sweet_ufs_load_close(void);
+ extern void sweet_ufs_load_dump(unsigned int);
+ extern void sweet_load_collect(task_t, struct sweet_load_snapshot *);
+ 
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++/* Called from the ordinary ring dump after dropping IPC locks; dump-time only. */
++void
++sweet_ipcsend_receiver_name(int pid, char *name, int size)
++{
++    if (name == NULL || size <= 0) return;
++    strlcpy(name, "unknown", (size_t)size);
++    if (pid <= 0) return;
++    proc_name(pid, name, size);
++    if (name[0] == '\0') strlcpy(name, "unknown", (size_t)size);
++}
++#endif
++
+ static bool sweet_load_configured;
+ static uint32_t sweet_load_control, sweet_load_ready, sweet_load_missed;
+ static unsigned int sweet_load_dumped;
+diff --git a/osfmk/ipc/ipc_mqueue.c b/osfmk/ipc/ipc_mqueue.c
+index 01335db..4190212 100644
+--- a/osfmk/ipc/ipc_mqueue.c
++++ b/osfmk/ipc/ipc_mqueue.c
+@@ -402,13 +402,16 @@ static struct sweet_ipcsend_ring sweet_ipcsend_ring;
+ /* Shared ring core is single-try, bounded and never waits or logs. */
+ static int
+ sweet_ipcsend_record(uint32_t target, uint32_t phase, uint64_t token,
+-    uint64_t tid, int32_t receiver_pid, uint32_t msgcount, uint32_t qlimit,
++    uint64_t tid, int32_t receiver_pid, uint32_t receiver_name, int32_t msg_id,
++    uint32_t option, uint32_t timeout, uint32_t msgcount, uint32_t qlimit,
+     uint32_t fullwaiters_flag, int32_t wait_result)
+ {
+     const struct sweet_ipcsend_record record = {
+         .token = token, .tid = tid, .target = target, .phase = phase,
+         .msgcount = msgcount, .qlimit = qlimit, .fullwaiters_flag = fullwaiters_flag,
+-        .receiver_pid = receiver_pid, .wait_result = wait_result,
++        .receiver_pid = receiver_pid, .receiver_name = receiver_name,
++        .msg_id = msg_id, .option = option, .timeout = timeout,
++        .wait_result = wait_result,
+     };
+     return sweet_ipcsend_ring_append(&sweet_ipcsend_ring, &record);
+ }
+@@ -432,10 +435,15 @@ sweet_ipcsend_dump(unsigned int sample, unsigned int final)
+         snapshot.count, snapshot.used, snapshot.lost, SWEET_IPCSEND_CAPACITY);
+     for (uint32_t i = 0; i < snapshot.count; ++i) {
+         const struct sweet_ipcsend_record *r = &snapshot.records[i];
++        char receiver_name[32];
++        /* This dump-time name is not proof of the receiver's event-time identity. */
++        sweet_ipcsend_receiver_name(r->receiver_pid, receiver_name, (int)sizeof(receiver_name));
+         printf("SWEET IPCSENDR: v=1 s=%u target=%u phase=%u token=0x%llx tid=0x%llx "
+-            "receiver=%d count=%u limit=%u fullwaiters_flag=%u wr=%d\n", sample,
++            "receiver=%d receiver_port=0x%x receiver_name_at_dump=%s id=%d option=0x%x timeout=%u "
++            "count=%u limit=%u fullwaiters_flag=%u wr=%d\n", sample,
+             r->target, r->phase, (unsigned long long)r->token,
+-            (unsigned long long)r->tid, r->receiver_pid, r->msgcount,
++            (unsigned long long)r->tid, r->receiver_pid, r->receiver_name,
++            receiver_name, r->msg_id, r->option, r->timeout, r->msgcount,
+             r->qlimit, r->fullwaiters_flag, r->wait_result);
+     }
+ }
+@@ -514,7 +522,8 @@ ipc_mqueue_send_locked(
+ #if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
+ 		if (sweet_target != 0 && wresult == THREAD_WAITING) {
+ 			sweet_entry_recorded = sweet_ipcsend_record(sweet_target, SWEET_IPCSEND_ENTRY,
+-			    sweet_token, thread_tid(cur_thread), sweet_receiver,
++			    sweet_token, thread_tid(cur_thread), sweet_receiver, port->ip_receiver_name,
++			    ikm_header(kmsg)->msgh_id, option, send_timeout,
+ 			    mqueue->imq_msgcount, mqueue->imq_qlimit,
+ 			    port->ip_fullwaiters ? 1u : 0u, wresult) == 0;
+ 		}
+@@ -535,7 +544,8 @@ ipc_mqueue_send_locked(
+ 		if (sweet_entry_recorded) {
+ 			pid_t receiver = ipc_port_get_receiver_task_locked(port, NULL);
+ 			sweet_ipcsend_record(sweet_target, SWEET_IPCSEND_EXIT,
+-			    sweet_token, thread_tid(cur_thread), receiver,
++			    sweet_token, thread_tid(cur_thread), receiver, port->ip_receiver_name,
++			    ikm_header(kmsg)->msgh_id, option, send_timeout,
+ 			    mqueue->imq_msgcount, mqueue->imq_qlimit,
+ 			    port->ip_fullwaiters ? 1u : 0u, wresult);
+ 		}
+diff --git a/osfmk/kern/SweetIPCSendTrace.h b/osfmk/kern/SweetIPCSendTrace.h
+index de95ebf..a19e21b 100644
+--- a/osfmk/kern/SweetIPCSendTrace.h
++++ b/osfmk/kern/SweetIPCSendTrace.h
+@@ -10,8 +10,9 @@
+ struct sweet_ipcsend_record {
+     uint64_t token, tid;
+     /* ip_fullwaiters may be sticky; this scalar is a flag, not a count. */
+-    uint32_t target, phase, msgcount, qlimit, fullwaiters_flag;
+-    int32_t receiver_pid, wait_result;
++    uint32_t target, phase, msgcount, qlimit, fullwaiters_flag, receiver_name;
++    uint32_t option, timeout;
++    int32_t receiver_pid, msg_id, wait_result;
+ };
+ struct sweet_ipcsend_snapshot {
+     struct sweet_ipcsend_record records[SWEET_IPCSEND_CAPACITY];
+@@ -84,4 +85,5 @@ sweet_ipcsend_ring_drain(struct sweet_ipcsend_ring *ring,
+ 
+ void sweet_ipcsend_close(void);
+ void sweet_ipcsend_dump(unsigned int sample, unsigned int final);
++void sweet_ipcsend_receiver_name(int pid, char *name, int size);
+ #endif
