@@ -1,0 +1,147 @@
+--- a/iokit/Kernel/arm/SweetPlatformExpert.cpp
++++ b/iokit/Kernel/arm/SweetPlatformExpert.cpp
+@@ -12,6 +12,7 @@
+ 
+ extern "C" bool dali_rtc_get_utc(clock_sec_t *, clock_nsec_t *);
+ extern "C" bool dali_rtc_set_utc(clock_sec_t, clock_nsec_t);
++void dali_touch_handoff_observe(IORegistryEntry *);
+ 
+ class SweetPlatformExpert : public IODTPlatformExpert {
+ 	OSDeclareDefaultStructors(SweetPlatformExpert);
+@@ -50,6 +51,7 @@
+ 	if (!IODTPlatformExpert::start(provider)) {
+ 		return false;
+ 	}
++	dali_touch_handoff_observe(provider);
+ 	registerService();
+ 	IOLog("SWEET: platform expert registered\n");
+ 	return true;
+--- a/iokit/conf/files.arm64
++++ b/iokit/conf/files.arm64
+@@ -25,6 +25,7 @@
+ iokit/Kernel/arm/DaliPMIF.cpp                                    optional iokitcpp
+ iokit/Kernel/arm/DaliUSBPMIC.cpp                                 optional iokitcpp
+ iokit/Kernel/arm/DaliI2C5.cpp                                    optional iokitcpp
++iokit/Kernel/arm/DaliTouchHandoff.cpp                            optional iokitcpp
+ iokit/Kernel/arm/DaliUSBPower.cpp                                optional iokitcpp
+ iokit/Kernel/arm/DaliUSBHost.cpp                                 optional iokitcpp
+ iokit/Kernel/arm/DaliXHCI.cpp                                    optional iokitcpp
+--- /dev/null
++++ b/iokit/Kernel/arm/DaliTouchHandoff.h
+@@ -0,0 +1,50 @@
++/* One-shot Dali SPI6 handoff observation. No peripheral transaction. */
++#ifndef DALI_TOUCH_HANDOFF_H
++#define DALI_TOUCH_HANDOFF_H
++struct DaliTouchSnapshot {
++    unsigned int gpio, mux, fence, parentVote, parentDone, gateVote, gateDone, gateStatus;
++};
++struct DaliTouchIO {
++    void *context;
++    bool (*open)(void *, unsigned int, unsigned long long);
++    bool (*read)(void *, unsigned int, unsigned int, unsigned int *);
++    void (*close)(void *, unsigned int);
++};
++/* Inputs are raw ADT property bytes, callbacks map and read fixed regions. */
++static inline int dali_touch_handoff(const void *compatible, unsigned int compatibleLen,
++    const void *enabled, unsigned int enabledLen, const DaliTouchIO *io,
++    DaliTouchSnapshot *result)
++{
++    static const char target[] = "xiaomi,dali";
++    const unsigned char *c = static_cast<const unsigned char *>(compatible);
++    const unsigned char *e = static_cast<const unsigned char *>(enabled);
++    bool match = false;
++    if (!c || !e || enabledLen != 4 || e[0] != 1 || e[1] || e[2] || e[3]) return 0;
++    for (unsigned int i = 0; i < compatibleLen;) {
++        unsigned int start = i;
++        while (i < compatibleLen && c[i]) ++i;
++        if (i == compatibleLen) return 0;
++        if (i - start == sizeof(target)-1) {
++            unsigned int k = 0;
++            while (k < sizeof(target)-1 && c[start+k] == (unsigned char)target[k]) ++k;
++            if (k == sizeof(target)-1) match = true;
++        }
++        ++i;
++    }
++    if (!match || !io || !io->open || !io->read || !io->close || !result) return 0;
++    static const unsigned long long addresses[] = {0x1002d000ULL,0x10000000ULL,0x14500000ULL,0x16640000ULL};
++    static const unsigned int regions[] = {0,1,1,2,2,2,2,3};
++    static const unsigned int offsets[] = {0x3a0,0x90,0x274,0x28,0x2c14,0x08,0x2c04,0x14};
++    unsigned int values[8] = {}, opened = 0;
++    int rc = -1;
++    for (; opened < 4; ++opened) if (!io->open(io->context, opened, addresses[opened])) goto done;
++    for (unsigned int i=0;i<8;++i) if (!io->read(io->context,regions[i],offsets[i],&values[i])) goto done;
++    result->gpio=values[0]; result->mux=values[1]; result->fence=values[2];
++    result->parentVote=values[3]; result->parentDone=values[4];
++    result->gateVote=values[5]; result->gateDone=values[6]; result->gateStatus=values[7];
++    rc = 1;
++done:
++    while (opened) io->close(io->context, --opened);
++    return rc;
++}
++#endif
+--- /dev/null
++++ b/iokit/Kernel/arm/DaliTouchHandoff.cpp
+@@ -0,0 +1,63 @@
++/* Optional one-shot read-only MT6991 SPI6 handoff observation.
++ * Addresses from live Dali DT; register layout from MiCode MT6991 e45c319.
++ * This does not identify ownership, power state, touch controller or input.
++ */
++#include <pexpert/arm64/board_config.h>
++#if defined(SWEET)
++#include "DaliTouchHandoff.h"
++#include <IOKit/IORegistryEntry.h>
++#include <IOKit/IOMemoryDescriptor.h>
++#include <IOKit/IOLib.h>
++#include <libkern/c++/OSData.h>
++
++namespace {
++struct ReadMaps {
++    IOMemoryDescriptor *memory[4] = {};
++    IOMemoryMap *mapping[4] = {};
++    static bool open(void *p, unsigned int index, unsigned long long address) {
++        ReadMaps *self = static_cast<ReadMaps *>(p);
++        self->memory[index] = IOMemoryDescriptor::withPhysicalAddress(address,
++            index == 2 ? 0x3000 : 0x1000, kIODirectionIn);
++        if (self->memory[index])
++            self->mapping[index] = self->memory[index]->map(kIOMapInhibitCache | kIOMapReadOnly);
++        if (self->mapping[index] && self->mapping[index]->getVirtualAddress()) return true;
++        OSSafeReleaseNULL(self->mapping[index]);
++        OSSafeReleaseNULL(self->memory[index]);
++        return false;
++    }
++    static bool read(void *p, unsigned int index, unsigned int offset, unsigned int *value) {
++        ReadMaps *self = static_cast<ReadMaps *>(p);
++        *value = *reinterpret_cast<volatile unsigned int *>(self->mapping[index]->getVirtualAddress() + offset);
++        __asm__ volatile("dmb oshld" ::: "memory");
++        return true;
++    }
++    static void close(void *p, unsigned int index) {
++        ReadMaps *self = static_cast<ReadMaps *>(p);
++        OSSafeReleaseNULL(self->mapping[index]);
++        OSSafeReleaseNULL(self->memory[index]);
++    }
++};
++}
++
++void dali_touch_handoff_observe(IORegistryEntry *root)
++{
++    if (!root) return;
++    OSData *compatible = OSDynamicCast(OSData, root->getProperty("compatible"));
++    OSData *enabled = OSDynamicCast(OSData, root->getProperty("dali-touch-handoff"));
++    if (!compatible || !enabled) return;
++    ReadMaps maps;
++    DaliTouchIO io = {&maps, ReadMaps::open, ReadMaps::read, ReadMaps::close};
++    DaliTouchSnapshot s = {};
++    int rc = dali_touch_handoff(compatible->getBytesNoCopy(), compatible->getLength(),
++        enabled->getBytesNoCopy(), enabled->getLength(), &io, &s);
++    if (rc < 0) {
++        kprintf("DALI TOUCH HANDOFF: mapping/read failed\n");
++    } else if (rc > 0) {
++        kprintf("DALI TOUCH HANDOFF: pin81-84=%x,%x,%x,%x parent=%x vote=%u done=%u fence=%u gate-vote=%u done=%u gated=%u; ownership and touch unknown\n",
++            (s.gpio >> 4) & 15, (s.gpio >> 8) & 15, (s.gpio >> 12) & 15, (s.gpio >> 16) & 15,
++            (s.mux >> 16) & 7, (s.parentVote >> 23) & 1, (s.parentDone >> 23) & 1,
++            (s.fence >> 29) & 1, (s.gateVote >> 7) & 1, (s.gateDone >> 7) & 1,
++            (s.gateStatus >> 7) & 1);
++    }
++}
++#endif
