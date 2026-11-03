@@ -42,7 +42,8 @@ LEAVE = added_hook('sweet_ulock_record_end(&sweet_ulock_trace,')
 EXPECTED = {
     'bsd/kern/sys_ulock.c': '89a84e38cb79a79feec904f907b3dd20ec5ed2d7dbda1d3a2a7ba32a9dfdee06',
     'bsd/sys/user.h': '6b39bb8ac79b31d7fada34da238d39d2e609baa8332ead7d2ce5e96af0e736e2',
-    'bsd/dev/sweet_sample.c': '021bf0b0c785abd81cbc358722fa3a72965a5ca1206b36eb04500cf52aae3b16',
+    # 0197/0198 add lsd selection and bounded CPU activity; ulock hooks stay fixed.
+    'bsd/dev/sweet_sample.c': '47a4b8c966c3d156a596da1e0181d046bc09ddd7eb788a8892944380e0cfe7e2',
     'bsd/kern/SweetUlockTrace.h': '9c21081f70ea5970a48a36f9b78cf8122a3590ab51c3b1f1d5941ecdeeb20542',
 }
 
