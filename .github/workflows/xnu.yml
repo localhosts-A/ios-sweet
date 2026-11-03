@@ -67,6 +67,7 @@ on:
       - "tools/test_dali_fastboot_return.py"
       - "tools/test_dali_root_sync.py"
       - "tools/test_dali_ufs_speed.py"
+      - "tools/test_dali_ufs_extended.py"
       - "tools/ufs_speed_fixtures/**"
       - "tools/test_dali_ulock.py"
       - "tools/test_dali_ulock_trace.c"
@@ -180,6 +181,7 @@ jobs:
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_fastboot_return.py"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_root_sync.py"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_ufs_speed.py"
+          python3 -I "$GITHUB_WORKSPACE/tools/test_dali_ufs_extended.py"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_ulock.py"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_trial_safety.py"
           python3 tools/test_dali_boottrace.py
@@ -242,6 +244,7 @@ jobs:
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_fastboot_return.py"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_root_sync.py" "$SWEET_LOAD_SOURCE_DIR"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_ufs_speed.py" "$SWEET_LOAD_SOURCE_DIR"
+          python3 -I "$GITHUB_WORKSPACE/tools/test_dali_ufs_extended.py" "$SWEET_LOAD_SOURCE_DIR"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_ulock.py"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_cpu_start.py" "$SWEET_LOAD_SOURCE_DIR"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_cpu_on.py" "$SWEET_LOAD_SOURCE_DIR"

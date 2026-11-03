@@ -1,0 +1,228 @@
+--- a/bsd/dev/SweetUFSSpeedRead.h
++++ b/bsd/dev/SweetUFSSpeedRead.h
+@@ -6,6 +6,14 @@
+ #define DALI_SPEED_BYTES (4u << 20)
+ #define DALI_SPEED_BLOCKS (DALI_SPEED_BYTES / UFS_BLOCK)
+ 
++/* Four disjoint 64MiB windows immediately beyond the short-probe prefix.
++ * Each is read once sequentially, then re-read and compared byte for byte.
++ */
++#define DALI_EXT_WINDOW_BYTES (64u << 20)
++#define DALI_EXT_WINDOWS 4u
++#define DALI_EXT_WINDOW_BLOCKS (DALI_EXT_WINDOW_BYTES / UFS_BLOCK)
++#define DALI_EXT_TOTAL_BLOCKS (DALI_SPEED_BLOCKS + DALI_EXT_WINDOWS * DALI_EXT_WINDOW_BLOCKS)
++
+ struct dali_speed_sample {
+     uint64_t bytes, begin, end;
+     unsigned int commands;
+@@ -65,3 +73,62 @@
+     }
+     return sample->error;
+ }
++
++/* The whole experiment range is checked before every pass. The 1MiB bounce
++ * buffer and READ(10) are unchanged. Copies/comparisons are in the reported
++ * wall time; command timeout may extend the experiment deadline by up to 5s.
++ */
++static int
++ufs_dali_extended_read_pass(void *reference, size_t reference_bytes,
++    unsigned int window, bool compare, uint64_t until, struct dali_speed_sample *sample)
++{
++    if (sample == NULL) return EINVAL;
++    bzero(sample, sizeof(*sample));
++    if (!su.dali || su.ready || !su.hsg1_active || su.command_poisoned ||
++        !su.capacity_valid || reference == NULL || reference_bytes != DALI_EXT_WINDOW_BYTES ||
++        window >= DALI_EXT_WINDOWS || su.nblocks < DALI_EXT_TOTAL_BLOCKS ||
++        su.nblocks > DALI_ROOT_MAX_BLOCKS || su.first_block > UINT32_MAX ||
++        DALI_EXT_TOTAL_BLOCKS - 1 > UINT32_MAX - su.first_block ||
++        su.first_block >= su.capacity_blocks ||
++        DALI_EXT_TOTAL_BLOCKS > su.capacity_blocks - su.first_block) {
++        sample->error = EINVAL;
++        return sample->error;
++    }
++    uint64_t first = su.first_block + DALI_SPEED_BLOCKS +
++        (uint64_t)window * DALI_EXT_WINDOW_BLOCKS;
++    uint64_t last = sample->begin = mach_absolute_time();
++    if (last >= until) {
++        sample->end = last;
++        sample->error = ETIMEDOUT;
++        return sample->error;
++    }
++    for (unsigned int offset = 0; offset < DALI_EXT_WINDOW_BYTES; offset += BOUNCE_SIZE) {
++        uint64_t now = mach_absolute_time();
++        if (now < last || now >= until) {
++            sample->error = ETIMEDOUT;
++            break;
++        }
++        last = now;
++        int error = ufs_read_blocks(first + offset / UFS_BLOCK, BOUNCE_SIZE / UFS_BLOCK);
++        sample->commands++;
++        if (error) {
++            sample->error = error;
++            break;
++        }
++        const void *bounce = (const void *)(su.dma + DMA_BOUNCE);
++        uint8_t *saved = (uint8_t *)reference + offset;
++        if (compare) {
++            if (memcmp(saved, bounce, BOUNCE_SIZE) != 0) {
++                sample->error = EIO;
++                break;
++            }
++        } else {
++            memcpy(saved, bounce, BOUNCE_SIZE);
++        }
++        sample->bytes += BOUNCE_SIZE;
++    }
++    sample->end = mach_absolute_time();
++    if ((sample->end < last || sample->end >= until) && !sample->error)
++        sample->error = ETIMEDOUT;
++    return sample->error;
++}
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -60,7 +60,6 @@
+ static int ufs_dali_hs_platform_validate(void);
+ static int ufs_pwm_reentry_error(void);
+ static int ufs_pwm_failure(int error);
+-static int ufs_dali_speed_save_log(bool verified);
+ extern void sweet_keys_init(void);
+ extern void sweet_touch_init(void);
+ extern void sweet_usb_probe(void);
+@@ -185,7 +184,8 @@
+ 	bool wait;                              /* boot-arg ufswait=1 */
+ 	bool pwm_two_lanes;                     /* Dali ADT opt-in, evaluated before init */
+ 	bool hsg1_requested, hsg1_active;        /* Explicit Dali HS-G1 functional opt-in */
+-	bool speed_probe, speed_probe_done;     /* Read-only, pre-root short trial */
++	bool speed_probe, speed_probe_done;     /* Read-only, pre-root trial */
++	bool speed_extended;                   /* Separately opted-in longer reads */
+ 	bool dali;                              /* MT6991 HCI profile from ADT compatible */
+ 	bool capacity_valid;
+ 	uint8_t last_sense_key, last_sense_asc, last_sense_ascq;
+@@ -438,6 +438,32 @@
+ 	return value == 1;
+ }
+ 
++/* Bind an extended result to a fresh host-supplied nonce, even with auto-return
++ * disabled. All three boot arguments must be explicitly zero. The run-id is
++ * 32 lowercase ASCII hex bytes without a terminator in the device tree.
++ */
++static bool
++ufs_dali_extended_configuration(char run_id[33])
++{
++	uint32_t auto_return = 1, rw = 1, logger = 1;
++	DTEntry node;
++	const void *prop = NULL;
++	unsigned int size = 0;
++	if (!PE_parse_boot_argn("dalifastboot", &auto_return, sizeof(auto_return)) || auto_return ||
++	    !PE_parse_boot_argn("ufsrw", &rw, sizeof(rw)) || rw ||
++	    !PE_parse_boot_argn("sweetlog", &logger, sizeof(logger)) || logger ||
++	    SecureDTLookupEntry(NULL, "/sweet-ufs", &node) != kSuccess ||
++	    SecureDTGetProperty(node, "dali-ufs-run-id", &prop, &size) != kSuccess ||
++	    prop == NULL || size != 32) return false;
++	const uint8_t *bytes = prop;
++	for (unsigned int i = 0; i < 32; ++i)
++		if (!((bytes[i] >= '0' && bytes[i] <= '9') ||
++		    (bytes[i] >= 'a' && bytes[i] <= 'f'))) return false;
++	memcpy(run_id, bytes, 32);
++	run_id[32] = '\0';
++	return true;
++}
++
+ /* Optional Dali-only polling budget; malformed input keeps the old default. */
+ static uint32_t
+ ufs_dali_spin_us(DTEntry node, bool dali)
+@@ -2647,6 +2673,8 @@
+ 	PE_parse_boot_argn("ufsroot", want, sizeof(want));
+ 	uint32_t rw = 0;
+ 	PE_parse_boot_argn("ufsrw", &rw, sizeof(rw));
++	/* Neither probe persists a UFS log; avoid even probing the log area. */
++	if (su.speed_probe) log_want[0] = '\0';
+ 	uint32_t cache = 0, wait = 0;
+ 	PE_parse_boot_argn("ufscache", &cache, sizeof(cache));
+ 	PE_parse_boot_argn("ufswait", &wait, sizeof(wait));
+@@ -2755,15 +2783,16 @@
+ 	su.lun = (uint8_t)lun;
+ 	su.secsize = DEV_BSIZE;
+ 
+-	/* Only the explicit short probe reserves 4MiB, before taking the UFS lock.
+-	 * This allocation lives until the one pre-root reboot; no BSD node is exposed.
++	/* Allocate before the UFS lock; 4MiB normally or 64MiB for extended.
++	 * The permanent reference lives until reboot. No BSD node is exposed.
+ 	 */
+ 	vm_offset_t speed_reference = 0;
+ 	uint64_t speed_until = 0;
+ 	struct dali_speed_sample speed_before = {0}, speed_after = {0};
+ 	if (su.speed_probe) {
+ 		su.failure_stage = "speed-probe-allocate";
+-		if (kmem_alloc(kernel_map, &speed_reference, DALI_SPEED_BYTES,
++		size_t reference_size = su.speed_extended ? DALI_EXT_WINDOW_BYTES : DALI_SPEED_BYTES;
++		if (kmem_alloc(kernel_map, &speed_reference, reference_size,
+ 		    KMA_DATA | KMA_ZERO | KMA_PERMANENT, VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS)
+ 			return ENOMEM;
+ 		uint64_t span = 0, now = mach_absolute_time();
+@@ -2830,10 +2859,31 @@
+ 		    (unsigned long long)(speed_before.end - speed_before.begin),
+ 		    (unsigned long long)(speed_after.end - speed_after.begin),
+ 		    speed_before.commands, speed_after.commands);
+-		su.failure_stage = "speed-probe-save-log";
+-		error = ufs_dali_speed_save_log(true);
+-		if (!error) su.speed_probe_done = true;
+ 	}
++	if (!error && su.speed_extended) {
++		su.failure_stage = "speed-probe-extended";
++		for (unsigned int window = 0; window < DALI_EXT_WINDOWS && !error; ++window) {
++			for (unsigned int pass = 0; pass < 2 && !error; ++pass) {
++				struct dali_speed_sample sample = {0};
++				error = ufs_dali_extended_read_pass((void *)speed_reference,
++				    DALI_EXT_WINDOW_BYTES, window, pass != 0, speed_until, &sample);
++				uint64_t ticks = sample.end >= sample.begin ? sample.end - sample.begin : 0;
++				uint64_t ns = 0;
++				absolutetime_to_nanoseconds(ticks, &ns);
++				printf("SWEET UFS EXT: v=1 window=%u pass=%u bytes=%llu commands=%u "
++				    "ticks=%llu ns=%llu error=%d poisoned=%u\n", window, pass,
++				    (unsigned long long)sample.bytes, sample.commands,
++				    (unsigned long long)ticks, (unsigned long long)ns,
++				    error, su.command_poisoned ? 1u : 0u);
++			}
++		}
++		if (error) (void)ufs_pwm_failure(error);
++		else printf("SWEET UFS EXT: v=1 complete=1 windows=%u window-bytes=%u "
++		    "exact-byte-match=1 root-mounted=0 data-writes=0 ufs-log-writes=0\n",
++		    DALI_EXT_WINDOWS, DALI_EXT_WINDOW_BYTES);
++	}
++	/* Retained RAM console only: neither probe calls the UFS log writer. */
++	if (!error && su.speed_probe) su.speed_probe_done = true;
+ 	lck_mtx_unlock(&sweet_ufs_lock);
+ 	if (error) {
+ 		return error;
+@@ -3093,7 +3143,7 @@
+ 	uint64_t total, seq;
+ };
+ 
+-#include "SweetUFSSpeedLog.h"
++/* The pre-root probes do not use the persistent UFS log writer. */
+ 
+ #if DEVELOPMENT
+ /* Completed logger publications only: no UFS lock or DMA access in the waiter. */
+@@ -3267,15 +3317,20 @@
+     bool two_lanes = ufs_dali_two_lane_requested();
+     bool hsg1 = ufs_dali_speed_flag("dali-hs-g1");
+     bool speed_probe = ufs_dali_speed_flag("dali-speed-probe");
++    bool extended = ufs_dali_speed_flag("dali-speed-extended");
++    char run_id[33] = {0};
+     if ((two_lanes && pwm_requested != 0) ||
+-        (hsg1 && (two_lanes || pwm_requested != 0)) || (speed_probe && !hsg1)) return EINVAL;
++        (hsg1 && (two_lanes || pwm_requested != 0)) || (speed_probe && !hsg1) ||
++        (extended && (!speed_probe || !ufs_dali_extended_configuration(run_id)))) return EINVAL;
+     bool pwm_guard = hsg1 || two_lanes || (pwm_requested == 1 && SWEET_PWM_PLATFORM_CAP > 1);
+     pwm_error = ufs_pwm_root_enter(pwm_guard);
+     if (pwm_error) return pwm_error;
+     su.pwm_two_lanes = two_lanes;
+     su.hsg1_requested = hsg1;
+     su.speed_probe = speed_probe;
++    su.speed_extended = extended;
+ 	(void)sweet_ramoops_start();
++	if (extended) printf("SWEET UFS EXT: v=1 start=1 run-id=%s auto=0 root-write=0 log=0\n", run_id);
+ 	if (!su.ready) {
+ 		su.failure_stage = "root-init";
+ 		int error = sweet_ufs_init();

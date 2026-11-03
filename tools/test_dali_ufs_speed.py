@@ -70,13 +70,14 @@ def main():
     with tempfile.TemporaryDirectory(prefix='dali-ufs-speed-') as name:
         folder=Path(name)
         if len(sys.argv)>1:
-            view=Path(sys.argv[1])
+            actual_view=Path(sys.argv[1])
             for path,text in expected.items():
-                assert (view/path).read_text(encoding='latin-1')==text,path
-        else:
-            view=folder/'xnu'
-            for path,text in expected.items():
-                dest=view/path;dest.parent.mkdir(parents=True,exist_ok=True);dest.write_text(text)
+                assert (actual_view/path).read_text(encoding='latin-1') == sources.UFS_POST_EXT.get(path, text),path
+        # Historical 0200/0205 fixtures exercise their exact historical source;
+        # the 0206 extended implementation has its own sanitizer fixtures.
+        view=folder/'xnu'
+        for path,text in expected.items():
+            dest=view/path;dest.parent.mkdir(parents=True,exist_ok=True);dest.write_text(text)
         # Include only explicit actual headers, not the entire BSD include tree.
         include=folder/'include';include.mkdir()
         for header in ('SweetUFSHSFloor.h','SweetUFSPWMClock.h'):

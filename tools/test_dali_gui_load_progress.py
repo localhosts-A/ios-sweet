@@ -110,6 +110,11 @@ UFS_PMC_PATCH = ROOT/'xnu/patches/0205-dali-ufs-pmc-pending-device-present.patch
 PMC_PRE_POLICY = {'bsd/dev/SweetUFSPWMPolicy.h': SOURCE['bsd/dev/SweetUFSPWMPolicy.h']}
 for path, previous in PMC_PRE_POLICY.items():
     SOURCE[path] = apply_exact_hunks(previous, path, UFS_PMC_PATCH)
+# Preserve 0205 snapshots for historical function fixtures while checking that
+# the materialized source contains the separately tested extended probe.
+UFS_EXT_PATCH = ROOT/'xnu/patches/0206-dali-ufs-extended-read-probe.patch'
+UFS_POST_EXT = {path: apply_exact_hunks(SOURCE[path], path, UFS_EXT_PATCH)
+                for path in ('bsd/dev/sweet_ufs.c', 'bsd/dev/SweetUFSSpeedRead.h')}
 LOCK = SOURCE['osfmk/kern/lock_mtx.c']
 SAMPLER, UFS, EXCEPTION, GUI_POLICY, IO_POLICY = (SOURCE[p] for p in PATHS)
 RW_POLICY = SOURCE['osfmk/kern/SweetRWWaitProgress.h']
@@ -600,7 +605,8 @@ int main(void){
     def test_final_source_and_unchanged_old_helpers(self):
         if os.environ.get('SWEET_LOAD_SOURCE_DIR'):
             directory=Path(os.environ['SWEET_LOAD_SOURCE_DIR'])
-            for path,text in SOURCE.items(): self.assertEqual((directory/path).read_text(encoding='latin-1'),text,path)
+            for path,text in SOURCE.items():
+                self.assertEqual((directory/path).read_text(encoding='latin-1'), UFS_POST_EXT.get(path, text), path)
             self.assertEqual((directory/'osfmk/kern/Makefile').read_text(),SOURCE['osfmk/kern/Makefile'])
         old=old_fragment(PATHS[0])
         for name in ('sweet_bbpc_trace','sweet_bbvm_enter','sweet_bbvm_leave','sweet_ff_fault_trace','sweet_ff_screen_dump'):
