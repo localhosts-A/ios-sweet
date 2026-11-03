@@ -1,0 +1,40 @@
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -2312,16 +2312,37 @@
+ 		lck_mtx_unlock(&sweet_ufs_lock);
+ 		return error;
+ 	}
++	case DKIOCGETFEATURES:
++		/* No FUA, barrier, or UNMAP support is exposed. */
++		*f = 0;
++		return 0;
+ 	case DKIOCGETMAXBLOCKCOUNTREAD:
+ 		*o = BOUNCE_SIZE / su.secsize;
+ 		return 0;
+ 	case DKIOCGETMAXBLOCKCOUNTWRITE:
+ 		*o = su.writable ? BOUNCE_SIZE / su.secsize : 0;
+ 		return 0;
++	case DKIOCGETMAXBYTECOUNTREAD:
++		*o = BOUNCE_SIZE;
++		return 0;
++	case DKIOCGETMAXBYTECOUNTWRITE:
++		*o = su.writable ? BOUNCE_SIZE : 0;
++		return 0;
+ 	case DKIOCGETMAXSEGMENTCOUNTREAD:
+ 	case DKIOCGETMAXSEGMENTCOUNTWRITE:
++		/* buf_map and the bounce copy accept noncontiguous input pages. */
++		*o = BOUNCE_SIZE / PAGE_SIZE + 1;
++		return 0;
++	case DKIOCGETMAXSEGMENTBYTECOUNTREAD:
++	case DKIOCGETMAXSEGMENTBYTECOUNTWRITE:
++		*o = BOUNCE_SIZE;
++		return 0;
++	case DKIOCGETMINSEGMENTALIGNMENTBYTECOUNT:
+ 		*o = 1;
+ 		return 0;
++	case DKIOCGETCOMMANDPOOLSIZE:
++		*f = 1;
++		return 0;
+ 	default:
+ 		return ENOTTY;
+ 	}

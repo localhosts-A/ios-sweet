@@ -1,0 +1,217 @@
+--- a/bsd/kern/sys_ulock.c
++++ b/bsd/kern/sys_ulock.c
+@@ -67,6 +67,40 @@
+ #include <os/hash.h>
+ #include <sys/ulock.h>
+ 
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++#include <os/atomic_private.h>
++#include <arm/thread.h>
++#include <kern/SweetLoadProgress.h>
++#include "SweetUlockTrace.h"
++
++static struct sweet_ulock_trace sweet_ulock_trace;
++
++/* Called only by the ordinary sample thread, never with the ulock interlock held. */
++void
++sweet_ulock_dump(unsigned int sample, unsigned int final)
++{
++	static struct sweet_ulock_snapshot snapshot;
++	if (final) sweet_ulock_record_close(&sweet_ulock_trace);
++	if (sweet_ulock_record_snapshot(&sweet_ulock_trace, &snapshot) != 0) {
++		printf("SWEET ULOCK: v=1 s=%u busy=1\n", sample);
++		return;
++	}
++	printf("SWEET ULOCK: v=1 s=%u active=%u busy_drop=%u full_drop=%u exhausted=%u final=%u\n",
++	    sample, snapshot.count, snapshot.busy_drop, snapshot.full_drop, snapshot.exhausted, final);
++	for (unsigned int i = 0; i < snapshot.count; ++i) {
++		const struct sweet_ulock_record *r = &snapshot.records[i];
++		printf("SWEET ULOCKW: v=1 s=%u token=0x%llx tid=0x%llx op=%u flags=0x%x "
++		    "owner_tid=0x%llx owner_known=%u addr=0x%llx value=0x%llx timeout_ns=0x%llx "
++		    "begin=0x%llx pc=0x%llx lr=0x%llx\n", sample,
++		    (unsigned long long)r->token, (unsigned long long)r->tid, r->opcode, r->flags,
++		    (unsigned long long)r->owner_tid, (unsigned int)(r->owner_tid != 0),
++		    (unsigned long long)r->address, (unsigned long long)r->value,
++		    (unsigned long long)r->timeout_ns, (unsigned long long)r->begin,
++		    (unsigned long long)r->pc, (unsigned long long)r->lr);
++	}
++}
++#endif
++
+ /*
+  * How ulock promotion works:
+  *
+@@ -721,6 +755,27 @@
+ 		uthread->uu_save.uus_ulock_wait_data.flags = flags;
+ 		uthread->uu_save.uus_ulock_wait_data.owner_thread = owner_thread;
+ 		uthread->uu_save.uus_ulock_wait_data.old_owner = old_owner;
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++		uthread->uu_save.uus_ulock_wait_data.sweet_trace_token = 0;
++		/* Slot 2 is the first admitted SpringBoard task, retained by sweet_load. */
++		if (!SWEET_ULOCK_LOAD(&sweet_ulock_trace.closed) &&
++		    sweet_load_rw_target(current_task()) == 2) {
++			arm_saved_state_t *state = find_user_regs(self);
++			struct sweet_ulock_record event = {
++				.tid = thread_tid(self),
++				/* owner_thread, when present, already has a +1 reference here. */
++				.owner_tid = owner_thread != THREAD_NULL ? thread_tid(owner_thread) : 0,
++				.address = args->addr, .value = value, .timeout_ns = timeout,
++				.begin = mach_absolute_time(), .opcode = opcode, .flags = flags,
++			};
++			if (state != NULL && is_saved_state64(state)) {
++				event.pc = get_saved_state_pc(state);
++				event.lr = get_saved_state_lr(state);
++			}
++			uthread->uu_save.uus_ulock_wait_data.sweet_trace_token =
++			    sweet_ulock_record_begin(&sweet_ulock_trace, &event);
++		}
++#endif
+ 	}
+ 
+ 	ull_unlock(ull);
+@@ -829,6 +884,11 @@
+ 	thread_t owner_thread = uthread->uu_save.uus_ulock_wait_data.owner_thread;
+ 	thread_t old_owner = uthread->uu_save.uus_ulock_wait_data.old_owner;
+ 
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++	/* Atomic generation check also works if the producer guard is held. */
++	sweet_ulock_record_end(&sweet_ulock_trace,
++	    uthread->uu_save.uus_ulock_wait_data.sweet_trace_token);
++#endif
+ 	ret = wait_result_to_return_code(wr);
+ 
+ 	ull_lock(ull);
+--- a/bsd/sys/user.h
++++ b/bsd/sys/user.h
+@@ -189,6 +189,9 @@
+ 			thread_t old_owner;
+ 			int32_t *retval;
+ 			uint flags;
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++			uint64_t sweet_trace_token; /* generation-tagged scalar, never a pointer */
++#endif
+ 		} uus_ulock_wait_data;
+ 
+ 		struct _bsdthread_terminate {
+--- a/bsd/dev/sweet_sample.c
++++ b/bsd/dev/sweet_sample.c
+@@ -468,6 +468,8 @@
+     sweet_ufs_load_dump(sample);
+ #if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
+     sweet_ipcsend_dump(sample, sample == SWEET_LOAD_SAMPLES - 1);
++    extern void sweet_ulock_dump(unsigned int, unsigned int);
++    sweet_ulock_dump(sample, sample == SWEET_LOAD_SAMPLES - 1);
+ #endif
+ }
+ 
+--- /dev/null
++++ b/bsd/kern/SweetUlockTrace.h
+@@ -0,0 +1,108 @@
++#ifndef SWEET_ULOCK_TRACE_H
++#define SWEET_ULOCK_TRACE_H
++
++#include <stdint.h>
++
++/* Active, not historical, waits: slots are reusable after the continuation. */
++#define SWEET_ULOCK_SLOTS 16u
++#define SWEET_ULOCK_INDEX_BITS 4u
++
++#ifndef SWEET_ULOCK_CAS
++#define SWEET_ULOCK_CAS(p, old, newval) os_atomic_cmpxchg((p), (old), (newval), acq_rel)
++#define SWEET_ULOCK_LOAD(p) os_atomic_load((p), acquire)
++#define SWEET_ULOCK_STORE(p, v) os_atomic_store((p), (v), release)
++#define SWEET_ULOCK_INC(p) os_atomic_inc((p), relaxed)
++#endif
++
++struct sweet_ulock_record {
++    uint64_t token, tid, owner_tid, address, value, timeout_ns, begin, pc, lr;
++    uint32_t opcode, flags;
++};
++struct sweet_ulock_slot {
++    uint64_t token; /* atomic; generation-tagged to prevent a stale finish clearing a reuse */
++    struct sweet_ulock_record record; /* guarded against producer and sampler */
++};
++struct sweet_ulock_trace {
++    uint32_t guard, closed, busy_drop, full_drop, exhausted;
++    uint64_t generation;
++    struct sweet_ulock_slot slots[SWEET_ULOCK_SLOTS];
++};
++struct sweet_ulock_snapshot {
++    uint32_t count, busy_drop, full_drop, exhausted;
++    struct sweet_ulock_record records[SWEET_ULOCK_SLOTS];
++};
++
++_Static_assert(SWEET_ULOCK_SLOTS == (1u << SWEET_ULOCK_INDEX_BITS), "token index");
++_Static_assert(sizeof(struct sweet_ulock_trace) + sizeof(struct sweet_ulock_snapshot) <= 4096,
++    "bounded ulock records");
++
++/* Producer is called with ull locked: never wait, print, allocate or retain pointers. */
++static inline uint64_t
++sweet_ulock_record_begin(struct sweet_ulock_trace *trace, const struct sweet_ulock_record *record)
++{
++    if (!trace || !record || !record->tid || SWEET_ULOCK_LOAD(&trace->closed)) return 0;
++    if (!SWEET_ULOCK_CAS(&trace->guard, 0u, 1u)) {
++        SWEET_ULOCK_INC(&trace->busy_drop);
++        return 0;
++    }
++    uint64_t token = 0;
++    if (!SWEET_ULOCK_LOAD(&trace->closed)) {
++        unsigned int i;
++        for (i = 0; i < SWEET_ULOCK_SLOTS; ++i) {
++            if (SWEET_ULOCK_LOAD(&trace->slots[i].token) == 0) break;
++        }
++        if (i == SWEET_ULOCK_SLOTS) {
++            ++trace->full_drop;
++        } else if (trace->generation == (UINT64_MAX >> SWEET_ULOCK_INDEX_BITS)) {
++            trace->exhausted = 1;
++        } else {
++            token = (++trace->generation << SWEET_ULOCK_INDEX_BITS) | i;
++            trace->slots[i].record = *record;
++            trace->slots[i].record.token = token;
++            SWEET_ULOCK_STORE(&trace->slots[i].token, token);
++        }
++    }
++    SWEET_ULOCK_STORE(&trace->guard, 0u);
++    return token;
++}
++
++/* Same wait's continuation, without guard: cannot erase a slot reused meanwhile. */
++static inline void
++sweet_ulock_record_end(struct sweet_ulock_trace *trace, uint64_t token)
++{
++    if (!trace || !token) return;
++    unsigned int i = (unsigned int)(token & (SWEET_ULOCK_SLOTS - 1u));
++    (void)SWEET_ULOCK_CAS(&trace->slots[i].token, token, 0ull);
++}
++
++static inline void
++sweet_ulock_record_close(struct sweet_ulock_trace *trace)
++{
++    if (trace) SWEET_ULOCK_STORE(&trace->closed, 1u);
++}
++
++/* Snapshot holds the producer guard; an exit may still retire its atomic token. */
++static inline int
++sweet_ulock_record_snapshot(struct sweet_ulock_trace *trace, struct sweet_ulock_snapshot *snapshot)
++{
++    if (!trace || !snapshot) return -1;
++    unsigned int tries;
++    for (tries = 0; tries < 128; ++tries) {
++        if (SWEET_ULOCK_CAS(&trace->guard, 0u, 1u)) break;
++    }
++    if (tries == 128) return -1;
++    snapshot->count = 0;
++    for (unsigned int i = 0; i < SWEET_ULOCK_SLOTS; ++i) {
++        uint64_t token = SWEET_ULOCK_LOAD(&trace->slots[i].token);
++        if (!token) continue;
++        struct sweet_ulock_record record = trace->slots[i].record;
++        if (SWEET_ULOCK_LOAD(&trace->slots[i].token) != token) continue;
++        snapshot->records[snapshot->count++] = record;
++    }
++    snapshot->busy_drop = SWEET_ULOCK_LOAD(&trace->busy_drop);
++    snapshot->full_drop = trace->full_drop;
++    snapshot->exhausted = trace->exhausted;
++    SWEET_ULOCK_STORE(&trace->guard, 0u);
++    return 0;
++}
++#endif

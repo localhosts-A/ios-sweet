@@ -67,6 +67,13 @@ PREFIX = r'''
 #define DKIOCSYNCHRONIZE 12
 #define DKIOCGETMAXSEGMENTCOUNTREAD 10
 #define DKIOCGETMAXSEGMENTCOUNTWRITE 11
+#define DKIOCGETMAXBYTECOUNTREAD 13
+#define DKIOCGETMAXBYTECOUNTWRITE 14
+#define DKIOCGETMAXSEGMENTBYTECOUNTREAD 15
+#define DKIOCGETMAXSEGMENTBYTECOUNTWRITE 16
+#define DKIOCGETMINSEGMENTALIGNMENTBYTECOUNT 17
+#define DKIOCGETCOMMANDPOOLSIZE 18
+#define PAGE_SIZE 16384u
 #define DEV_BSIZE 512
 #define DK_FEATURE_BARRIER 1
 #define DK_FEATURE_PRIORITY 2
@@ -245,7 +252,11 @@ int main(void){
         logger_guard = ('\t\t/* Do not overwrite DMA memory until hardware ownership is known. */\n'
                         '\t\tif (su.dali && su.command_poisoned) {\n\t\t\terror = ETIMEDOUT;\n\t\t}\n')
         self.assertEqual(UFS.count(strategy_guard),1); self.assertEqual(UFS.count(logger_guard),1)
-        normalized = source.without_fastboot_log_hooks(source.without_pwm_init_hooks(UFS))
+        # Verify the new capability patch exactly, then retain the historical
+        # whole-file comparison for the preceding 0180 startup/poison changes.
+        pre_caps = source.fixture.fragment('bsd/dev/sweet_ufs.c', source.PWM_PATCH)
+        self.assertEqual(source.apply_exact_hunks(pre_caps, 'bsd/dev/sweet_ufs.c', source.UFS_CAP_PATCH), UFS)
+        normalized = source.without_fastboot_log_hooks(source.without_pwm_init_hooks(pre_caps))
         begin = normalized.index('#if DEVELOPMENT\n/* Completed logger publications only:')
         end = normalized.index('static void\nsweet_log_thread(', begin)
         normalized = normalized[:begin] + normalized[end:]

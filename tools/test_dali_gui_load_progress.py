@@ -39,6 +39,8 @@ SOURCE.update({p: fixture.fragment(p, PWM_PATCH)
 BBCTX_PATCH = ROOT/'xnu/patches/0181-sweet-bounded-backboard-context.patch'
 IPCSEND_PATCH = ROOT/'xnu/patches/0185-mach-ipcsend-diagnostic.patch'
 IPCSEND_CONTEXT_PATCH = ROOT/'xnu/patches/0186-sweet-ipcsend-context-scalars.patch'
+ULOCK_PATCH = ROOT/'xnu/patches/0189-sweet-springboard-ulock.patch'
+UFS_CAP_PATCH = ROOT/'xnu/patches/0190-sweet-ufs-io-capabilities.patch'
 
 
 SOURCE['pexpert/arm/DaliFastbootReturnPolicy.h'] = apply_exact_hunks(
@@ -52,6 +54,10 @@ for path in ('bsd/dev/sweet_sample.c', 'osfmk/kern/Makefile'):
     SOURCE[path] = apply_exact_hunks(SOURCE[path], path, IPCSEND_PATCH)
 SOURCE['bsd/dev/sweet_sample.c'] = apply_exact_hunks(
     SOURCE['bsd/dev/sweet_sample.c'], 'bsd/dev/sweet_sample.c', IPCSEND_CONTEXT_PATCH)
+SOURCE['bsd/dev/sweet_sample.c'] = apply_exact_hunks(
+    SOURCE['bsd/dev/sweet_sample.c'], 'bsd/dev/sweet_sample.c', ULOCK_PATCH)
+SOURCE['bsd/dev/sweet_ufs.c'] = apply_exact_hunks(
+    SOURCE['bsd/dev/sweet_ufs.c'], 'bsd/dev/sweet_ufs.c', UFS_CAP_PATCH)
 for path in ('bsd/dev/SweetBBContextPolicy.h', 'bsd/dev/SweetBBContextRuntime.h',
              'bsd/sys/SweetBBContext.h'):
     SOURCE[path] = fixture.fragment(path, BBCTX_PATCH)
@@ -320,7 +326,7 @@ GUI_MOCK += r'''
 struct task {unsigned references;};typedef struct task *task_t;
 #define TASK_NULL NULL
 static struct task target_task;
-static bool eligible=true;static unsigned task_lookups,ident_reads,collector_calls,io_calls,io_closes,io_begins;
+static bool eligible=true;static unsigned task_lookups,ident_reads,collector_calls,io_calls,io_closes,io_begins,ulock_calls,ulock_final;
 static task_t selected_task=&target_task;
 static task_t current_task(void) {__atomic_add_fetch(&task_lookups,1,__ATOMIC_RELAXED);return selected_task;}
 static void task_reference(task_t t) {__atomic_add_fetch(&t->references,1,__ATOMIC_RELAXED);}
@@ -334,6 +340,9 @@ bool sweet_ufs_load_eligible(void) {return eligible;}
 void sweet_ufs_load_begin(void) {++io_begins;}
 void sweet_ufs_load_close(void) {++io_closes;}
 void sweet_ufs_load_dump(unsigned int s) {assert(s<40);++io_calls;}
+void sweet_ipcsend_close(void) {}
+void sweet_ipcsend_dump(unsigned int s,unsigned int final) {assert(s<40 && final==(s==39));}
+void sweet_ulock_dump(unsigned int s,unsigned int final) {assert(s<40 && final==(s==39));++ulock_calls;ulock_final+=final;}
 void sweet_load_collect(task_t t,struct sweet_load_snapshot *out) {
  assert(t==&target_task);++collector_calls;bzero(out,sizeof(*out));out->captured=8;out->thread_count=10;
  for(unsigned i=0;i<8;++i)out->threads[i].tid=i+1;
@@ -344,7 +353,7 @@ GUI_TAIL = ipc.TAIL + r'''
 static void load_reset(void) {
  reset();irq_context=false;sweet_load_rw_configured=0;selected_task=&target_task;ident_uniqueid=123;ident_version=1;sweet_load_configured=false;sweet_load_control=sweet_load_ready=sweet_load_missed=0;sweet_load_dumped=0;
  bzero(sweet_load_slots,sizeof(sweet_load_slots));bzero(&target_task,sizeof(target_task));
- task_lookups=ident_reads=collector_calls=io_calls=io_closes=io_begins=0;eligible=true;atomic_hook=NULL;atomic_before=NULL;atomic_load_hook=atomic_store_hook=NULL;
+ task_lookups=ident_reads=collector_calls=io_calls=io_closes=io_begins=ulock_calls=ulock_final=0;eligible=true;atomic_hook=NULL;atomic_before=NULL;atomic_load_hook=atomic_store_hook=NULL;
 }
 static void load_common(void) {
  common();load_reset();sweet_load_prepare(0);sweet_load_rw_prepare(0);sweet_load_begin();sweet_load_register(0,&regs);sweet_load_dump(0);
@@ -383,7 +392,8 @@ class LoadProgressTest(unittest.TestCase):
 
     def gui(self, body, extra='', compiler_error=None):
         # Every exercised producer/dump comes from0175; old helpers are byte-checked below.
-        code=ipc.LEGACY+ipc.POLICY+GUI_POLICY+GUI_MOCK+IPC_HELPERS+GUI_HELPERS+function(SAMPLER,'sweet_ff_trace')+function(SAMPLER,'sweet_ff_dump')+GUI_TAIL+extra+body
+        config='\n#define DEVELOPMENT 1\n#define ARM64_BOARD_CONFIG_SWEET 1\n'
+        code=ipc.LEGACY+ipc.POLICY+GUI_POLICY+GUI_MOCK+IPC_HELPERS+config+GUI_HELPERS+function(SAMPLER,'sweet_ff_trace')+function(SAMPLER,'sweet_ff_dump')+GUI_TAIL+extra+body
         return self.compile_run(code.replace('int main(void) {','int main(void) { load_common();'),compiler_error=compiler_error)
 
     def test_registration_modes_filters_and_first_generation(self):
@@ -441,6 +451,7 @@ int main(void) {
  load_reset();sweet_load_prepare(1);sweet_load_begin();sweet_load_register(0,&regs);strcpy(process.p_comm,"SpringBoard");sweet_load_register(0,&regs);
  for(unsigned i=0;i<40;++i){sweet_load_dump(i);sweet_load_dump(i);}
  assert(sweet_load_dumped==40 && io_calls==40 && io_closes==1 && collector_calls==80);
+ assert(ulock_calls==40 && ulock_final==1);
  assert(!sweet_load_admitting(sweet_load_control) && target_task.references==2);
  sweet_load_begin();sweet_load_dump(40);assert(io_calls==40 && io_begins==1);
  unsigned count=0;for(char *p=captured;*p;++p)count+=*p=='\n';assert(count==761);
@@ -504,6 +515,7 @@ int main(void){
         replayed = apply_exact_hunks(previous, 'bsd/dev/sweet_sample.c', BBCTX_PATCH)
         replayed = apply_exact_hunks(replayed, 'bsd/dev/sweet_sample.c', IPCSEND_PATCH)
         replayed = apply_exact_hunks(replayed, 'bsd/dev/sweet_sample.c', IPCSEND_CONTEXT_PATCH)
+        replayed = apply_exact_hunks(replayed, 'bsd/dev/sweet_sample.c', ULOCK_PATCH)
         self.assertEqual(replayed, SAMPLER)
         with self.assertRaises(AssertionError):
             apply_exact_hunks('\n' + previous, 'bsd/dev/sweet_sample.c', BBCTX_PATCH)

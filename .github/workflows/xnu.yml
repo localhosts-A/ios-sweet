@@ -63,6 +63,9 @@ on:
       - "tools/dali_trial_adapters.py"
       - "tools/test_dali_trial_safety.py"
       - "tools/test_dali_fastboot_return.py"
+      - "tools/test_dali_ulock.py"
+      - "tools/test_dali_ulock_trace.c"
+      - "tools/test_dali_ufs_ioctl.py"
 
 concurrency:
   group: xnu-${{ github.ref }}
@@ -156,6 +159,7 @@ jobs:
           python3 tools/test_dali_root_capture.py
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_uuidtext.py"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_fastboot_return.py"
+          python3 -I "$GITHUB_WORKSPACE/tools/test_dali_ulock.py"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_trial_safety.py"
           python3 tools/test_dali_boottrace.py
           python3 tools/test_dali_gui.py
@@ -206,7 +210,9 @@ jobs:
           python3 tools/test_dali_ufs_pwm.py
           python3 tools/test_dali_ufs_pwm_clock.py
           python3 tools/test_dali_ufs_startup.py
+          python3 -I "$GITHUB_WORKSPACE/tools/test_dali_ufs_ioctl.py" "$SWEET_LOAD_SOURCE_DIR/bsd/dev/sweet_ufs.c" "$SWEET_LOAD_SOURCE_DIR"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_fastboot_return.py"
+          python3 -I "$GITHUB_WORKSPACE/tools/test_dali_ulock.py"
           python3 tools/test_dali_watchdog_lease.py
 
       - name: Compiler cache statistics

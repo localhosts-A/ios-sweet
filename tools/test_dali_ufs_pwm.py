@@ -313,18 +313,22 @@ class PWMHardwareTest(unittest.TestCase):
     self.assertEqual(result.returncode,0,result.stdout+result.stderr)
     self.assertNotRegex(result.stdout+result.stderr,r'(?i)skip|offset|fuzz|failed|error:')
    for rel in paths:
-    # This checks 0180 alone, before the later return-limit and interval overlays.
+    # This checks 0180 alone, before the later return and UFS capability overlays.
     expected = (source.fixture.fragment(rel,source.PWM_PATCH)
-     if rel in ('pexpert/arm/DaliFastbootReturnPolicy.h','pexpert/arm/pe_dali_watchdog.c')
-     else source.SOURCE[rel])
+     if rel in ('bsd/dev/sweet_ufs.c','pexpert/arm/DaliFastbootReturnPolicy.h',
+                'pexpert/arm/pe_dali_watchdog.c') else source.SOURCE[rel])
     self.assertEqual((tree/rel).read_text(),expected,rel)
    self.assertTrue((tree/'bsd/dev/SweetUFSPWMPolicy.h').is_file())
    self.assertTrue((tree/'bsd/dev/SweetUFSPWMClock.h').is_file())
  def test_ordinary_io_and_uic_functions_unchanged(self):
   for name in ('ufs_mtk_log_uic_error','ufs_mtk_ack_uic','ufs_mtk_link_reset_event','ufs_mtk_uic',
    'ufs_scsi_on_lun_timeout','ufs_scsi','ufs_query_current_power_mode','ufs_query_fdeviceinit_flag',
-   'ufs_read_blocks','ufs_write_blocks','ufs_write_log_blocks','ufs_sync_cache','sweet_ufs_strategy','sweet_ufs_ioctl','sweet_log_thread'):
+   'ufs_read_blocks','ufs_write_blocks','ufs_write_log_blocks','ufs_sync_cache','sweet_ufs_strategy','sweet_log_thread'):
    self.assertEqual(function(UFS,name),function(OLD,name),name)
+  # 0190 intentionally updates ioctl; retain the 0180-vs-0178 equality check.
+  pre_caps=source.fixture.fragment('bsd/dev/sweet_ufs.c',source.PWM_PATCH)
+  self.assertEqual(function(pre_caps,'sweet_ufs_ioctl'),function(OLD,'sweet_ufs_ioctl'))
+  self.assertEqual(source.apply_exact_hunks(pre_caps,'bsd/dev/sweet_ufs.c',source.UFS_CAP_PATCH),UFS)
  def test_disabled_invalid_profile_or_effective_cap1_zero_uic(self):
   self.run_c(r'''
 for(unsigned req=0;req<4;++req)for(unsigned dali=0;dali<2;++dali)for(unsigned cold=0;cold<2;++cold){

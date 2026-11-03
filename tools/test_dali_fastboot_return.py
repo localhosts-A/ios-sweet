@@ -146,6 +146,7 @@ def adt_fixture():
 
 LIMIT_PATCH = ROOT / 'xnu/patches/0187-dali-extend-bounded-return-lease.patch'
 INTERVAL_PATCH = ROOT / 'xnu/patches/0188-dali-fastboot-supported-sample-intervals.patch'
+UFS_CAP_PATCH = ROOT / 'xnu/patches/0190-sweet-ufs-io-capabilities.patch'
 BASE_PATCH = ROOT / 'xnu/patches/0180-sweet-dali-pwm-link-policy.patch'
 POLICY_PATH = 'pexpert/arm/DaliFastbootReturnPolicy.h'
 NATIVE_PATH = 'pexpert/arm/pe_dali_watchdog.c'
@@ -645,12 +646,14 @@ in_irq=false;preempt=1;assert(!sweet_log_fastboot_drain(100));puts("PASS");}
                 if path == 'bsd/dev/sweet_sample.c':
                     expected = (Path(source_dir) / path).read_text()
                     self.assertEqual(hashlib.sha256(expected.encode()).hexdigest(),
-                                     '766a96a35bf41796efc3ea6541b9af4d324532d6e99610cd9ab5dcd619dcfd1d')
+                                     '021bf0b0c785abd81cbc358722fa3a72965a5ca1206b36eb04500cf52aae3b16')
                 elif path == POLICY_PATH:
                     expected = POLICY
                 elif path == NATIVE_PATH:
                     expected = NATIVE
-                elif path in ('bsd/dev/sweet_ufs.c', 'osfmk/arm64/dali_watchdog.h'):
+                elif path == 'bsd/dev/sweet_ufs.c':
+                    expected = apply_exact_hunks(fragment(path, BASE_PATCH), path, UFS_CAP_PATCH)
+                elif path == 'osfmk/arm64/dali_watchdog.h':
                     expected = fragment(path, BASE_PATCH)
                 else:
                     expected = fragment(path)
