@@ -117,8 +117,8 @@ diff --git a/bsd/dev/SweetUFSHSPlatform.h b/bsd/dev/SweetUFSHSPlatform.h
 - * Include after su, ufs_rd/ufs_ao_rd and ordinary UIC helpers. No new PLL,
 - * PMIF, PMIC, DVFSRC INIT, clock switch, suspend or downward-voltage operation.
 + * Include after su, ufs_rd/ufs_ao_rd and ordinary UIC helpers. The explicit
-+ * dali-dvfsrc-init opt-in permits one vendor INIT(flag=0,vmode=0) only for an
-+ * unconfigured controller. No START/free-run, PLL, PMIF, PMIC, clock switch,
++ * dali-dvfsrc-init opt-in permits one vendor INIT(flag=0,vmode=0) attempt only
++ * with zero max/count metadata and no known nonzero AP request fields. No START/free-run, PLL, PMIF, PMIC, clock switch,
 + * suspend, forced OPP or downward AP minimum-request operation is added.
   */
  #ifndef SWEET_UFS_HS_PLATFORM_H
@@ -174,7 +174,7 @@ diff --git a/bsd/dev/SweetUFSHSPlatform.h b/bsd/dev/SweetUFSHSPlatform.h
  static int
  ufs_hs_floor_write(void *context, uint32_t value)
  {
-@@ -124,44 +127,115 @@
+@@ -124,44 +127,121 @@
  
  static void
  ufs_hs_delay_us(void *context, uint32_t microseconds)
@@ -186,7 +186,9 @@ diff --git a/bsd/dev/SweetUFSHSPlatform.h b/bsd/dev/SweetUFSHSPlatform.h
 +/* Standard parent INIT only, not the separate enable-free-run START. Actual
 + * MT6991 DT has flag=0/vmode=0; these are x2/x3 and x4..x7 stay zero. The
 + * explicit property is consumed only by the already opt-in pre-root HS path.
-+ * An existing configuration or an inherited AP vote is never reinitialized.
++ * A usable configuration or nonzero known AP VCORE/DRAM/EMI request field is
++ * not reinitialized. Zero fields do not prove absent owners/global quiescence;
++ * this is an explicit managed bring-up attempt, not firmware-state detection.
 + */
 +static int
 +ufs_hs_firmware_prepare(bool enabled)
@@ -207,13 +209,17 @@ diff --git a/bsd/dev/SweetUFSHSPlatform.h b/bsd/dev/SweetUFSHSPlatform.h
 +        action = enabled ? "adopt-configured" : "init-disabled";
 +        goto out;
 +    }
++    action = "refuse-inconsistent-config";
++    if (count != 0) { error = EIO; goto out; }
 +    action = "refuse-active-request";
 +    if (ufs_hs_clock_ok(NULL) ||
 +        ufs_hs_floor_read(NULL, HSF_REQUEST, &request) ||
 +        ufs_hs_floor_read(NULL, HSF_FORCE_REQUEST, &force) ||
 +        ufs_hs_floor_read(NULL, HSF_HALT, &halt) ||
 +        ufs_hs_floor_read(NULL, HSF_TARGET, &target) ||
-+        (request & HSF_REQUEST_MASK) || force || (halt & 2u) || (target & (1u << 16))) {
++        /* MT6991 SW_REQ: VCORE[6:4], DRAM[15:12], EMI[3:0]. */
++        (request & (HSF_REQUEST_MASK | 0xf000u | 0xfu)) ||
++        force || (halt & 2u) || (target & (1u << 16))) {
 +        error = EIO;
 +        goto out;
 +    }

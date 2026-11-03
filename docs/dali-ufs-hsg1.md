@@ -12,7 +12,7 @@ Two exact 4-byte little-endian ADT properties under the Dali `sweet-ufs` node:
   requires the HS-G1 flag. Conflicts with `ufspwm` or the older two-lane flag
   are rejected before initialization.
 - `dali-dvfsrc-init = 1`: within that HS path only, permit one standard vendor
-  firmware INIT for an unconfigured controller. This flag alone cannot start
+  firmware INIT attempt under the zero-metadata/no-known-nonzero-AP-field conditions below. This flag alone cannot start
   UFS/HS, and it does not enable the separate START/free-run operation.
 
 Absent/malformed flags and non-Dali compatible do not map the new platform
@@ -86,10 +86,15 @@ change or a reason to retry. Firmware table values are not ADC measurements.
 The fixed MT6991 parent driver and actual module call SMC `0xc2000506`, command
 0, with x2=flag and x3=vmode. Both properties are absent on this board, so both
 arguments and x4–x7 are zero. `dali-dvfsrc-init=1` permits that call once only
-when the observed max-OPP field is zero, the AP VCORE request is zero, and
+when the observed max-OPP field and whole gear header are zero, the known AP
+VCORE[6:4], DRAM[15:12] and EMI[3:0] request fields are all zero, and
 force/halt/target-busy are absent with the checked clock unchanged. A configured
-controller is adopted without INIT, even with the property enabled. An existing
-AP vote is never discarded to make initialization possible.
+controller is adopted without INIT, even with the property enabled. Nonzero
+known AP request fields prevent INIT; they are not cleared to make it possible.
+Zero metadata is not a proved uninitialized-firmware sentinel, and selector 0
+is still a valid request value. These guards do not establish absent owners or
+global firmware/SCP/DRAM quiescence; the explicit opt-in permits a managed
+bring-up attempt, not an automatically proven safe state transition.
 
 The code records valid before/after basic/count snapshots, whether a call was
 attempted, and raw INIT status/DRAM-type returns. A transport error or nonzero

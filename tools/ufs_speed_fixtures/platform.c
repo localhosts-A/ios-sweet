@@ -41,7 +41,7 @@ static void reset(void){
  top[0xd0/4]=6u<<8;pll[0x3c/4]=1u<<6;pll[0x268/4]=0x180000;
  hci[0x144/4]=3;
 }
-static void unconfigured(void){dvfs[0]=dvfs[0xfc/4]=dvfs[0x6ac/4]=0;}
+static void unconfigured(void){dvfs[0]=dvfs[0xfc/4]=dvfs[0x6ac/4]=0;dvfs[0x18/4]=0x50000;}
 int main(void){
  reset();uint64_t a0=0,a1=0;
  assert(ufs_hs_smc(NULL,1,0,&a0,&a1)==EINVAL && !smcs);
@@ -71,25 +71,28 @@ int main(void){
  assert(dali_hs_platform.floor.failure==HSF_CONFIGURATION && !dali_hs_platform.floor.count_read);
  reset();unconfigured();allow_init=true;
  assert(!ufs_dali_hs_platform_adopt() && inits==1 && smcs==9 && dali_hs_platform.init_attempted);
- assert(dali_hs_platform.floor.max_opp==86 && dali_hs_platform.floor.opp_count==6 && dvfs[0x18/4]==0x52020);
+ assert(dali_hs_platform.floor.max_opp==86 && dali_hs_platform.floor.opp_count==6 && dvfs[0x18/4]==0x50020);
  assert(ufs_hs_firmware_prepare(true)==EBUSY && inits==1 && smcs==9);
  /* A returned INIT is not configured/voltage success. No retry/START. */
  reset();unconfigured();allow_init=true;init_populates=false;
  assert(ufs_dali_hs_platform_adopt()==EIO && inits==1 && smcs==1 && !acquires && !releases);
- assert(dali_hs_platform.floor.failure==HSF_CONFIGURATION && dvfs[0x18/4]==0x52000);
+ assert(dali_hs_platform.floor.failure==HSF_CONFIGURATION && dvfs[0x18/4]==0x50000);
  calls=smcs;assert(ufs_dali_hs_platform_adopt()==EIO && smcs==calls);
  reset();unconfigured();allow_init=true;init_fw_status=UINT64_MAX;
  assert(ufs_dali_hs_platform_adopt()==EIO && inits==1 && smcs==1 && !acquires && !releases);
- assert(dali_hs_platform.init_status==UINT64_MAX && dvfs[0x18/4]==0x52000);
+ assert(dali_hs_platform.init_status==UINT64_MAX && dvfs[0x18/4]==0x50000);
  reset();unconfigured();allow_init=true;fail_smc=1;
  assert(ufs_dali_hs_platform_adopt()==EIO && smcs==1 && !acquires && !releases && dali_hs_platform.init_attempted);
  reset();unconfigured();allow_init=true;init_clock_change=true;
- assert(ufs_dali_hs_platform_adopt()==EIO && inits==1 && smcs==1 && !acquires && !releases && dvfs[0x18/4]==0x52000);
- for(unsigned i=0;i<4;i++){
+ assert(ufs_dali_hs_platform_adopt()==EIO && inits==1 && smcs==1 && !acquires && !releases && dvfs[0x18/4]==0x50000);
+ for(unsigned i=0;i<6;i++){
   reset();unconfigured();allow_init=true;
   if(i==0)dvfs[0x18/4]|=1u<<4;if(i==1)dvfs[0x604/4]=1;if(i==2)dvfs[0xc4/4]=2;if(i==3)dvfs[0x5f0/4]=1u<<16;
+  if(i==4)dvfs[0x18/4]|=2u<<12;if(i==5)dvfs[0x18/4]|=1u;
   uint32_t old=dvfs[0x18/4];assert(ufs_dali_hs_platform_adopt()==EIO && !inits && !smcs && dvfs[0x18/4]==old);
  }
+ reset();unconfigured();allow_init=true;dvfs[0xfc/4]=5;
+ assert(ufs_dali_hs_platform_adopt()==EIO && !smcs && !inits && dvfs[0x18/4]==0x50000);
  reset();allow_init=true;dvfs[0xfc/4]=0;
  assert(ufs_dali_hs_platform_adopt()==EIO && !smcs && !inits && dali_hs_platform.floor.failure==HSF_COUNT_ERROR);
  reset();unconfigured();allow_init=true;complete_requests=false;
