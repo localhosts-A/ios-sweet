@@ -9,7 +9,7 @@
  	uint32_t initialized = 0; /* release/acquire publication after initCPU sends SGI */
  
  public:
-@@ -85,16 +85,16 @@
+@@ -85,18 +85,18 @@
  		if (flag != 1) {
  			return false;
  		}
@@ -33,8 +33,11 @@
  		}
 -		kprintf("DALI CPU: boot-only match validated mpidr=0x%llx\n", live_mpidr);
  	}
- 	/* MPIDR Aff1 = core: 0x000-0x500 A55, 0x600/0x700 A76 */
+-	/* MPIDR Aff1 = core: 0x000-0x500 A55, 0x600/0x700 A76 */
++	/* Supported affinities encode core in Aff1, with Aff0 zero. */
  	if (cpu->phys_id > 0x700 || (cpu->phys_id & 0xff) != 0 ||
+ 	    topology->num_cpus > SWEET_SMP_MAX_CPUS) {
+ 		panic("SWEET CPU: invalid topology cpu=%u mpidr=0x%x count=%u",
 @@ -105,7 +105,7 @@
  	if (!IOCPU::start(provider)) {
  		return false;
@@ -55,7 +58,14 @@
  	}
  	registerService();
  	__atomic_store_n(&sweet_cpus[cpu->cpu_id], this, __ATOMIC_RELEASE);
-@@ -176,8 +176,8 @@
+@@ -170,14 +170,14 @@
+ 		}
+ 		IOSleep(1);
+ 	}
+-	/* The supplied ADT has cpu0 as the boot CPU and ascending A55 nodes. */
++	/* The supplied ADT has CPU0 as boot CPU; start CPUs in ADT order. */
+ 	if (topology->boot_cpu->cpu_id != 0 || topology->boot_cpu->phys_id != 0) {
+ 		panic("SWEET CPU: expected boot MPIDR 0 and logical CPU 0");
  	}
  	for (unsigned int i = 0; i < topology->num_cpus; i++) {
  		SweetCPU *cpu = __atomic_load_n(&sweet_cpus[i], __ATOMIC_ACQUIRE);
