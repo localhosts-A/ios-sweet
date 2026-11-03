@@ -1,0 +1,88 @@
+--- a/iokit/Kernel/arm/SweetCPU.cpp
++++ b/iokit/Kernel/arm/SweetCPU.cpp
+@@ -42,7 +42,7 @@
+ class SweetCPU : public IOCPU {
+ 	OSDeclareDefaultStructors(SweetCPU);
+ 	const OSSymbol *cpuName = NULL;
+-	bool daliBootCPU = false;
++	bool daliCPU = false;
+ 	uint32_t initialized = 0; /* release/acquire publication after initCPU sends SGI */
+ 
+ public:
+@@ -85,16 +85,16 @@
+ 		if (flag != 1) {
+ 			return false;
+ 		}
+-		daliBootCPU = true;
+-		const uint64_t live_mpidr = __builtin_arm_rsr64("MPIDR_EL1") & 0xff00ffffffULL;
+-		/* Only adopt the running firmware CPU. No Dali secondary CPU_ON. */
+-		if (topology->num_cpus != 1 || topology->max_cpu_id != 0 ||
+-		    cpu != topology->boot_cpu || cpu->cpu_id != 0 ||
+-		    cpu->phys_id != 0 || live_mpidr != cpu->phys_id) {
+-			panic("DALI CPU: unsupported boot-only topology count=%u cpu=%u phys=0x%x live=0x%llx",
+-			    topology->num_cpus, cpu->cpu_id, cpu->phys_id, live_mpidr);
++		daliCPU = true;
++		/* IOKit matches all nubs from the boot CPU, not from each target. */
++		if (cpu == topology->boot_cpu) {
++			const uint64_t live_mpidr = __builtin_arm_rsr64("MPIDR_EL1") & 0xff00ffffffULL;
++			if (cpu->cpu_id != 0 || cpu->phys_id != 0 || live_mpidr != cpu->phys_id) {
++				panic("DALI CPU: invalid boot CPU cpu=%u phys=0x%x live=0x%llx",
++				    cpu->cpu_id, cpu->phys_id, live_mpidr);
++			}
++			kprintf("DALI CPU: boot match validated mpidr=0x%llx\n", live_mpidr);
+ 		}
+-		kprintf("DALI CPU: boot-only match validated mpidr=0x%llx\n", live_mpidr);
+ 	}
+ 	/* MPIDR Aff1 = core: 0x000-0x500 A55, 0x600/0x700 A76 */
+ 	if (cpu->phys_id > 0x700 || (cpu->phys_id & 0xff) != 0 ||
+@@ -105,7 +105,7 @@
+ 	if (!IOCPU::start(provider)) {
+ 		return false;
+ 	}
+-	cpuName = OSSymbol::withCStringNoCopy(daliBootCPU ? "MT6991 boot CPU" : "Kryo 470");
++	cpuName = OSSymbol::withCStringNoCopy(daliCPU ? "MT6991 CPU" : "Kryo 470");
+ 	if (cpuName == NULL) {
+ 		return false;
+ 	}
+@@ -130,8 +130,8 @@
+ 		panic("SWEET CPU: PMI routing is not implemented");
+ 	}
+ 
+-	if (daliBootCPU) {
+-		kprintf("DALI CPU: ml_processor_register returned\n");
++	if (daliCPU) {
++		kprintf("DALI CPU: cpu=%u ml_processor_register returned\n", cpu->cpu_id);
+ 	}
+ 	registerService();
+ 	__atomic_store_n(&sweet_cpus[cpu->cpu_id], this, __ATOMIC_RELEASE);
+@@ -176,8 +176,8 @@
+ 	}
+ 	for (unsigned int i = 0; i < topology->num_cpus; i++) {
+ 		SweetCPU *cpu = __atomic_load_n(&sweet_cpus[i], __ATOMIC_ACQUIRE);
+-		if (cpu->daliBootCPU) {
+-			kprintf("DALI CPU: processor_start begin\n");
++		if (cpu->daliCPU) {
++			kprintf("DALI CPU: cpu=%u processor_start begin\n", i);
+ 		}
+ 		kern_return_t kr = processor_start(cpu->machProcessor);
+ 		if (kr != KERN_SUCCESS) {
+@@ -194,8 +194,8 @@
+ 			}
+ 			IOSleep(1);
+ 		}
+-		if (cpu->daliBootCPU) {
+-			kprintf("DALI CPU: boot CPU running; SGI delivered\n");
++		if (cpu->daliCPU) {
++			kprintf("DALI CPU: cpu=%u running; self-SGI delivered\n", i);
+ 		}
+ 		IOLog("SWEET CPU: cpu=%u mpidr=0x%x came alive; SGI1 OK\n",
+ 		    i, topology->cpus[i].phys_id);
+@@ -205,7 +205,7 @@
+ 	__atomic_load_n(&sweet_cpus[topology->boot_cpu->cpu_id], __ATOMIC_ACQUIRE)->cpusRunning();
+ 	IOService::publishResource(gIOAllCPUInitializedKey, kOSBooleanTrue);
+ 	ml_set_max_cpus(topology->max_cpu_id + 1);
+-	if (__atomic_load_n(&sweet_cpus[topology->boot_cpu->cpu_id], __ATOMIC_ACQUIRE)->daliBootCPU) {
++	if (__atomic_load_n(&sweet_cpus[topology->boot_cpu->cpu_id], __ATOMIC_ACQUIRE)->daliCPU) {
+ 		kprintf("DALI CPU: CPU completion published\n");
+ 	}
+ 	IOLog("SWEET CPU: %u/%u CPUs initialized, SGI1 verified\n",
