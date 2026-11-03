@@ -256,7 +256,8 @@ int main(void){
         # whole-file comparison for the preceding 0180 startup/poison changes.
         pre_caps = source.fixture.fragment('bsd/dev/sweet_ufs.c', source.PWM_PATCH)
         self.assertEqual(source.apply_exact_hunks(pre_caps, 'bsd/dev/sweet_ufs.c', source.UFS_CAP_PATCH), source.UFS_PRE_POLL)
-        self.assertEqual(source.apply_exact_hunks(source.UFS_PRE_POLL, 'bsd/dev/sweet_ufs.c', source.UFS_POLL_PATCH), UFS)
+        self.assertEqual(source.apply_exact_hunks(source.UFS_PRE_POLL, 'bsd/dev/sweet_ufs.c', source.UFS_POLL_PATCH), source.UFS_PRE_LANES)
+        self.assertEqual(source.apply_exact_hunks(source.UFS_PRE_LANES, 'bsd/dev/sweet_ufs.c', source.UFS_LANE_PATCH), UFS)
         normalized = source.without_fastboot_log_hooks(source.without_pwm_init_hooks(pre_caps))
         begin = normalized.index('#if DEVELOPMENT\n/* Completed logger publications only:')
         end = normalized.index('static void\nsweet_log_thread(', begin)

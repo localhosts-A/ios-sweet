@@ -1,0 +1,131 @@
+diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -178,6 +178,7 @@
+ 	bool writable;                          /* boot-arg ufsrw=1 */
+ 	bool cache;                             /* boot-arg ufscache=1 */
+ 	bool wait;                              /* boot-arg ufswait=1 */
++	bool pwm_two_lanes;                     /* Dali ADT opt-in, evaluated before init */
+ 	bool dali;                              /* MT6991 HCI profile from ADT compatible */
+ 	bool capacity_valid;
+ 	uint8_t last_sense_key, last_sense_asc, last_sense_ascq;
+@@ -392,6 +393,26 @@
+ 	return 0;
+ }
+ 
++/* Only the explicit Dali ADT trial can request a two-lane PWM transition. */
++static bool
++ufs_dali_two_lane_requested(void)
++{
++	DTEntry node;
++	const void *compat = NULL, *prop = NULL;
++	unsigned int compat_size = 0, prop_size = 0;
++	uint32_t value = 0;
++	if (SecureDTLookupEntry(NULL, "/sweet-ufs", &node) != kSuccess ||
++	    SecureDTGetProperty(node, "compatible", &compat, &compat_size) != kSuccess ||
++	    compat == NULL || compat_size < sizeof("mediatek,mt6991-ufshc") ||
++	    memcmp(compat, "mediatek,mt6991-ufshc", sizeof("mediatek,mt6991-ufshc")) != 0 ||
++	    SecureDTGetProperty(node, "dali-pwm-two-lanes", &prop, &prop_size) != kSuccess ||
++	    prop == NULL || prop_size != sizeof(value)) {
++		return false;
++	}
++	memcpy(&value, prop, sizeof(value));
++	return value == 1;
++}
++
+ /* Optional Dali-only polling budget; malformed input keeps the old default. */
+ static uint32_t
+ ufs_dali_spin_us(DTEntry node, bool dali)
+@@ -1718,7 +1739,7 @@
+ ufs_pwm_pmc(uint32_t mode, uint64_t until)
+ {
+     if (mach_absolute_time() >= until) return ETIMEDOUT;
+-    if (mode != 0x22) return EINVAL;
++    if (mode != 0x22 && mode != 0x55) return EINVAL;
+     int error = ufs_pwm_idle();
+     if (error || ufs_rd(REG_IS) != 0) return error ? error : EIO;
+     uint64_t span = 0, now = mach_absolute_time();
+@@ -1808,6 +1829,58 @@
+     return 0;
+ }
+ 
++/* Optional standard PWM G1 two-lane PMC. No HS, gear, clock or voltage changes. */
++static int
++ufs_dali_prepare_two_lanes(bool requested)
++{
++    if (!requested || !su.dali) return 0;
++    uint64_t span = 0, now = mach_absolute_time();
++    nanoseconds_to_absolutetime(30ull * NSEC_PER_SEC, &span);
++    if (span == 0 || now > UINT64_MAX - span) return ufs_pwm_latch(ETIMEDOUT, false);
++    uint64_t until = now + span;
++    struct sweet_pwm_snapshot before = {0}, after = {0};
++    uint32_t local_max = 0, peer_max = 0, peer_rx = 0, peer_tx = 0;
++    uint32_t peer_rx_active = 0, peer_tx_active = 0;
++    int error = ufs_pwm_snapshot(&before, until);
++    if (!error) error = ufs_pwm_get(false, 0x1586, &local_max, until);
++    if (!error) error = ufs_pwm_get(true, 0x1586, &peer_max, until);
++    if (!error) error = ufs_pwm_get(true, 0x1581, &peer_rx, until);
++    if (!error) error = ufs_pwm_get(true, 0x1561, &peer_tx, until);
++    if (error) return ufs_pwm_failure(error);
++    if (local_max < 1 || local_max > 7 || peer_max < 1 || peer_max > 7 ||
++        peer_rx < 1 || peer_rx > 2 || peer_tx < 1 || peer_tx > 2 ||
++        (((before.mode >> 4) == 2 || (before.mode >> 4) == 5) && before.rx_gear > local_max) ||
++        (((before.mode & 0xf) == 2 || (before.mode & 0xf) == 5) && before.tx_gear > peer_max))
++        return ufs_pwm_latch(EIO, false);
++    printf("SWEET UFS 2LANE: before mode=0x%x gear=%u/%u active=%u/%u connected=%u/%u peer=%u/%u max=%u/%u\n",
++        before.mode, before.rx_gear, before.tx_gear, before.rx_active, before.tx_active,
++        before.rx_connected, before.tx_connected, peer_rx, peer_tx, local_max, peer_max);
++    if (before.mode != 0x55 ||
++        before.rx_gear != 1 || before.tx_gear != 1 ||
++        before.rx_active != 1 || before.tx_active != 1 ||
++        before.rx_connected != 2 || before.tx_connected != 2 || peer_rx != 2 || peer_tx != 2) {
++        printf("SWEET UFS 2LANE: healthy link outside scope; unchanged\n");
++        return 0;
++    }
++    /* Stage only the two lane attributes; preserve existing PWM mode and gear. */
++    error = ufs_pwm_set(0x1580, 2, until); /* PA_ACTIVERXDATALANES */
++    if (!error) error = ufs_pwm_set(0x1560, 2, until); /* PA_ACTIVETXDATALANES */
++    if (!error) error = ufs_pwm_pmc(before.mode, until);
++    if (!error) error = ufs_pwm_snapshot(&after, until);
++    if (!error) error = ufs_pwm_get(true, 0x1580, &peer_rx_active, until);
++    if (!error) error = ufs_pwm_get(true, 0x1560, &peer_tx_active, until);
++    if (error) return ufs_pwm_failure(error);
++    if (after.mode != before.mode || after.rx_gear != before.rx_gear || after.tx_gear != before.tx_gear ||
++        after.rx_active != 2 || after.tx_active != 2 || peer_rx_active != 2 || peer_tx_active != 2 ||
++        after.rx_connected != before.rx_connected || after.tx_connected != before.tx_connected ||
++        after.rx_term != before.rx_term || after.tx_term != before.tx_term)
++        return ufs_pwm_latch(EIO, false);
++    printf("SWEET UFS 2LANE: verified mode=0x%x gear=%u/%u active=%u/%u peer=%u/%u\n",
++        after.mode, after.rx_gear, after.tx_gear, after.rx_active, after.tx_active,
++        peer_rx_active, peer_tx_active);
++    return 0;
++}
++
+ static int
+ ufs_mtk_dme_rmw(const char *get_stage, const char *set_stage, uint32_t attribute,
+ 	uint32_t clear_mask, uint32_t set_bits)
+@@ -2591,6 +2664,10 @@
+             pwm_cap = ufs_pwm_clock_cap();
+         error = ufs_dali_prepare_pwm(pwm_requested, su.dali, pwm_cap);
+     }
++	if (!error && su.pwm_two_lanes) {
++		su.failure_stage = "pwm-two-lanes";
++		error = ufs_dali_prepare_two_lanes(true);
++	}
+ 	if (!error) {
+ 		su.failure_stage = "read-capacity";
+ 		error = ufs_read_capacity();
+@@ -3023,9 +3100,12 @@
+     if (pwm_error) return pwm_error;
+     uint32_t pwm_requested = 0;
+     (void)PE_parse_boot_argn("ufspwm", &pwm_requested, sizeof(pwm_requested));
+-    bool pwm_guard = pwm_requested == 1 && SWEET_PWM_PLATFORM_CAP > 1;
++    bool two_lanes = ufs_dali_two_lane_requested();
++    if (two_lanes && pwm_requested != 0) return EINVAL;
++    bool pwm_guard = two_lanes || (pwm_requested == 1 && SWEET_PWM_PLATFORM_CAP > 1);
+     pwm_error = ufs_pwm_root_enter(pwm_guard);
+     if (pwm_error) return pwm_error;
++    su.pwm_two_lanes = two_lanes;
+ 	(void)sweet_ramoops_start();
+ 	if (!su.ready) {
+ 		su.failure_stage = "root-init";

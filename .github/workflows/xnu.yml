@@ -71,6 +71,9 @@ on:
       - "tools/dali-ufs-poll-adt.py"
       - "tools/test_dali_ufs_poll.py"
       - "tools/test_dali_ufs_poll_adt.py"
+      - "tools/dali-ufs-two-lane-adt.py"
+      - "tools/test_dali_ufs_two_lane.py"
+      - "tools/test_dali_ufs_two_lane_adt.py"
       - "tools/dali-touch-handoff-adt.py"
       - "tools/test_dali_touch_handoff.py"
       - "tools/test_dali_touch_handoff.cpp"
@@ -200,6 +203,8 @@ jobs:
           python3 tools/test_dali_ufs_startup.py
           python3 -I tools/test_dali_ufs_poll.py
           python3 -I tools/test_dali_ufs_poll_adt.py
+          python3 -I tools/test_dali_ufs_two_lane.py
+          python3 -I tools/test_dali_ufs_two_lane_adt.py
 
       - name: Build
         working-directory: dxb
@@ -227,6 +232,7 @@ jobs:
           python3 tools/test_dali_ufs_pwm_clock.py
           python3 tools/test_dali_ufs_startup.py
           python3 -I tools/test_dali_ufs_poll.py
+          python3 -I tools/test_dali_ufs_two_lane.py
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_ufs_ioctl.py" "$SWEET_LOAD_SOURCE_DIR/bsd/dev/sweet_ufs.c" "$SWEET_LOAD_SOURCE_DIR"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_fastboot_return.py"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_ulock.py"

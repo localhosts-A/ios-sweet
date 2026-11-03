@@ -42,6 +42,7 @@ IPCSEND_CONTEXT_PATCH = ROOT/'xnu/patches/0186-sweet-ipcsend-context-scalars.pat
 ULOCK_PATCH = ROOT/'xnu/patches/0189-sweet-springboard-ulock.patch'
 UFS_CAP_PATCH = ROOT/'xnu/patches/0190-sweet-ufs-io-capabilities.patch'
 UFS_POLL_PATCH = ROOT/'xnu/patches/0193-sweet-ufs-bounded-poll-adt.patch'
+UFS_LANE_PATCH = ROOT/'xnu/patches/0196-dali-ufs-pwm-two-lanes.patch'
 
 
 SOURCE['pexpert/arm/DaliFastbootReturnPolicy.h'] = apply_exact_hunks(
@@ -62,6 +63,9 @@ SOURCE['bsd/dev/sweet_ufs.c'] = apply_exact_hunks(
 UFS_PRE_POLL = SOURCE['bsd/dev/sweet_ufs.c']
 SOURCE['bsd/dev/sweet_ufs.c'] = apply_exact_hunks(
     UFS_PRE_POLL, 'bsd/dev/sweet_ufs.c', UFS_POLL_PATCH)
+UFS_PRE_LANES = SOURCE['bsd/dev/sweet_ufs.c']
+SOURCE['bsd/dev/sweet_ufs.c'] = apply_exact_hunks(
+    UFS_PRE_LANES, 'bsd/dev/sweet_ufs.c', UFS_LANE_PATCH)
 for path in ('bsd/dev/SweetBBContextPolicy.h', 'bsd/dev/SweetBBContextRuntime.h',
              'bsd/sys/SweetBBContext.h'):
     SOURCE[path] = fixture.fragment(path, BBCTX_PATCH)
