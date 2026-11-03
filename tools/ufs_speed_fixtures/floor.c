@@ -24,7 +24,7 @@ static int write32(void *p,uint32_t value){
 }
 static int smc(void *p,uint32_t cmd,uint32_t index,uint64_t *a0,uint64_t *a1){
  struct mock *m=p;++m->smcs;if(m->smcs==m->fail_smc)return 1;*a0=*a1=0;
- if(cmd==4){assert(index<HSF_OPPS && !m->acquires && !m->writes);*a1=m->cal[HSF_OPPS-index-1];}
+ if(cmd==4){unsigned count=(m->reg[HSF_COUNT/4]&7u)+1u;assert(count<=HSF_OPPS && index<count && !m->acquires && !m->writes);*a1=m->cal[count-index-1];}
  else if(cmd==0x40){assert(!index && !m->acquires && !m->writes);++m->acquires;}
  else{assert(cmd==0x41 && !index && m->acquires==1 && !m->releases);++m->releases;if(m->release_fail)*a0=UINT64_MAX;}
  if(m->opaque_resource && cmd!=4)*a0=3; /* No zero-only resource ABI is assumed. */
@@ -52,8 +52,22 @@ int main(void){struct hsf_state s;struct mock m;
  assert(!hsf_acquire(&s,true,&ops,&m) && !m.writes && s.request==5 && m.releases==1);
  reset(&s,&m);m.cal[2]=640000;
  assert(!hsf_acquire(&s,true,&ops,&m) && s.request==3 && s.nominal_uv==725000 && s.calibrated_uv==725000);
+ for(unsigned count=3;count<=HSF_OPPS;count++){
+  reset(&s,&m);m.reg[HSF_COUNT/4]=count-1;
+  assert(!hsf_acquire(&s,true,&ops,&m) && s.opp_count==count && s.raw_count==count-1);
+  assert(s.request==2 && s.calibrated_uv==650000 && m.smcs==count+2 && m.writes==1);
+ }
+ for(unsigned count=1;count<=8;count++){
+  if(count>=3 && count<=HSF_OPPS)continue;
+  reset(&s,&m);m.reg[HSF_COUNT/4]=count-1;
+  assert(hsf_acquire(&s,true,&ops,&m)==HSF_COUNT_ERROR && !m.writes && !m.smcs);
+ }
+ reset(&s,&m);m.reg[HSF_COUNT/4]=2;m.cal[2]=640000;
+ assert(hsf_acquire(&s,true,&ops,&m)==HSF_TABLE && !m.writes && !m.acquires);
+ reset(&s,&m);m.reg[HSF_COUNT/4]=2;m.reg[HSF_REQUEST/4]|=3u<<4;
+ assert(hsf_acquire(&s,true,&ops,&m)==HSF_REQUEST_ERROR && !m.writes && !m.acquires);
  for(unsigned bad=0;bad<4;bad++){
-  reset(&s,&m);if(bad==0)m.reg[HSF_COUNT/4]=4;if(bad==1)m.reg[HSF_FORCE_REQUEST/4]=UINT32_MAX;
+  reset(&s,&m);if(bad==0)m.reg[HSF_COUNT/4]=1;if(bad==1)m.reg[HSF_FORCE_REQUEST/4]=UINT32_MAX;
   if(bad==2)m.reg[HSF_HALT/4]=2;if(bad==3)m.cal[3]=1;
   assert(hsf_acquire(&s,true,&ops,&m)!=0 && !m.writes && !m.acquires && s.phase==HSF_FAILED);
   unsigned reads=m.reads;assert(hsf_acquire(&s,true,&ops,&m)!=0 && m.reads==reads);

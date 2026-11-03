@@ -40,9 +40,16 @@ The actual Dali DT requires 650000 uV for the maximum UFS controller clock.
 existing exact MT6991 decoder, with stable clock/gate/reference snapshots.
 It maps only the actual DVFSRC, CKSYS and APMIXED ranges.
 
-`SweetUFSHSFloor.h` reads the live six-gear count and six calibrated firmware
-entries. It chooses the lowest selector whose nominal and calibrated values
-both satisfy 650000 uV, never lowering an inherited AP request. It uses the
+`SweetUFSHSFloor.h` reads the live configured gear count and that many
+calibrated firmware entries. The nominal regulator has six possible selectors;
+this is a ceiling, not proof that the active firmware table always has six
+entries. Counts 3 through 6 use the vendor's `count - 1 - selector` reverse
+index. Fewer than three cannot express nominal selector 2 (650000 uV), and
+more than six lacks a known nominal selector map, so both are rejected before
+any request write. The raw count and decoded number are logged even on a
+capability rejection. It chooses the lowest configured selector whose nominal
+and calibrated values both satisfy 650000 uV, never lowering an inherited AP
+request. Unknown, out-of-table and insufficient-voltage states remain errors. It uses the
 standard temporary memory-resource request/release and writes only
 `SW_REQ[6:4]`, preserving unrelated bits. It waits for target idle and
 `CUR_TAR_GEAR[10:8] >= request`, with a 1000-us clock budget and a separate

@@ -51,6 +51,14 @@ def main():
     # The source fixture must reconstruct, not read unchecked mutable bytes.
     assert sources.apply_exact_hunks(sources.UFS_PRE_SPEED,'bsd/dev/sweet_ufs.c',PATCH)==expected[PATHS[0]]
     assert sources.apply_exact_hunks(sources.PE_PRE_SPEED,'pexpert/arm/pe_dali_watchdog.c',PATCH)==expected[PATHS[1]]
+    for path, previous in sources.HS_PRE_LIVE_OPP.items():
+        assert sources.apply_exact_hunks(previous,path,sources.UFS_OPP_PATCH)==expected[path]
+        try:
+            sources.apply_exact_hunks('\n'+previous,path,sources.UFS_OPP_PATCH)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError('Offset accepted in live OPP patch: '+path)
     with tempfile.TemporaryDirectory(prefix='dali-ufs-speed-') as name:
         folder=Path(name)
         if len(sys.argv)>1:

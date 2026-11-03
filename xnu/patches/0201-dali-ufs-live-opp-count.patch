@@ -1,0 +1,94 @@
+diff --git a/bsd/dev/SweetUFSHSFloor.h b/bsd/dev/SweetUFSHSFloor.h
+index ba404fa67b6aa817e418495aa992223d288b3cb5..e99eca37fa2a97ba9a312a98b27805afdf06e2ac 100644
+--- a/bsd/dev/SweetUFSHSFloor.h
++++ b/bsd/dev/SweetUFSHSFloor.h
+@@ -43,10 +43,11 @@
+ struct hsf_state {
+     struct hsf_ops ops;
+     void *context;
+     uint32_t phase, failed_stage, failure;
+     uint32_t request, completed, nominal_uv, calibrated_uv;
++    uint32_t raw_count, opp_count; /* Live firmware table, not nominal capacity. */
+     uint32_t calibrated[HSF_OPPS];
+     uint64_t resource_request_result, resource_release_result;
+     bool resource_requested, wrote_request;
+ };
+ 
+@@ -73,11 +74,12 @@
+         s->ops.read(s->context, HSF_GEAR, &completed)) return HSF_READ;
+     if (force != 0 || (halt & 2u)) return HSF_FORCE;
+     *request = (req >> 4) & 7u;
+     *gear = (completed >> 8) & 7u;
+     *idle = (target & (1u << 16)) == 0;
+-    if (*request >= HSF_OPPS || *gear >= HSF_OPPS) return HSF_REQUEST_ERROR;
++    if (s->opp_count < 3 || s->opp_count > HSF_OPPS ||
++        *request >= s->opp_count || *gear >= s->opp_count) return HSF_REQUEST_ERROR;
+     if (s->ops.clock_ok(s->context)) return HSF_CLOCK;
+     return HSF_OK;
+ }
+ 
+ static inline int
+@@ -113,26 +115,33 @@
+     int error = s->ops.clock_ok(context);
+     if (error) return hsf_fail(s, HSF_CLOCK);
+     uint32_t count = 0;
+     s->phase = HSF_CAPABILITY;
+     if (s->ops.read(context, HSF_COUNT, &count)) return hsf_fail(s, HSF_READ);
+-    if (((count & 7u) + 1u) != HSF_OPPS) return hsf_fail(s, HSF_COUNT_ERROR);
+-    for (unsigned int i = 0; i < HSF_OPPS; ++i) {
++    s->raw_count = count;
++    s->opp_count = (count & 7u) + 1u;
++    /* The regulator publishes six possible AP selectors, while the v4 helper
++     * obtains the configured firmware count dynamically. Never assume the
++     * nominal table length is the live reverse-index base. Below three gears
++     * cannot express nominal selector2; above six lacks a known nominal map.
++     */
++    if (s->opp_count < 3 || s->opp_count > HSF_OPPS) return hsf_fail(s, HSF_COUNT_ERROR);
++    for (unsigned int i = 0; i < s->opp_count; ++i) {
+         uint64_t a0 = UINT64_MAX, a1 = UINT64_MAX;
+-        if (s->ops.smc(context, 4, HSF_OPPS - i - 1u, &a0, &a1) || a0 != 0 ||
++        if (s->ops.smc(context, 4, s->opp_count - i - 1u, &a0, &a1) || a0 != 0 ||
+             a1 < 500000 || a1 > 1000000 || (i && a1 < s->calibrated[i-1]))
+             return hsf_fail(s, HSF_TABLE);
+         s->calibrated[i] = (uint32_t)a1;
+     }
+-    uint32_t minimum = HSF_OPPS;
+-    for (unsigned int i = 0; i < HSF_OPPS; ++i) {
++    uint32_t minimum = s->opp_count;
++    for (unsigned int i = 0; i < s->opp_count; ++i) {
+         if (nominal[i] >= HSF_MIN_UV && s->calibrated[i] >= HSF_MIN_UV) {
+             minimum = i;
+             break;
+         }
+     }
+-    if (minimum == HSF_OPPS) return hsf_fail(s, HSF_TABLE);
++    if (minimum == s->opp_count) return hsf_fail(s, HSF_TABLE);
+     uint32_t request = 0, completed = 0;
+     bool idle = false;
+     error = hsf_read_health(s, &request, &completed, &idle);
+     if (error || !idle) return hsf_fail(s, error ? (unsigned int)error : HSF_LOST_FLOOR);
+     s->request = request > minimum ? request : minimum; /* Never lower an inherited request. */
+diff --git a/bsd/dev/SweetUFSHSPlatform.h b/bsd/dev/SweetUFSHSPlatform.h
+index 0499a71901149989b90a893a9a3c12cf07b0ab88..3c6773b894cdf937fb0b743f1c301fc7d3dc3e4e 100644
+--- a/bsd/dev/SweetUFSHSPlatform.h
++++ b/bsd/dev/SweetUFSHSPlatform.h
+@@ -148,15 +148,17 @@
+     const struct hsf_ops ops = {ufs_hs_floor_read, ufs_hs_floor_write, ufs_hs_smc,
+         ufs_hs_clock_ok, ufs_hs_now_us, ufs_hs_delay_us};
+     int error = hsf_acquire(&dali_hs_platform.floor, true, &ops, NULL);
+     struct hsf_state *s = &dali_hs_platform.floor;
+     printf("SWEET UFS HSFLOOR: result=%d stage=%u request=%u completed=%u nominal=%u calibrated=%u "
+-        "write-attempted=%u clock=%llu resource-raw=0x%llx/0x%llx scope=ap-min-request-not-adc\n", error,
++        "write-attempted=%u clock=%llu resource-raw=0x%llx/0x%llx raw-count=0x%x opp-count=%u "
++        "scope=ap-min-request-not-adc\n", error,
+         error ? s->failed_stage : s->phase, s->request, s->completed, s->nominal_uv,
+         s->calibrated_uv, s->wrote_request ? 1u : 0u,
+         (unsigned long long)sweet_pwm_clock_hz(&second.pll, &second.pll),
+-        (unsigned long long)s->resource_request_result, (unsigned long long)s->resource_release_result);
++        (unsigned long long)s->resource_request_result, (unsigned long long)s->resource_release_result,
++        s->raw_count, s->opp_count);
+     if (error) dali_hs_platform.failure = EIO;
+     return dali_hs_platform.failure;
+ }
+ 
+ static int
