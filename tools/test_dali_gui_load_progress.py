@@ -41,6 +41,7 @@ IPCSEND_PATCH = ROOT/'xnu/patches/0185-mach-ipcsend-diagnostic.patch'
 IPCSEND_CONTEXT_PATCH = ROOT/'xnu/patches/0186-sweet-ipcsend-context-scalars.patch'
 ULOCK_PATCH = ROOT/'xnu/patches/0189-sweet-springboard-ulock.patch'
 UFS_CAP_PATCH = ROOT/'xnu/patches/0190-sweet-ufs-io-capabilities.patch'
+UFS_POLL_PATCH = ROOT/'xnu/patches/0193-sweet-ufs-bounded-poll-adt.patch'
 
 
 SOURCE['pexpert/arm/DaliFastbootReturnPolicy.h'] = apply_exact_hunks(
@@ -58,6 +59,9 @@ SOURCE['bsd/dev/sweet_sample.c'] = apply_exact_hunks(
     SOURCE['bsd/dev/sweet_sample.c'], 'bsd/dev/sweet_sample.c', ULOCK_PATCH)
 SOURCE['bsd/dev/sweet_ufs.c'] = apply_exact_hunks(
     SOURCE['bsd/dev/sweet_ufs.c'], 'bsd/dev/sweet_ufs.c', UFS_CAP_PATCH)
+UFS_PRE_POLL = SOURCE['bsd/dev/sweet_ufs.c']
+SOURCE['bsd/dev/sweet_ufs.c'] = apply_exact_hunks(
+    UFS_PRE_POLL, 'bsd/dev/sweet_ufs.c', UFS_POLL_PATCH)
 for path in ('bsd/dev/SweetBBContextPolicy.h', 'bsd/dev/SweetBBContextRuntime.h',
              'bsd/sys/SweetBBContext.h'):
     SOURCE[path] = fixture.fragment(path, BBCTX_PATCH)
@@ -541,7 +545,7 @@ int main(void){
             trace = trace.replace(addition, '')
         self.assertEqual(trace, function(old,'sweet_ff_trace'))
         for name in ('ufs_scsi_on_lun_timeout','ufs_sync_cache'):
-            self.assertEqual(function(UFS,name),function(old_fragment(PATHS[1]),name),name)
+            self.assertEqual(function(UFS_PRE_POLL,name),function(old_fragment(PATHS[1]),name),name)
         logger_guard = ('\t\t/* Do not overwrite DMA memory until hardware ownership is known. */\n'
                         '\t\tif (su.dali && su.command_poisoned) {\n'
                         '\t\t\terror = ETIMEDOUT;\n\t\t}\n')

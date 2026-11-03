@@ -147,6 +147,7 @@ def adt_fixture():
 LIMIT_PATCH = ROOT / 'xnu/patches/0187-dali-extend-bounded-return-lease.patch'
 INTERVAL_PATCH = ROOT / 'xnu/patches/0188-dali-fastboot-supported-sample-intervals.patch'
 UFS_CAP_PATCH = ROOT / 'xnu/patches/0190-sweet-ufs-io-capabilities.patch'
+UFS_POLL_PATCH = ROOT / 'xnu/patches/0193-sweet-ufs-bounded-poll-adt.patch'
 BASE_PATCH = ROOT / 'xnu/patches/0180-sweet-dali-pwm-link-policy.patch'
 POLICY_PATH = 'pexpert/arm/DaliFastbootReturnPolicy.h'
 NATIVE_PATH = 'pexpert/arm/pe_dali_watchdog.c'
@@ -653,6 +654,7 @@ in_irq=false;preempt=1;assert(!sweet_log_fastboot_drain(100));puts("PASS");}
                     expected = NATIVE
                 elif path == 'bsd/dev/sweet_ufs.c':
                     expected = apply_exact_hunks(fragment(path, BASE_PATCH), path, UFS_CAP_PATCH)
+                    expected = apply_exact_hunks(expected, path, UFS_POLL_PATCH)
                 elif path == 'osfmk/arm64/dali_watchdog.h':
                     expected = fragment(path, BASE_PATCH)
                 else:

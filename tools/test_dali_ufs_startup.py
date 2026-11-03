@@ -169,7 +169,7 @@ static void keep(void){
 static void reset(void){
  keep();memset(&su,0,sizeof(su));memset(dma,0xa5,sizeof(dma));memset(&b,0,sizeof(b));
  su.dali=su.ready=su.writable=su.log_partition_configured=su.log_partition_ready=true;
- su.dma=(uintptr_t)dma;su.dma_pa=0x100000000ull;su.lun=2;su.first_block=500;su.nblocks=4096;su.secsize=512;
+ su.dma=(uintptr_t)dma;su.dma_pa=0x100000000ull;su.lun=2;su.first_block=500;su.nblocks=4096;su.secsize=512;su.spin_us=50;
  su.log_first_block=10000;su.log_nblocks=2048;strcpy(su.log_partition_name,"unixnu_logs");
  memset(sweet_log_ring,0x33,sizeof(sweet_log_ring));sweet_log_total=4096;
  now=complete_after=wake_at=submitted_at=0;held=in_irq=timeout_mode=early_wake=reject_wait=false;irq_on=true;preempt=0;
@@ -244,7 +244,7 @@ int main(void){
     def test_final_source_and_only_two_guards(self):
         if os.environ.get('SWEET_LOAD_SOURCE_DIR'):
             self.assertEqual((Path(os.environ['SWEET_LOAD_SOURCE_DIR'])/'bsd/dev/sweet_ufs.c').read_text(encoding='latin-1'), UFS)
-        self.assertEqual(source.function(UFS,'ufs_scsi_on_lun_timeout'), source.function(OLD,'ufs_scsi_on_lun_timeout'))
+        self.assertEqual(source.function(source.UFS_PRE_POLL,'ufs_scsi_on_lun_timeout'), source.function(OLD,'ufs_scsi_on_lun_timeout'))
         for name in ('ufs_scsi','ufs_sync_cache','ufs_query_current_power_mode','ufs_query_fdeviceinit_flag'):
             self.assertEqual(source.function(UFS,name), source.function(OLD,name))
         strategy_guard = ('\t/* A poisoned command may still own DMA; do not touch its bounce buffer. */\n'
@@ -255,7 +255,8 @@ int main(void){
         # Verify the new capability patch exactly, then retain the historical
         # whole-file comparison for the preceding 0180 startup/poison changes.
         pre_caps = source.fixture.fragment('bsd/dev/sweet_ufs.c', source.PWM_PATCH)
-        self.assertEqual(source.apply_exact_hunks(pre_caps, 'bsd/dev/sweet_ufs.c', source.UFS_CAP_PATCH), UFS)
+        self.assertEqual(source.apply_exact_hunks(pre_caps, 'bsd/dev/sweet_ufs.c', source.UFS_CAP_PATCH), source.UFS_PRE_POLL)
+        self.assertEqual(source.apply_exact_hunks(source.UFS_PRE_POLL, 'bsd/dev/sweet_ufs.c', source.UFS_POLL_PATCH), UFS)
         normalized = source.without_fastboot_log_hooks(source.without_pwm_init_hooks(pre_caps))
         begin = normalized.index('#if DEVELOPMENT\n/* Completed logger publications only:')
         end = normalized.index('static void\nsweet_log_thread(', begin)

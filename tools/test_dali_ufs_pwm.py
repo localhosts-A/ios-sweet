@@ -324,11 +324,12 @@ class PWMHardwareTest(unittest.TestCase):
   for name in ('ufs_mtk_log_uic_error','ufs_mtk_ack_uic','ufs_mtk_link_reset_event','ufs_mtk_uic',
    'ufs_scsi_on_lun_timeout','ufs_scsi','ufs_query_current_power_mode','ufs_query_fdeviceinit_flag',
    'ufs_read_blocks','ufs_write_blocks','ufs_write_log_blocks','ufs_sync_cache','sweet_ufs_strategy','sweet_log_thread'):
-   self.assertEqual(function(UFS,name),function(OLD,name),name)
+   self.assertEqual(function(source.UFS_PRE_POLL if name=='ufs_scsi_on_lun_timeout' else UFS,name),function(OLD,name),name)
   # 0190 intentionally updates ioctl; retain the 0180-vs-0178 equality check.
   pre_caps=source.fixture.fragment('bsd/dev/sweet_ufs.c',source.PWM_PATCH)
   self.assertEqual(function(pre_caps,'sweet_ufs_ioctl'),function(OLD,'sweet_ufs_ioctl'))
-  self.assertEqual(source.apply_exact_hunks(pre_caps,'bsd/dev/sweet_ufs.c',source.UFS_CAP_PATCH),UFS)
+  self.assertEqual(source.apply_exact_hunks(pre_caps,'bsd/dev/sweet_ufs.c',source.UFS_CAP_PATCH),source.UFS_PRE_POLL)
+  self.assertEqual(source.apply_exact_hunks(source.UFS_PRE_POLL,'bsd/dev/sweet_ufs.c',source.UFS_POLL_PATCH),UFS)
  def test_disabled_invalid_profile_or_effective_cap1_zero_uic(self):
   self.run_c(r'''
 for(unsigned req=0;req<4;++req)for(unsigned dali=0;dali<2;++dali)for(unsigned cold=0;cold<2;++cold){

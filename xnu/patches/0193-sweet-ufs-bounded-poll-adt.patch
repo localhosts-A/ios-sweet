@@ -1,0 +1,63 @@
+diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -127,7 +127,8 @@
+ #define PRDT_CHUNK      (256u << 10)            /* PRDT byte count field: 18 bits */
+ #define PRDT_MAX        (BOUNCE_SIZE / PRDT_CHUNK)
+ #define CMD_TIMEOUT_NS  (5ull * NSEC_PER_SEC)
+-#define CMD_SPIN_NS     (50ull * NSEC_PER_USEC)
++#define CMD_SPIN_US     50u
++#define DALI_CMD_SPIN_MAX_US 1000u
+ #define CMD_SLEEP_NS    (200ull * NSEC_PER_USEC)
+ #define UFS_QUERY_TIMEOUT_NS (200ull * NSEC_PER_USEC * 1000ull)
+ #define UFS_DEVICE_INIT_TIMEOUT_NS (1500ull * 1000ull * NSEC_PER_USEC)
+@@ -173,6 +174,7 @@
+ 	uint64_t log_offset_bytes;
+ 	char log_partition_name[64];
+ 	uint32_t secsize;                       /* logical sector size for the BSD layer */
++	uint32_t spin_us;                       /* Dali ADT opt-in, otherwise 50 */
+ 	bool writable;                          /* boot-arg ufsrw=1 */
+ 	bool cache;                             /* boot-arg ufscache=1 */
+ 	bool wait;                              /* boot-arg ufswait=1 */
+@@ -390,6 +392,21 @@
+ 	return 0;
+ }
+ 
++/* Optional Dali-only polling budget; malformed input keeps the old default. */
++static uint32_t
++ufs_dali_spin_us(DTEntry node, bool dali)
++{
++	const void *prop = NULL;
++	unsigned int size = 0;
++	uint32_t value;
++	if (!dali || SecureDTGetProperty(node, "dali-poll-spin-us", &prop, &size) != kSuccess ||
++	    prop == NULL || size != sizeof(value)) {
++		return CMD_SPIN_US;
++	}
++	memcpy(&value, prop, sizeof(value));
++	return value >= CMD_SPIN_US && value <= DALI_CMD_SPIN_MAX_US ? value : CMD_SPIN_US;
++}
++
+ /*
+  * One SCSI command in slot 0, data (if any) to/from the bounce buffer
+  * (to the device when write is set). Returns 0 or an errno.
+@@ -469,7 +486,7 @@
+ 	    !ml_at_interrupt_context() && get_preemption_level() == 0;
+ 	uint64_t spin_until = 0, sleep_interval = 0;
+ 	if (sleepable) {
+-		nanoseconds_to_absolutetime(CMD_SPIN_NS, &spin_until);
++		nanoseconds_to_absolutetime((uint64_t)su.spin_us * NSEC_PER_USEC, &spin_until);
+ 		spin_until += mach_absolute_time();
+ 		nanoseconds_to_absolutetime(CMD_SLEEP_NS, &sleep_interval);
+ 	}
+@@ -2462,6 +2479,10 @@
+ 	    memcmp(compatible, "mediatek,mt6991-ufshc", sizeof("mediatek,mt6991-ufshc")) == 0) {
+ 		su.dali = true;
+ 	}
++	su.spin_us = ufs_dali_spin_us(node, su.dali);
++	if (su.dali && su.wait) {
++		printf("SWEET UFS: bounded command poll spin=%u us\n", su.spin_us);
++	}
+ 	if (su.dali && strcmp(want, "unixnu_data") != 0) {
+ 		su.failure_stage = "dali-root-partition";
+ 		printf("SWEET UFS: refusing Dali root partition \"%s\"; only unixnu_data is allowed\n", want);
