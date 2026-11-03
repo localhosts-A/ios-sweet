@@ -43,6 +43,7 @@ ULOCK_PATCH = ROOT/'xnu/patches/0189-sweet-springboard-ulock.patch'
 UFS_CAP_PATCH = ROOT/'xnu/patches/0190-sweet-ufs-io-capabilities.patch'
 UFS_POLL_PATCH = ROOT/'xnu/patches/0193-sweet-ufs-bounded-poll-adt.patch'
 UFS_LANE_PATCH = ROOT/'xnu/patches/0196-dali-ufs-pwm-two-lanes.patch'
+UFS_SPEED_PATCH = ROOT/'xnu/patches/0200-dali-ufs-hsg1-short-speed-trial.patch'
 
 
 SOURCE['pexpert/arm/DaliFastbootReturnPolicy.h'] = apply_exact_hunks(
@@ -79,6 +80,15 @@ SOURCE['bsd/dev/sweet_sample.c'] = apply_exact_hunks(
 SOURCE['pexpert/arm/pe_dali_watchdog.c'] = apply_exact_hunks(
     SOURCE['pexpert/arm/pe_dali_watchdog.c'], 'pexpert/arm/pe_dali_watchdog.c',
     ROOT/'xnu/patches/0199-dali-root-sync-before-fastboot.patch')
+# Preserve historical snapshots while requiring exact 0200 replay into final source.
+UFS_PRE_SPEED = SOURCE['bsd/dev/sweet_ufs.c']
+PE_PRE_SPEED = SOURCE['pexpert/arm/pe_dali_watchdog.c']
+for path in ('bsd/dev/sweet_ufs.c', 'pexpert/arm/pe_dali_watchdog.c'):
+    SOURCE[path] = apply_exact_hunks(SOURCE[path], path, UFS_SPEED_PATCH)
+for path in ('bsd/dev/SweetUFSHSG1.h', 'bsd/dev/SweetUFSSpeedRead.h',
+             'bsd/dev/SweetUFSSpeedLog.h', 'bsd/dev/SweetUFSHSFloor.h',
+             'bsd/dev/SweetUFSHSPlatform.h', 'pexpert/arm/DaliUFSSpeedReturn.h'):
+    SOURCE[path] = fixture.fragment(path, UFS_SPEED_PATCH)
 LOCK = SOURCE['osfmk/kern/lock_mtx.c']
 SAMPLER, UFS, EXCEPTION, GUI_POLICY, IO_POLICY = (SOURCE[p] for p in PATHS)
 RW_POLICY = SOURCE['osfmk/kern/SweetRWWaitProgress.h']
@@ -550,6 +560,21 @@ int main(void){
         with self.assertRaises(AssertionError):
             apply_exact_hunks(previous.replace(old_line, '    /* changed */\n', 1),
                               'bsd/dev/sweet_sample.c', BBCTX_PATCH)
+
+    def test_speed_replay_rejects_offsets_and_context_changes(self):
+        for path, previous, context in (
+            ('bsd/dev/sweet_ufs.c', UFS_PRE_SPEED, 'extern void sweet_sample_start(void);\n'),
+            ('pexpert/arm/pe_dali_watchdog.c', PE_PRE_SPEED,
+             '#include "DaliFastbootReturnSMC.h"\n'),
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(apply_exact_hunks(previous, path, UFS_SPEED_PATCH), SOURCE[path])
+                with self.assertRaises(AssertionError):
+                    apply_exact_hunks('\n' + previous, path, UFS_SPEED_PATCH)
+                self.assertEqual(previous.count(context), 1)
+                with self.assertRaises(AssertionError):
+                    apply_exact_hunks(previous.replace(context, '/* changed context */\n', 1),
+                                      path, UFS_SPEED_PATCH)
 
     def test_final_source_and_unchanged_old_helpers(self):
         if os.environ.get('SWEET_LOAD_SOURCE_DIR'):

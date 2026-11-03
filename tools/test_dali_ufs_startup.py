@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Execute final0180 UFS functions, preserving real polling/blocking and DMA callers."""
+"""Execute final0200 UFS functions with HS disabled, retaining real DMA callers."""
 from pathlib import Path
 import os
 import shutil
@@ -99,6 +99,11 @@ static int unlocks,maps,unmaps,biodones,sleeps,fail_command,desync_command,timeo
 static bool ocs_error;
 static unsigned operations[1024],operation_count;static jmp_buf logger_exit;
 static uint64_t submitted_at;static unsigned char tag_at_submit;
+/* 0200's real SCSI guard must not call the HS platform on the default-off path. */
+static unsigned hs_reentry_calls,hs_validate_calls,hs_failure_calls;
+static int ufs_pwm_reentry_error(void){++hs_reentry_calls;return EIO;}
+static int ufs_dali_hs_platform_validate(void){++hs_validate_calls;return EIO;}
+static int ufs_pwm_failure(int error){++hs_failure_calls;return error;}
 static void event(unsigned n){assert(operation_count<1024);operations[operation_count++]=n;}
 static int output(const char *fmt,...){(void)fmt;return 0;}
 #define printf output
@@ -167,6 +172,7 @@ static void keep(void){
  (void)&old_strategy;(void)&old_logger;(void)&sweet_ufs_grp;
 }
 static void reset(void){
+ assert(!hs_reentry_calls && !hs_validate_calls && !hs_failure_calls);
  keep();memset(&su,0,sizeof(su));memset(dma,0xa5,sizeof(dma));memset(&b,0,sizeof(b));
  su.dali=su.ready=su.writable=su.log_partition_configured=su.log_partition_ready=true;
  su.dma=(uintptr_t)dma;su.dma_pa=0x100000000ull;su.lun=2;su.first_block=500;su.nblocks=4096;su.secsize=512;su.spin_us=50;
@@ -176,7 +182,7 @@ static void reset(void){
  wait_calls=block_calls=delay_calls=polls=commands=clear_calls=cache_calls=0;
  unlocks=maps=unmaps=biodones=sleeps=fail_command=desync_command=timeout_command=0;ocs_error=false;operation_count=0;
 }
-static void check_counters(void){assert(wait_calls>=block_calls && block_calls>=0 && delay_calls>=0 && polls>=commands && clear_calls<=commands && cache_calls>=0 && unmaps<=maps && biodones>=unmaps);}
+static void check_counters(void){assert(!hs_reentry_calls && !hs_validate_calls && !hs_failure_calls);assert(wait_calls>=block_calls && block_calls>=0 && delay_calls>=0 && polls>=commands && clear_calls<=commands && cache_calls>=0 && unmaps<=maps && biodones>=unmaps);}
 static int command(uint64_t timeout){uint8_t c[10]={0x28};held=true;int e=ufs_scsi_on_lun_timeout(2,c,10,4096,false,timeout);held=false;return e;}
 static void logger(bool old){if(!setjmp(logger_exit)){if(old)old_logger(NULL,0);else sweet_log_thread(NULL,0);}assert(!held);}
 static void unchanged_after_poison(bool write,bool partial){
@@ -193,7 +199,8 @@ static void unchanged_after_poison(bool write,bool partial){
 def fixture():
     constants = UFS[UFS.index('#define REG_CAP'):UFS.index('struct utrd {')]
     layout = UFS[UFS.index('struct utrd {'):UFS.index('#if DEVELOPMENT\n#include "SweetUFSLoadPolicy.h"')]
-    log_header = UFS[UFS.index('struct sweet_log_header {'):UFS.index('\nstatic void\nsweet_log_thread')]
+    log_begin = UFS.index('struct sweet_log_header {')
+    log_header = UFS[log_begin:UFS.index('\n};', log_begin)+4] + '\n'
     policy = source.fixture.fragment('bsd/dev/SweetUFSCompletion.h', ROOT/'xnu/patches/0166-sweet-dali-validate-scsi-completions.patch')
     actual = ''.join(source.function(UFS, n) for n in FUNCTIONS)
     old = source.function(OLD, 'sweet_ufs_strategy').replace('sweet_ufs_strategy(', 'old_strategy(')
@@ -241,7 +248,7 @@ int main(void){
  puts("PASS");}
 ''', logger_publication=True)
 
-    def test_final_source_and_only_two_guards(self):
+    def test_final_source_and_historical_poison_guards(self):
         if os.environ.get('SWEET_LOAD_SOURCE_DIR'):
             self.assertEqual((Path(os.environ['SWEET_LOAD_SOURCE_DIR'])/'bsd/dev/sweet_ufs.c').read_text(encoding='latin-1'), UFS)
         self.assertEqual(source.function(source.UFS_PRE_POLL,'ufs_scsi_on_lun_timeout'), source.function(OLD,'ufs_scsi_on_lun_timeout'))
@@ -257,7 +264,8 @@ int main(void){
         pre_caps = source.fixture.fragment('bsd/dev/sweet_ufs.c', source.PWM_PATCH)
         self.assertEqual(source.apply_exact_hunks(pre_caps, 'bsd/dev/sweet_ufs.c', source.UFS_CAP_PATCH), source.UFS_PRE_POLL)
         self.assertEqual(source.apply_exact_hunks(source.UFS_PRE_POLL, 'bsd/dev/sweet_ufs.c', source.UFS_POLL_PATCH), source.UFS_PRE_LANES)
-        self.assertEqual(source.apply_exact_hunks(source.UFS_PRE_LANES, 'bsd/dev/sweet_ufs.c', source.UFS_LANE_PATCH), UFS)
+        self.assertEqual(source.apply_exact_hunks(source.UFS_PRE_LANES, 'bsd/dev/sweet_ufs.c', source.UFS_LANE_PATCH), source.UFS_PRE_SPEED)
+        self.assertEqual(source.apply_exact_hunks(source.UFS_PRE_SPEED, 'bsd/dev/sweet_ufs.c', source.UFS_SPEED_PATCH), UFS)
         normalized = source.without_fastboot_log_hooks(source.without_pwm_init_hooks(pre_caps))
         begin = normalized.index('#if DEVELOPMENT\n/* Completed logger publications only:')
         end = normalized.index('static void\nsweet_log_thread(', begin)

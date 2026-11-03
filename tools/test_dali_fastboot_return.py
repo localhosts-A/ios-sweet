@@ -149,14 +149,16 @@ INTERVAL_PATCH = ROOT / 'xnu/patches/0188-dali-fastboot-supported-sample-interva
 UFS_CAP_PATCH = ROOT / 'xnu/patches/0190-sweet-ufs-io-capabilities.patch'
 UFS_POLL_PATCH = ROOT / 'xnu/patches/0193-sweet-ufs-bounded-poll-adt.patch'
 UFS_LANE_PATCH = ROOT / 'xnu/patches/0196-dali-ufs-pwm-two-lanes.patch'
+UFS_SPEED_PATCH = ROOT / 'xnu/patches/0200-dali-ufs-hsg1-short-speed-trial.patch'
 BASE_PATCH = ROOT / 'xnu/patches/0180-sweet-dali-pwm-link-policy.patch'
 POLICY_PATH = 'pexpert/arm/DaliFastbootReturnPolicy.h'
 NATIVE_PATH = 'pexpert/arm/pe_dali_watchdog.c'
 POLICY = apply_exact_hunks(fragment(POLICY_PATH, BASE_PATCH), POLICY_PATH, LIMIT_PATCH)
 NATIVE_BASE = fragment(NATIVE_PATH, BASE_PATCH)
 NATIVE_PRE_SYNC = apply_exact_hunks(NATIVE_BASE, NATIVE_PATH, INTERVAL_PATCH)
-NATIVE = apply_exact_hunks(NATIVE_PRE_SYNC, NATIVE_PATH,
-                           ROOT / 'xnu/patches/0199-dali-root-sync-before-fastboot.patch')
+NATIVE_PRE_SPEED = apply_exact_hunks(NATIVE_PRE_SYNC, NATIVE_PATH,
+                                     ROOT / 'xnu/patches/0199-dali-root-sync-before-fastboot.patch')
+NATIVE = apply_exact_hunks(NATIVE_PRE_SPEED, NATIVE_PATH, UFS_SPEED_PATCH)
 MOCK = r'''
 #include <assert.h>
 #include <stdio.h>
@@ -661,6 +663,7 @@ in_irq=false;preempt=1;assert(!sweet_log_fastboot_drain(100));puts("PASS");}
                     expected = apply_exact_hunks(fragment(path, BASE_PATCH), path, UFS_CAP_PATCH)
                     expected = apply_exact_hunks(expected, path, UFS_POLL_PATCH)
                     expected = apply_exact_hunks(expected, path, UFS_LANE_PATCH)
+                    expected = apply_exact_hunks(expected, path, UFS_SPEED_PATCH)
                 elif path == 'osfmk/arm64/dali_watchdog.h':
                     expected = fragment(path, BASE_PATCH)
                 else:

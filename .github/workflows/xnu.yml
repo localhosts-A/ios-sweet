@@ -66,6 +66,8 @@ on:
       - "tools/test_dali_trial_safety.py"
       - "tools/test_dali_fastboot_return.py"
       - "tools/test_dali_root_sync.py"
+      - "tools/test_dali_ufs_speed.py"
+      - "tools/ufs_speed_fixtures/**"
       - "tools/test_dali_ulock.py"
       - "tools/test_dali_ulock_trace.c"
       - "tools/test_dali_ufs_ioctl.py"
@@ -177,6 +179,7 @@ jobs:
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_uuidtext.py"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_fastboot_return.py"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_root_sync.py"
+          python3 -I "$GITHUB_WORKSPACE/tools/test_dali_ufs_speed.py"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_ulock.py"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_trial_safety.py"
           python3 tools/test_dali_boottrace.py
@@ -238,6 +241,7 @@ jobs:
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_ufs_ioctl.py" "$SWEET_LOAD_SOURCE_DIR/bsd/dev/sweet_ufs.c" "$SWEET_LOAD_SOURCE_DIR"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_fastboot_return.py"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_root_sync.py" "$SWEET_LOAD_SOURCE_DIR"
+          python3 -I "$GITHUB_WORKSPACE/tools/test_dali_ufs_speed.py" "$SWEET_LOAD_SOURCE_DIR"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_ulock.py"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_cpu_start.py" "$SWEET_LOAD_SOURCE_DIR"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_cpu_on.py" "$SWEET_LOAD_SOURCE_DIR"
@@ -654,6 +658,9 @@ jobs:
           grep -Fq 'sweet_log_fastboot_publish(flushed);' xnu/bsd/dev/sweet_ufs.c
           nm fakeroot/System/Library/Kernels/kernel.development.sweet | grep ' _dali_fastboot_return_poll$'
           nm fakeroot/System/Library/Kernels/kernel.development.sweet | grep ' _sweet_fastboot_sync_root$'
+          nm fakeroot/System/Library/Kernels/kernel.development.sweet | grep ' _dali_fastboot_return_ufs_probe$'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'scope=ap-min-request-not-adc'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'exact-byte-match=1 root-mounted=0 root-writes=0'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'scope=sync-pass-not-quiesced'
           nm fakeroot/System/Library/Kernels/kernel.development.sweet | grep ' _sweet_log_fastboot_drain$'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET FASTBOOT: v=1 stage=%s run=%s'

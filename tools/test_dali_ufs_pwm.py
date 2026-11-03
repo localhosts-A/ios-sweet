@@ -9,7 +9,7 @@ import os,shutil,subprocess,tempfile,unittest
 import test_dali_gui_load_progress as source
 ROOT=Path(__file__).resolve().parents[1]
 # Keep the existing PWM hardware fixture pinned to its exact pre-0196 source.
-# The independent two-lane fixture executes final 0196 entry points.
+# The independent two-lane fixture executes 0196 entry points, before 0200.
 UFS=source.UFS_PRE_LANES
 OLD=source.fixture.fragment('bsd/dev/sweet_ufs.c',source.CURRENT_PATCH)
 POLICY=source.SOURCE['bsd/dev/SweetUFSPWMPolicy.h']
@@ -157,9 +157,9 @@ def fixture():
  # Execute the final PMC helper with the original gear policy and root mock.
  # 0196 permits SLOWAUTO in addition to the existing SLOW mode, but must not
  # alter any other instruction in the old helper.
- old_pmc=function(UFS,'ufs_pwm_pmc'); final_pmc=function(source.UFS,'ufs_pwm_pmc')
- assert final_pmc.replace('mode != 0x22 && mode != 0x55','mode != 0x22') == old_pmc
- actual=''.join(function(source.UFS if n=='ufs_pwm_pmc' else UFS,n) for n in FUNCS)
+ old_pmc=function(UFS,'ufs_pwm_pmc'); lane_pmc=function(source.UFS_PRE_SPEED,'ufs_pwm_pmc')
+ assert lane_pmc.replace('mode != 0x22 && mode != 0x55','mode != 0x22') == old_pmc
+ actual=''.join(function(source.UFS_PRE_SPEED if n=='ufs_pwm_pmc' else UFS,n) for n in FUNCS)
  return HW_PREFIX.replace('/* ACTUAL_PWM_INIT_CALL */',call)+constants+actual+HW_TAIL
 
 
@@ -338,7 +338,8 @@ class PWMHardwareTest(unittest.TestCase):
   self.assertEqual(function(pre_caps,'sweet_ufs_ioctl'),function(OLD,'sweet_ufs_ioctl'))
   self.assertEqual(source.apply_exact_hunks(pre_caps,'bsd/dev/sweet_ufs.c',source.UFS_CAP_PATCH),source.UFS_PRE_POLL)
   self.assertEqual(source.apply_exact_hunks(source.UFS_PRE_POLL,'bsd/dev/sweet_ufs.c',source.UFS_POLL_PATCH),UFS)
-  self.assertEqual(source.apply_exact_hunks(UFS,'bsd/dev/sweet_ufs.c',source.UFS_LANE_PATCH),source.UFS)
+  self.assertEqual(source.apply_exact_hunks(UFS,'bsd/dev/sweet_ufs.c',source.UFS_LANE_PATCH),source.UFS_PRE_SPEED)
+  self.assertEqual(source.apply_exact_hunks(source.UFS_PRE_SPEED,'bsd/dev/sweet_ufs.c',source.UFS_SPEED_PATCH),source.UFS)
  def test_disabled_invalid_profile_or_effective_cap1_zero_uic(self):
   self.run_c(r'''
 for(unsigned req=0;req<4;++req)for(unsigned dali=0;dali<2;++dali)for(unsigned cold=0;cold<2;++cold){

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run actual Dali two-lane PMC/root functions on a bounded host mock."""
+"""Run pinned 0196 two-lane PMC/root functions on a bounded host mock."""
 import os
 import pathlib
 import subprocess
@@ -8,9 +8,12 @@ import tempfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import test_dali_ufs_pwm as base
-candidate = base.source.UFS
+candidate = base.source.UFS_PRE_SPEED
+# This historical dynamic fixture intentionally executes 0196; nevertheless,
+# require exact 0200 replay and compare the entire actual materialized source.
+assert base.source.apply_exact_hunks(candidate, 'bsd/dev/sweet_ufs.c', base.source.UFS_SPEED_PATCH) == base.source.UFS
 if os.environ.get('SWEET_LOAD_SOURCE_DIR'):
-    assert (pathlib.Path(os.environ['SWEET_LOAD_SOURCE_DIR'])/'bsd/dev/sweet_ufs.c').read_text(encoding='latin-1') == candidate
+    assert (pathlib.Path(os.environ['SWEET_LOAD_SOURCE_DIR'])/'bsd/dev/sweet_ufs.c').read_text(encoding='latin-1') == base.source.UFS
 f = base.source.function
 before = base.fixture()
 for name in ('ufs_mtk_uic','ufs_pwm_idle','ufs_pwm_get','ufs_pwm_snapshot','ufs_pwm_set'):

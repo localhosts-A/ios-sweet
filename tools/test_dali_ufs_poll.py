@@ -13,11 +13,13 @@ if os.environ.get('SWEET_LOAD_SOURCE_DIR'):
     assert (pathlib.Path(os.environ['SWEET_LOAD_SOURCE_DIR'])/'bsd/dev/sweet_ufs.c').read_text(encoding='latin-1') == source
 
 actual = base.source.function(source, 'ufs_scsi_on_lun_timeout')
+pre_speed = base.source.function(base.source.UFS_PRE_SPEED, 'ufs_scsi_on_lun_timeout')
 old = base.source.function(base.source.UFS_PRE_POLL, 'ufs_scsi_on_lun_timeout')
 changed = 'nanoseconds_to_absolutetime((uint64_t)su.spin_us * NSEC_PER_USEC, &spin_until);'
 original = 'nanoseconds_to_absolutetime(CMD_SPIN_NS, &spin_until);'
-if actual.replace(changed, original) != old or actual.count(changed) != 1:
-    raise ValueError('unexpected command function difference')
+if pre_speed.replace(changed, original) != old or pre_speed.count(changed) != 1:
+    raise ValueError('unexpected pre-0200 polling function difference')
+assert base.source.apply_exact_hunks(base.source.UFS_PRE_SPEED, 'bsd/dev/sweet_ufs.c', base.source.UFS_SPEED_PATCH) == source
 assert '#define DALI_CMD_SPIN_MAX_US 1000u' in source
 init = base.source.function(source, 'sweet_ufs_init')
 assert init.count('su.spin_us = ufs_dali_spin_us(node, su.dali);') == 1
@@ -94,7 +96,7 @@ int main(void){
  assert(command(5000000)==0 && now==1250 && block_calls==1);
  reset();su.spin_us=1000;su.wait=true;complete_after=1001;
  assert(command(5000000)==0 && now==1200 && block_calls==1 && delay_calls==1000);
- puts("PASS actual function: completion boundaries, bounded sleeping, contexts, timeout, poison, scheduler model");
+ check_counters();puts("PASS actual function: completion boundaries, bounded sleeping, contexts, timeout, poison, scheduler model");
  return 0;
 }
 '''
