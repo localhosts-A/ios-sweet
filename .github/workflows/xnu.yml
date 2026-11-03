@@ -65,6 +65,7 @@ on:
       - "tools/dali_trial_adapters.py"
       - "tools/test_dali_trial_safety.py"
       - "tools/test_dali_fastboot_return.py"
+      - "tools/test_dali_root_sync.py"
       - "tools/test_dali_ulock.py"
       - "tools/test_dali_ulock_trace.c"
       - "tools/test_dali_ufs_ioctl.py"
@@ -175,6 +176,7 @@ jobs:
           python3 tools/test_dali_root_capture.py
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_uuidtext.py"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_fastboot_return.py"
+          python3 -I "$GITHUB_WORKSPACE/tools/test_dali_root_sync.py"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_ulock.py"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_trial_safety.py"
           python3 tools/test_dali_boottrace.py
@@ -235,6 +237,7 @@ jobs:
           python3 -I tools/test_dali_ufs_two_lane.py
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_ufs_ioctl.py" "$SWEET_LOAD_SOURCE_DIR/bsd/dev/sweet_ufs.c" "$SWEET_LOAD_SOURCE_DIR"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_fastboot_return.py"
+          python3 -I "$GITHUB_WORKSPACE/tools/test_dali_root_sync.py" "$SWEET_LOAD_SOURCE_DIR"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_ulock.py"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_cpu_start.py" "$SWEET_LOAD_SOURCE_DIR"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_cpu_on.py" "$SWEET_LOAD_SOURCE_DIR"
@@ -650,6 +653,8 @@ jobs:
           grep -Fq 'dali_fastboot_return_poll();' xnu/bsd/dev/sweet_sample.c
           grep -Fq 'sweet_log_fastboot_publish(flushed);' xnu/bsd/dev/sweet_ufs.c
           nm fakeroot/System/Library/Kernels/kernel.development.sweet | grep ' _dali_fastboot_return_poll$'
+          nm fakeroot/System/Library/Kernels/kernel.development.sweet | grep ' _sweet_fastboot_sync_root$'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'scope=sync-pass-not-quiesced'
           nm fakeroot/System/Library/Kernels/kernel.development.sweet | grep ' _sweet_log_fastboot_drain$'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET FASTBOOT: v=1 stage=%s run=%s'
           grep -Fq '"sweetfftrace"' xnu/bsd/dev/sweet_sample.c

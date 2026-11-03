@@ -154,7 +154,9 @@ POLICY_PATH = 'pexpert/arm/DaliFastbootReturnPolicy.h'
 NATIVE_PATH = 'pexpert/arm/pe_dali_watchdog.c'
 POLICY = apply_exact_hunks(fragment(POLICY_PATH, BASE_PATCH), POLICY_PATH, LIMIT_PATCH)
 NATIVE_BASE = fragment(NATIVE_PATH, BASE_PATCH)
-NATIVE = apply_exact_hunks(NATIVE_BASE, NATIVE_PATH, INTERVAL_PATCH)
+NATIVE_PRE_SYNC = apply_exact_hunks(NATIVE_BASE, NATIVE_PATH, INTERVAL_PATCH)
+NATIVE = apply_exact_hunks(NATIVE_PRE_SYNC, NATIVE_PATH,
+                           ROOT / 'xnu/patches/0199-dali-root-sync-before-fastboot.patch')
 MOCK = r'''
 #include <assert.h>
 #include <stdio.h>
@@ -630,7 +632,9 @@ in_irq=false;preempt=1;assert(!sweet_log_fastboot_drain(100));puts("PASS");}
         new_guard = ('    if (heartbeat != 1 || delay_seconds != 30 ||\n'
                      '        (interval != 30 && interval != 60) ||\n')
         self.assertEqual(NATIVE_BASE.count(old_guard), 1)
-        self.assertEqual(NATIVE, NATIVE_BASE.replace(old_guard, new_guard))
+        self.assertEqual(NATIVE_PRE_SYNC, NATIVE_BASE.replace(old_guard, new_guard))
+        self.assertEqual(function(NATIVE, 'dali_fastboot_prepare'),
+                         function(NATIVE_PRE_SYNC, 'dali_fastboot_prepare'))
         native = NATIVE
         sampler = fragment('bsd/dev/sweet_sample.c')
         self.assertIn('"dalifastboot"', native)

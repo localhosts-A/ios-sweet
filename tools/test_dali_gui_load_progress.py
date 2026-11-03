@@ -76,6 +76,9 @@ for path in ('bsd/dev/sweet_sample.c', 'bsd/dev/SweetBBContextRuntime.h'):
     SOURCE[path] = apply_exact_hunks(SOURCE[path], path, LSD_CONTEXT_PATCH)
 SOURCE['bsd/dev/sweet_sample.c'] = apply_exact_hunks(
     SOURCE['bsd/dev/sweet_sample.c'], 'bsd/dev/sweet_sample.c', CPU_ACTIVITY_PATCH)
+SOURCE['pexpert/arm/pe_dali_watchdog.c'] = apply_exact_hunks(
+    SOURCE['pexpert/arm/pe_dali_watchdog.c'], 'pexpert/arm/pe_dali_watchdog.c',
+    ROOT/'xnu/patches/0199-dali-root-sync-before-fastboot.patch')
 LOCK = SOURCE['osfmk/kern/lock_mtx.c']
 SAMPLER, UFS, EXCEPTION, GUI_POLICY, IO_POLICY = (SOURCE[p] for p in PATHS)
 RW_POLICY = SOURCE['osfmk/kern/SweetRWWaitProgress.h']

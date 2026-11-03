@@ -38,8 +38,13 @@ static bool cmp(uint32_t *p,uint32_t a,uint32_t b){return __atomic_compare_excha
  def test_normal_return_and_arm_remain_byte_identical(self):
   for name in ('dali_fb_step','dali_fb_arm','dali_fb_rollback','dali_fb_parameters_valid'):
    self.assertEqual(function(POLICY,name),function(OLD_POLICY,name))
-  for name in ('dali_fastboot_return_poll','dali_fastboot_prepare','dali_fastboot_reset','dali_fastboot_drain','dali_watchdog_poll'):
+  for name in ('dali_fastboot_prepare','dali_fastboot_reset','dali_watchdog_poll'):
    self.assertEqual(function(NATIVE,name),function(OLD_NATIVE,name))
+  # 0199 intentionally adds root sync; require its exact replay, while the
+  # early-root failure policy above remains byte-identical and never drains.
+  synced=apply_exact_hunks(OLD_NATIVE,NATIVE_PATH,Path(__file__).resolve().parents[1]/'xnu/patches/0199-dali-root-sync-before-fastboot.patch')
+  for name in ('dali_fastboot_return_poll','dali_fastboot_drain'):
+   self.assertEqual(function(NATIVE,name),function(synced,name))
  def test_armed_early_failure_single_reset_no_drain_no_mode_length_write(self):
   self.run_c('''
 initial();assert(arm());fail_drain=true;

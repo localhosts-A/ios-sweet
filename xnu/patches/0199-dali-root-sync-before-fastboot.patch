@@ -1,0 +1,104 @@
+--- a/bsd/vfs/vfs_syscalls.c
++++ b/bsd/vfs/vfs_syscalls.c
+@@ -3096,6 +3096,52 @@
+ #endif
+ 
+ int print_vmpage_stat = 0;
++
++#if DEVELOPMENT && defined(ARM64_BOARD_CONFIG_SWEET)
++struct sweet_root_sync_pass {
++	int error;
++	unsigned int selected, attempted;
++};
++
++/* vfs_iterate owns an iterref; busy prevents unmount during the sync pass.
++ * This is not a freeze: writers can dirty buffers again, and HFS may skip a
++ * vnode internally. A returned zero is only the VFS operation's result.
++ */
++static int
++sweet_root_sync_callback(mount_t mp, void *context)
++{
++	struct sweet_root_sync_pass *pass = context;
++	if (!(vfs_flags(mp) & MNT_ROOTFS)) return VFS_RETURNED;
++	pass->selected++;
++	pass->error = vfs_busy(mp, LK_NOWAIT);
++	if (pass->error) return VFS_RETURNED_DONE;
++	char name[MFSNAMELEN] = {0};
++	vfs_name(mp, name);
++	if (strcmp(name, "hfs") != 0 ||
++	    (vfs_flags(mp) & (MNT_RDONLY | MNT_ASYNC))) {
++		pass->error = ENOTSUP;
++	} else {
++		pass->attempted++;
++		pass->error = VFS_SYNC(mp, MNT_WAIT, vfs_context_kernel());
++	}
++	vfs_unbusy(mp);
++	return VFS_RETURNED_DONE;
++}
++
++/* Called only by opted-in Dali return polling/drain in ordinary thread context,
++ * before logger drain and outside every project/UFS lock. No mount is retained.
++ */
++int
++sweet_fastboot_sync_root(void)
++{
++	struct sweet_root_sync_pass pass = {.error = ENOENT};
++	int error = vfs_iterate(0, sweet_root_sync_callback, &pass);
++	if (error) pass.error = error;
++	printf("SWEET ROOTSYNC: v=1 selected=%u attempted=%u result=%d scope=sync-pass-not-quiesced\n",
++	    pass.selected, pass.attempted, pass.error);
++	return pass.error;
++}
++#endif
+ 
+ /*
+  * sync_callback:	simple wrapper that calls VFS_SYNC() on volumes
+--- a/pexpert/arm/pe_dali_watchdog.c
++++ b/pexpert/arm/pe_dali_watchdog.c
+@@ -87,7 +87,9 @@
+ #include "DaliFastbootReturnPolicy.h"
+ #include "DaliFastbootReturnSMC.h"
+ extern bool sweet_log_fastboot_drain(uint64_t deadline);
++extern int sweet_fastboot_sync_root(void);
+ extern int get_preemption_level(void);
++static os_atomic(uint32_t) dali_fastboot_sync_claimed;
+ static struct dali_fb_state dali_fastboot_state;
+ static os_atomic(uint32_t) dali_fastboot_ready;
+ static char dali_fastboot_token[33];
+@@ -137,6 +139,12 @@
+ dali_fastboot_drain(void *context, uint64_t deadline)
+ {
+     (void)context;
++    if (mach_absolute_time() >= deadline) return false;
++    /* A final pass catches metadata dirtied since the earlier pass. This is
++     * still not writer quiescence; retain the original logger deadline/policy.
++     */
++    int error = sweet_fastboot_sync_root();
++    printf("SWEET ROOTSYNC: v=1 stage=final-returned result=%d scope=sync-pass-not-quiesced\n", error);
+     return sweet_log_fastboot_drain(deadline);
+ }
+ 
+@@ -210,6 +218,23 @@
+     if (!os_atomic_load(&dali_fastboot_ready, acquire) ||
+         !ml_get_interrupts_enabled() || ml_at_interrupt_context() || get_preemption_level() != 0)
+         return;
++    /* Start the blocking sync pass three minutes before return, not inside
++     * the logger's 20s drain deadline. VFS_SYNC has no hard duration bound;
++     * the finite inherited WDT remains unchanged. This is not writer freeze.
++     */
++    uint64_t now = mach_absolute_time();
++    unsigned int after = dali_fastboot_state.after;
++    unsigned int sync_after = after > 180 ? after - 180 : after / 2;
++    if (dali_fastboot_state.phase == 1 && now >= dali_fastboot_state.started &&
++        now - dali_fastboot_state.started >= dali_fastboot_state.frequency * sync_after &&
++        now - dali_fastboot_state.started < dali_fastboot_state.frequency * (dali_fastboot_state.lease - 10) &&
++        os_atomic_cmpxchg(&dali_fastboot_sync_claimed, 0u, 1u, acq_rel)) {
++        printf("SWEET ROOTSYNC: v=1 stage=begin at=0x%llx\n", now);
++        int error = sweet_fastboot_sync_root();
++        uint64_t end = mach_absolute_time();
++        printf("SWEET ROOTSYNC: v=1 stage=returned result=%d begin=0x%llx end=0x%llx scope=sync-pass-not-quiesced\n",
++            error, now, end);
++    }
+     (void)dali_fb_step(&dali_fastboot_state, &dali_fastboot_ops);
+ #endif
+ }
