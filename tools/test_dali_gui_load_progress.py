@@ -10,6 +10,7 @@ import unittest
 import test_dali_gui_user_entry as fixture
 import test_dali_backboard_ipc_context as ipc
 import test_dali_backboard_vm_fault as vm
+from test_dali_fastboot_return import apply_exact_hunks, LIMIT_PATCH
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_PATCH = ROOT/'xnu/patches/0175-sweet-bounded-gui-load-progress.patch'
@@ -40,58 +41,9 @@ IPCSEND_PATCH = ROOT/'xnu/patches/0185-mach-ipcsend-diagnostic.patch'
 IPCSEND_CONTEXT_PATCH = ROOT/'xnu/patches/0186-sweet-ipcsend-context-scalars.patch'
 
 
-def apply_exact_hunks(text, path, patch):
-    """Replay every hunk at its declared line, with no offset or fuzz."""
-    patch_text = patch.read_text()
-    blocks = patch_text.split('diff --git ')[1:]
-    matches = [b for b in blocks if b.startswith(f'a/{path} b/{path}\n')]
-    if len(matches) == 1:
-        lines = matches[0].splitlines(keepends=True)
-    elif not blocks:
-        marker = f'--- a/{path}\n'
-        start = patch_text.find(marker)
-        if start < 0:
-            raise AssertionError(path)
-        ends = [i for i in (patch_text.find('\n--- a/', start + len(marker)),
-                            patch_text.find('\n--- /dev/null', start + len(marker))) if i >= 0]
-        end = min(ends) + 1 if ends else len(patch_text)
-        lines = patch_text[start:end].splitlines(keepends=True)
-    else:
-        raise AssertionError(path)
-    original = text.splitlines(keepends=True)
-    result, cursor, index = [], 0, 0
-    while index < len(lines) and not lines[index].startswith('@@ '):
-        index += 1
-    while index < len(lines):
-        match = re.match(r'^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@', lines[index])
-        if not match:
-            raise AssertionError(f'malformed hunk for {path}')
-        old_start, old_count, new_start, new_count = (int(match.group(1)), int(match.group(2) or 1),
-                                                      int(match.group(3)), int(match.group(4) or 1))
-        target = old_start - 1 if old_count else old_start
-        if target < cursor or new_start != len(result) + (target - cursor) + 1:
-            raise AssertionError(f'hunk position mismatch for {path}')
-        result.extend(original[cursor:target]); cursor = target
-        index += 1; removed = added = 0
-        while index < len(lines) and not lines[index].startswith('@@ '):
-            line = lines[index]; index += 1
-            if not line or line[0] not in ' +-':
-                raise AssertionError(f'unexpected patch line for {path}')
-            if line[0] in ' -':
-                if cursor >= len(original) or original[cursor] != line[1:]:
-                    actual = original[cursor] if cursor < len(original) else '<eof>'
-                    raise AssertionError(
-                        f'hunk context mismatch for {path} at line {cursor + 1}: '
-                        f'expected {line[1:]!r}, got {actual!r}')
-                cursor += 1; removed += 1
-            if line[0] in ' +':
-                result.append(line[1:]); added += 1
-        if removed != old_count or added != new_count:
-            raise AssertionError(f'hunk count mismatch for {path}')
-    result.extend(original[cursor:])
-    return ''.join(result)
-
-
+SOURCE['pexpert/arm/DaliFastbootReturnPolicy.h'] = apply_exact_hunks(
+    SOURCE['pexpert/arm/DaliFastbootReturnPolicy.h'],
+    'pexpert/arm/DaliFastbootReturnPolicy.h', LIMIT_PATCH)
 SOURCE['bsd/dev/sweet_sample.c'] = apply_exact_hunks(
     SOURCE['bsd/dev/sweet_sample.c'], 'bsd/dev/sweet_sample.c', BBCTX_PATCH)
 for path in ('bsd/dev/sweet_sample.c', 'osfmk/kern/Makefile'):

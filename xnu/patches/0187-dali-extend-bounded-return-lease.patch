@@ -1,0 +1,26 @@
+diff --git a/pexpert/arm/DaliFastbootReturnPolicy.h b/pexpert/arm/DaliFastbootReturnPolicy.h
+--- a/pexpert/arm/DaliFastbootReturnPolicy.h
++++ b/pexpert/arm/DaliFastbootReturnPolicy.h
+@@ -13,8 +13,8 @@
+ #define DALI_FB_MARKER_OFFSET 0x24u
+ #define DALI_FB_MASK 0x0fu
+ #define DALI_FB_BOOTLOADER 3u
+-#define DALI_FB_MAX_AFTER 1080u
+-#define DALI_FB_MAX_LEASE 1140u
++#define DALI_FB_MAX_AFTER 2280u
++#define DALI_FB_MAX_LEASE 2400u
+ #define DALI_FB_DRAIN_SECONDS 20u
+ 
+ struct dali_fb_ops {
+diff --git a/pexpert/arm/DaliWatchdogPolicy.h b/pexpert/arm/DaliWatchdogPolicy.h
+--- a/pexpert/arm/DaliWatchdogPolicy.h
++++ b/pexpert/arm/DaliWatchdogPolicy.h
+@@ -3,7 +3,7 @@
+ #define DALI_WATCHDOG_POLICY_H
+ 
+ #define DALI_WDT_DEFAULT_SECONDS 120u
+-#define DALI_WDT_MAX_SECONDS 1200u
++#define DALI_WDT_MAX_SECONDS 2400u
+ 
+ static inline unsigned int
+ dali_wdt_select_lease(unsigned int requested)

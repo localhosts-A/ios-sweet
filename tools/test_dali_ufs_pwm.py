@@ -312,7 +312,11 @@ class PWMHardwareTest(unittest.TestCase):
     result=subprocess.run(command,input=patch,capture_output=True,text=True,env=env)
     self.assertEqual(result.returncode,0,result.stdout+result.stderr)
     self.assertNotRegex(result.stdout+result.stderr,r'(?i)skip|offset|fuzz|failed|error:')
-   for rel in paths:self.assertEqual((tree/rel).read_text(),source.SOURCE[rel],rel)
+   for rel in paths:
+    # This checks 0180 alone, before the later return-limit overlay.
+    expected = (source.fixture.fragment(rel,source.PWM_PATCH)
+     if rel=='pexpert/arm/DaliFastbootReturnPolicy.h' else source.SOURCE[rel])
+    self.assertEqual((tree/rel).read_text(),expected,rel)
    self.assertTrue((tree/'bsd/dev/SweetUFSPWMPolicy.h').is_file())
    self.assertTrue((tree/'bsd/dev/SweetUFSPWMClock.h').is_file())
  def test_ordinary_io_and_uic_functions_unchanged(self):

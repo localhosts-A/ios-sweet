@@ -113,6 +113,16 @@ class PayloadCommandLineTest(unittest.TestCase):
             self.assertEqual(candidate.split().count(required), 1, required)
         with self.assertRaisesRegex(ValueError, 'UTF-8 bytes; maximum is 607'):
             mkpayload.build(self.root / 'missing', self.tree, candidate + 'x')
+        # Current v5 uses PWM disabled; only the lease and interval change for
+        # the extended observation, without displacing any other boot argument.
+        v5 = candidate.replace('ufspwm=1', 'ufspwm=0')
+        extended = v5.replace('daliwdtlease=1140', 'daliwdtlease=2400').replace(
+            'sweetsampleinterval=30', 'sweetsampleinterval=60')
+        self.assertEqual(len(v5.encode('utf-8')), 607)
+        self.assertEqual(len(extended.encode('utf-8')), 607)
+        self.assertEqual(extended.replace('daliwdtlease=2400', 'daliwdtlease=1140').replace(
+            'sweetsampleinterval=60', 'sweetsampleinterval=30'), v5)
+        self.assertEqual(self.packed_command(extended), extended)
 
     def test_cli_leaves_existing_output_untouched(self):
         output = self.root / 'payload'

@@ -35,6 +35,58 @@ def fragment(path, patch=PATCH):
                    if line.startswith(('+', ' ')) and not line.startswith('+++'))
 
 
+def apply_exact_hunks(text, path, patch):
+    """Replay every hunk at its declared line, with no offset or fuzz."""
+    patch_text = patch.read_text()
+    blocks = patch_text.split('diff --git ')[1:]
+    matches = [b for b in blocks if b.startswith(f'a/{path} b/{path}\n')]
+    if len(matches) == 1:
+        lines = matches[0].splitlines(keepends=True)
+    elif not blocks:
+        marker = f'--- a/{path}\n'
+        start = patch_text.find(marker)
+        if start < 0:
+            raise AssertionError(path)
+        ends = [i for i in (patch_text.find('\n--- a/', start + len(marker)),
+                            patch_text.find('\n--- /dev/null', start + len(marker))) if i >= 0]
+        end = min(ends) + 1 if ends else len(patch_text)
+        lines = patch_text[start:end].splitlines(keepends=True)
+    else:
+        raise AssertionError(path)
+    original = text.splitlines(keepends=True)
+    result, cursor, index = [], 0, 0
+    while index < len(lines) and not lines[index].startswith('@@ '):
+        index += 1
+    while index < len(lines):
+        match = re.match(r'^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@', lines[index])
+        if not match:
+            raise AssertionError(f'malformed hunk for {path}')
+        old_start, old_count, new_start, new_count = (int(match.group(1)), int(match.group(2) or 1),
+                                                      int(match.group(3)), int(match.group(4) or 1))
+        target = old_start - 1 if old_count else old_start
+        if target < cursor or new_start != len(result) + (target - cursor) + 1:
+            raise AssertionError(f'hunk position mismatch for {path}')
+        result.extend(original[cursor:target]); cursor = target
+        index += 1; removed = added = 0
+        while index < len(lines) and not lines[index].startswith('@@ '):
+            line = lines[index]; index += 1
+            if not line or line[0] not in ' +-':
+                raise AssertionError(f'unexpected patch line for {path}')
+            if line[0] in ' -':
+                if cursor >= len(original) or original[cursor] != line[1:]:
+                    actual = original[cursor] if cursor < len(original) else '<eof>'
+                    raise AssertionError(
+                        f'hunk context mismatch for {path} at line {cursor + 1}: '
+                        f'expected {line[1:]!r}, got {actual!r}')
+                cursor += 1; removed += 1
+            if line[0] in ' +':
+                result.append(line[1:]); added += 1
+        if removed != old_count or added != new_count:
+            raise AssertionError(f'hunk count mismatch for {path}')
+    result.extend(original[cursor:])
+    return ''.join(result)
+
+
 def function(text, name):
     match = re.search(r'(?:static (?:inline )?)?(?:void|bool|uint32_t|uint64_t)\n' + name + r'\(', text)
     if match is None:
@@ -92,7 +144,10 @@ def adt_fixture():
     return recovery.adt.serialize(root)
 
 
-POLICY = fragment('pexpert/arm/DaliFastbootReturnPolicy.h')
+LIMIT_PATCH = ROOT / 'xnu/patches/0187-dali-extend-bounded-return-lease.patch'
+POLICY_PATH = 'pexpert/arm/DaliFastbootReturnPolicy.h'
+POLICY = apply_exact_hunks(fragment(POLICY_PATH, ROOT / 'xnu/patches/0180-sweet-dali-pwm-link-policy.patch'),
+                           POLICY_PATH, LIMIT_PATCH)
 MOCK = r'''
 #include <assert.h>
 #include <stdio.h>
@@ -125,7 +180,8 @@ class FastbootReturnTests(unittest.TestCase):
             if prefix == POLICY + MOCK:
                 body = body.replace('int main(void){',
                     'int main(void){(void)&arm;(void)&dali_fb_contract_valid;'
-                    '(void)&dali_fb_step;(void)writes;(void)records;(void)fences;', 1)
+                    '(void)&dali_fb_step;(void)&dali_fb_root_failure;'
+                    '(void)writes;(void)records;(void)fences;', 1)
             source.write_text(prefix + '\n' + body)
             compiled = subprocess.run([compiler, '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
                                        str(source), '-o', str(binary)], capture_output=True, text=True)
@@ -141,7 +197,15 @@ assert(dali_fb_contract_valid(0x1c010000,0x1000,0x24,15,3));
 assert(!dali_fb_contract_valid(0x1c010001,0x1000,0x24,15,3));
 assert(!dali_fb_contract_valid(0x1c010000,0x1000,0x20,15,3));
 assert(!dali_fb_contract_valid(0x1c010000,0x1000,0x24,255,3));
-for(unsigned a=0;a<1200;++a){bool valid=a>=120&&a<=1080;assert(dali_fb_parameters_valid(13000000,a,1140)==valid);}
+assert(DALI_FB_MAX_AFTER==2280 && DALI_FB_MAX_LEASE==2400);
+for(unsigned a=0;a<=2281;++a){bool valid=a>=120&&a<=2280;assert(dali_fb_parameters_valid(13000000,a,2400)==valid);}
+assert(dali_fb_parameters_valid(13000000,1080,1140));
+assert(dali_fb_parameters_valid(13000000,2280,2340));
+assert(dali_fb_parameters_valid(13000000,2280,2400));
+assert(!dali_fb_parameters_valid(13000000,2280,2339));
+assert(!dali_fb_parameters_valid(13000000,2280,2401));
+assert(!dali_fb_parameters_valid(13000000,2281,2400));
+assert(!dali_fb_parameters_valid(13000000,UINT32_MAX,2400));
 assert(!dali_fb_parameters_valid(0,1080,1140));assert(!dali_fb_parameters_valid(13000000,1080,1139));
 assert(!dali_fb_arm(&state,&ops,false,true,1000,13000000,1080,1140));
 assert(!dali_fb_arm(&state,&ops,true,false,1000,13000000,1080,1140));
@@ -172,6 +236,26 @@ ticks=1000+1080ULL*13000000-1;assert(!dali_fb_step(&state,&ops));assert(!drains)
 ++ticks;assert(!dali_fb_step(&state,&ops));assert(drains==1&&resets==1&&state.phase==3);
 assert(registers[9]==0x40002000&&registers[0]==0x17d&&registers[1]==0xf000);
 assert(!dali_fb_step(&state,&ops)&&resets==1);puts("PASS");}
+''')
+
+    def test_extended_deadline_still_requires_drain_and_unchanged_registers(self):
+        self.run_c(r'''
+int main(void){initial();
+assert(dali_fb_arm(&state,&ops,true,true,1000,13000000,2280,2400));
+ticks=1000+2280ULL*13000000-1;assert(!dali_fb_step(&state,&ops));assert(!drains&&!resets);
+++ticks;assert(!dali_fb_step(&state,&ops));
+assert(drains==1&&resets==1&&state.phase==3);
+assert(registers[9]==0x40002000&&registers[0]==0x17d&&registers[1]==0xf000);
+initial();assert(dali_fb_arm(&state,&ops,true,true,1000,13000000,2280,2400));
+ticks=1000+2340ULL*13000000;
+assert(!dali_fb_step(&state,&ops));assert(drains==1&&resets==1&&state.phase==3);
+initial();assert(dali_fb_arm(&state,&ops,true,true,1000,13000000,2280,2400));
+fail_drain=true;ticks=1000+2280ULL*13000000;
+assert(!dali_fb_step(&state,&ops));assert(state.phase==5&&!resets&&registers[9]==0x40002003);
+initial();assert(dali_fb_arm(&state,&ops,true,true,1000,13000000,2280,2400));
+ticks=1000+2390ULL*13000000;
+assert(!dali_fb_step(&state,&ops));assert(state.phase==5&&!drains&&!resets&&registers[9]==0x40002003);
+puts("PASS");}
 ''')
 
     def test_unconfirmed_drain_state_clock_keep_marker_no_cold_fallback(self):
@@ -296,6 +380,14 @@ in_irq=false;preempt=1;assert(!sweet_log_fastboot_drain(100));puts("PASS");}
             self.assertEqual(path.read_bytes(), b'keep')
 
     def test_final_sources_default_off_and_no_unrelated_transaction_changes(self):
+        old_policy = fragment(POLICY_PATH, ROOT / 'xnu/patches/0180-sweet-dali-pwm-link-policy.patch')
+        self.assertEqual(old_policy.count('#define DALI_FB_MAX_AFTER 1080u'), 1)
+        self.assertEqual(old_policy.count('#define DALI_FB_MAX_LEASE 1140u'), 1)
+        self.assertEqual(POLICY, old_policy.replace('#define DALI_FB_MAX_AFTER 1080u',
+                                                    '#define DALI_FB_MAX_AFTER 2280u').replace(
+            '#define DALI_FB_MAX_LEASE 1140u', '#define DALI_FB_MAX_LEASE 2400u'))
+        self.assertEqual(hashlib.sha256(POLICY.encode()).hexdigest(),
+                         'e293a1a0b051ba7724cfcbaa7fce15189f2ac4e54df417fd24a1184663c26297')
         native = fragment('pexpert/arm/pe_dali_watchdog.c')
         sampler = fragment('bsd/dev/sweet_sample.c')
         self.assertIn('"dalifastboot"', native)
@@ -314,8 +406,10 @@ in_irq=false;preempt=1;assert(!sweet_log_fastboot_drain(100));puts("PASS");}
                     expected = (Path(source_dir) / path).read_text()
                     self.assertEqual(hashlib.sha256(expected.encode()).hexdigest(),
                                      '766a96a35bf41796efc3ea6541b9af4d324532d6e99610cd9ab5dcd619dcfd1d')
+                elif path == POLICY_PATH:
+                    expected = POLICY
                 elif path in ('bsd/dev/sweet_ufs.c', 'pexpert/arm/pe_dali_watchdog.c',
-                              'pexpert/arm/DaliFastbootReturnPolicy.h', 'osfmk/arm64/dali_watchdog.h'):
+                              'osfmk/arm64/dali_watchdog.h'):
                     expected = fragment(path, ROOT/'xnu/patches/0180-sweet-dali-pwm-link-policy.patch')
                 else:
                     expected = fragment(path)

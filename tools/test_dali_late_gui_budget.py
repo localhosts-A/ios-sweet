@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from test_dali_watchdog_lease import POLICY as WDT
 
 ROOT = Path(__file__).resolve().parents[1]
 PATCH = ROOT / 'xnu/patches/0170-dali-finite-late-gui-startup-budgets.patch'
@@ -19,7 +20,6 @@ def fragment(path, patch=PATCH):
     raise AssertionError(path)
 
 
-WDT = fragment('pexpert/arm/DaliWatchdogPolicy.h')
 WAIT = fragment('iokit/Kernel/arm/hid/SweetHIDWaitPolicy.h')
 HID = fragment('iokit/Kernel/arm/hid/SweetHID.cpp')
 START = HID[HID.index('bool\nSweetHIDTouch::start('):HID.index('\nvoid\nSweetHIDTouch::swipeFired(')]
@@ -122,15 +122,15 @@ class LateGUIBudgetTest(unittest.TestCase):
     def test_defaults_bounds_clock_arithmetic_and_finite_expiry(self):
         self.run_code(WDT + WAIT + '''
 int main(void) {
-    assert(DALI_WDT_DEFAULT_SECONDS==120 && DALI_WDT_MAX_SECONDS==1200);
+    assert(DALI_WDT_DEFAULT_SECONDS==120 && DALI_WDT_MAX_SECONDS==2400);
     assert(SWEET_HID_WAIT_DEFAULT_SECONDS==600 && SWEET_HID_WAIT_MAX_SECONDS==1200);
-    for(unsigned n=0;n<1400;++n) {
-        assert(dali_wdt_select_lease(n)==((n>=120 && n<=1200)?n:120));
+    for(unsigned n=0;n<=2401;++n) {
+        assert(dali_wdt_select_lease(n)==((n>=120 && n<=2400)?n:120));
         assert(sweet_hid_select_wait(n)==((n>=600 && n<=1200)?n:600));
     }
     assert(dali_wdt_select_lease(UINT32_MAX)==120 && sweet_hid_select_wait(UINT32_MAX)==600);
     uint64_t hz=13000000,start=1000*hz;
-    for(unsigned n=120;n<=1200;++n) {
+    for(unsigned n=120;n<=2400;++n) {
         assert(dali_wdt_reload_due(start,0,start+n*hz-1,hz,n));
         assert(!dali_wdt_reload_due(start,0,start+n*hz,hz,n));
     }
@@ -140,7 +140,8 @@ int main(void) {
     assert(!dali_wdt_reload_due(start,start+hz,start,hz,1200));
     assert(!dali_wdt_reload_due(start,start,start+hz-1,hz,1200));
     assert(dali_wdt_reload_due(start,start,start+hz,hz,1200));
-    assert(!dali_wdt_reload_due(start,0,start,hz,1201));
+    assert(dali_wdt_reload_due(start,0,start,hz,1201));
+    assert(!dali_wdt_reload_due(start,0,start,hz,2401));
     puts("PASS");return 0;
 }
 ''')

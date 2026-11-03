@@ -1,22 +1,31 @@
 #!/usr/bin/env python3
 """Exercise actual finite watchdog policy/poll code with no hardware access."""
 from pathlib import Path
+import hashlib
+import os
 import re
 import shutil
 import subprocess
 import tempfile
 import unittest
+from test_dali_fastboot_return import apply_exact_hunks, LIMIT_PATCH
 
 ROOT = Path(__file__).resolve().parents[1]
 PATCH = ROOT / 'xnu/patches/0167-dali-configurable-finite-boot-watchdog-lease.patch'
 
 
-def final_file(path):
-    for block in PATCH.read_text().split('diff --git ')[1:]:
+def final_file(path, patch=PATCH):
+    for block in patch.read_text().split('diff --git ')[1:]:
         if f'b/{path}\n' in block:
             return ''.join(line[1:] for line in block.splitlines(keepends=True)
                            if line.startswith(('+', ' ')) and not line.startswith('+++'))
     raise AssertionError(path)
+
+
+POLICY_PATH = 'pexpert/arm/DaliWatchdogPolicy.h'
+POLICY = apply_exact_hunks(
+    final_file(POLICY_PATH, ROOT / 'xnu/patches/0170-dali-finite-late-gui-startup-budgets.patch'),
+    POLICY_PATH, LIMIT_PATCH)
 
 
 class WatchdogLeaseTest(unittest.TestCase):
@@ -28,7 +37,7 @@ class WatchdogLeaseTest(unittest.TestCase):
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
-''' + final_file('pexpert/arm/DaliWatchdogPolicy.h') + body
+''' + POLICY + body
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             (root / 'test.c').write_text(source)
@@ -42,12 +51,13 @@ class WatchdogLeaseTest(unittest.TestCase):
     def test_policy_defaults_boundaries_clock_overflow_and_rate_limit(self):
         self.run_c('''
 int main(void) {
-    assert(DALI_WDT_DEFAULT_SECONDS==120 && DALI_WDT_MAX_SECONDS==600);
-    for(unsigned int n=0;n<1000;++n)
-        assert(dali_wdt_select_lease(n)==((n>=120 && n<=600)?n:120));
+    assert(DALI_WDT_DEFAULT_SECONDS==120 && DALI_WDT_MAX_SECONDS==2400);
+    for(unsigned int n=0;n<=2401;++n)
+        assert(dali_wdt_select_lease(n)==((n>=120 && n<=2400)?n:120));
+    assert(dali_wdt_select_lease(1140)==1140 && dali_wdt_select_lease(2400)==2400);
     assert(dali_wdt_select_lease(UINT32_MAX)==120);
     const uint64_t hz=13000000,start=1000*hz;
-    for(unsigned int sec=120;sec<=600;++sec) {
+    for(unsigned int sec=120;sec<=2400;++sec) {
         assert(dali_wdt_reload_due(start,0,start,hz,sec));
         assert(dali_wdt_reload_due(start,0,start+sec*hz-1,hz,sec));
         assert(!dali_wdt_reload_due(start,0,start+sec*hz,hz,sec));
@@ -60,7 +70,7 @@ int main(void) {
     assert(!dali_wdt_reload_due(start,start,start+hz-1,hz,120));
     assert(dali_wdt_reload_due(start,start,start+hz,hz,120));
     assert(!dali_wdt_reload_due(start,0,start,hz,119));
-    assert(!dali_wdt_reload_due(start,0,start,hz,601));
+    assert(!dali_wdt_reload_due(start,0,start,hz,2401));
     puts("PASS");return 0;
 }
 ''')
@@ -101,6 +111,11 @@ int main(void) {
     dali_wdt_boot_seconds=600;dali_watchdog_poll();assert(barriers==3 && regs[2]==0x1971);
     test_now=dali_wdt_started+600*dali_wdt_hz;regs[2]=0xfeed;
     dali_watchdog_poll();assert(barriers==3 && regs[2]==0xfeed);
+    dali_wdt_boot_seconds=2400;test_now=dali_wdt_started+2399*dali_wdt_hz;
+    test_cpu=1;dali_watchdog_poll();assert(barriers==3 && regs[2]==0xfeed);
+    test_cpu=0;dali_watchdog_poll();assert(barriers==4 && regs[2]==0x1971);
+    test_now=dali_wdt_started+2400*dali_wdt_hz;regs[2]=0xfeed;
+    dali_watchdog_poll();assert(barriers==4 && regs[2]==0xfeed);
     assert(regs[0]==0x17d && regs[1]==0xf000 && regs[3]==0x11223344 && regs[4]==0x55667788 && regs[5]==0xaabbccdd);
     assert(dali_wdt_select_lease(0)==120);
     puts("PASS");return 0;
@@ -108,6 +123,15 @@ int main(void) {
 ''')
 
     def test_exact_dt_gate_default_and_mmio_write_scope_remain(self):
+        old_policy = final_file(POLICY_PATH, ROOT / 'xnu/patches/0170-dali-finite-late-gui-startup-budgets.patch')
+        self.assertEqual(old_policy.count('#define DALI_WDT_MAX_SECONDS 1200u'), 1)
+        self.assertEqual(POLICY, old_policy.replace('#define DALI_WDT_MAX_SECONDS 1200u',
+                                                    '#define DALI_WDT_MAX_SECONDS 2400u'))
+        self.assertEqual(hashlib.sha256(POLICY.encode()).hexdigest(),
+                         'a760d7dadccaefc1dc55a671a3c7e4ea7b7cab9b72ccfd5fa08075a73f5202e8')
+        source_dir = os.environ.get('SWEET_LOAD_SOURCE_DIR')
+        if source_dir:
+            self.assertEqual((Path(source_dir) / POLICY_PATH).read_text(), POLICY)
         source = final_file('pexpert/arm/pe_dali_watchdog.c')
         self.assertIn('#define DALI_WDT_BOOT_SECONDS 120u', source)
         self.assertIn('PE_parse_boot_argn("daliwdtlease"', source)
