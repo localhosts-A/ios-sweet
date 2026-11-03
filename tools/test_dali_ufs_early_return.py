@@ -3,11 +3,12 @@
 import shutil,subprocess,tempfile,unittest
 from pathlib import Path
 import test_dali_gui_load_progress as source
-from test_dali_fastboot_return import function,fragment
+from test_dali_fastboot_return import function,fragment,apply_exact_hunks,INTERVAL_PATCH,NATIVE_PATH
 POLICY=source.SOURCE['pexpert/arm/DaliFastbootReturnPolicy.h']
-NATIVE=source.SOURCE['pexpert/arm/pe_dali_watchdog.c']
+NATIVE=source.SOURCE[NATIVE_PATH]
 OLD_POLICY=fragment('pexpert/arm/DaliFastbootReturnPolicy.h')
-OLD_NATIVE=fragment('pexpert/arm/pe_dali_watchdog.c')
+# Compare the pre-0180 abort baseline after the independently tested 0188 guard change.
+OLD_NATIVE=apply_exact_hunks(fragment(NATIVE_PATH),NATIVE_PATH,INTERVAL_PATCH)
 
 MOCK = '\n#include <assert.h>\n#include <stdio.h>\n#include <string.h>\nstatic uint32_t registers[10],writes,resets,drains,records,fences;\nstatic bool wrong_marker,fail_drain,stale_mode,expire_drain;\nstatic uint64_t ticks;\nstatic bool mutate_after_record;\nstatic uint32_t rd(void *c,uint32_t off){(void)c;return registers[off/4];}\nstatic void wr(void *c,uint32_t off,uint32_t value){(void)c;assert(off==0x24);++writes;registers[off/4]=wrong_marker?value^1:value;}\nstatic void fence(void *c){(void)c;++fences;}\nstatic void record(void *c,const char *s,uint32_t m,uint32_t mode){(void)c;(void)m;(void)mode;assert(s);++records;if(mutate_after_record && !strcmp(s,"root-failure-prepared"))registers[0]^=8;if(expire_drain && !strcmp(s,"root-failure-prepared"))ticks=1000+13000000ULL*1130;}\nstatic uint64_t now(void *c){(void)c;return ticks;}\nstatic bool drain(void *c,uint64_t deadline){(void)c;++drains;assert(deadline>ticks);if(stale_mode)registers[0]^=8;if(expire_drain)ticks=deadline;return !fail_drain;}\nstatic uint32_t reset(void *c){(void)c;++resets;return (uint32_t)-1;}\nstatic const struct dali_fb_ops ops={0,rd,wr,fence,record,now,drain,reset};\nstatic struct dali_fb_state state;\nstatic void initial(void){memset(&state,0,sizeof(state));memset(registers,0,sizeof(registers));registers[0]=0x17d;registers[1]=0xf000;registers[9]=0x40002000;writes=resets=drains=records=fences=0;wrong_marker=fail_drain=stale_mode=expire_drain=false;ticks=1000;}\nstatic bool arm(void){return dali_fb_arm(&state,&ops,true,true,1000,13000000,1080,1140);}\n'
 

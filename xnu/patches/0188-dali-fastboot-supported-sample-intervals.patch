@@ -1,0 +1,13 @@
+diff --git a/pexpert/arm/pe_dali_watchdog.c b/pexpert/arm/pe_dali_watchdog.c
+--- a/pexpert/arm/pe_dali_watchdog.c
++++ b/pexpert/arm/pe_dali_watchdog.c
+@@ -168,7 +168,8 @@ dali_fastboot_prepare(DTEntry entry)
+     const uint8_t *policy = NULL;
+     unsigned int bytes = 0;
+     uint32_t values[3] = {0}, after = 0;
+-    if (heartbeat != 1 || delay_seconds != 30 || interval != 30 ||
++    if (heartbeat != 1 || delay_seconds != 30 ||
++        (interval != 30 && interval != 60) ||
+         names[0] != '-' || names[1] != '\0' ||
+         SecureDTGetProperty(entry, "fastboot-return-contract", (const void **)&contract, &bytes) != kSuccess ||
+         contract == NULL || bytes != sizeof(values)) {

@@ -10,7 +10,7 @@ import unittest
 import test_dali_gui_user_entry as fixture
 import test_dali_backboard_ipc_context as ipc
 import test_dali_backboard_vm_fault as vm
-from test_dali_fastboot_return import apply_exact_hunks, LIMIT_PATCH
+from test_dali_fastboot_return import apply_exact_hunks, LIMIT_PATCH, INTERVAL_PATCH
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_PATCH = ROOT/'xnu/patches/0175-sweet-bounded-gui-load-progress.patch'
@@ -44,6 +44,8 @@ IPCSEND_CONTEXT_PATCH = ROOT/'xnu/patches/0186-sweet-ipcsend-context-scalars.pat
 SOURCE['pexpert/arm/DaliFastbootReturnPolicy.h'] = apply_exact_hunks(
     SOURCE['pexpert/arm/DaliFastbootReturnPolicy.h'],
     'pexpert/arm/DaliFastbootReturnPolicy.h', LIMIT_PATCH)
+SOURCE['pexpert/arm/pe_dali_watchdog.c'] = apply_exact_hunks(
+    SOURCE['pexpert/arm/pe_dali_watchdog.c'], 'pexpert/arm/pe_dali_watchdog.c', INTERVAL_PATCH)
 SOURCE['bsd/dev/sweet_sample.c'] = apply_exact_hunks(
     SOURCE['bsd/dev/sweet_sample.c'], 'bsd/dev/sweet_sample.c', BBCTX_PATCH)
 for path in ('bsd/dev/sweet_sample.c', 'osfmk/kern/Makefile'):

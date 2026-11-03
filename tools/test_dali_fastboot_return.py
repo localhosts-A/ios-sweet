@@ -145,9 +145,13 @@ def adt_fixture():
 
 
 LIMIT_PATCH = ROOT / 'xnu/patches/0187-dali-extend-bounded-return-lease.patch'
+INTERVAL_PATCH = ROOT / 'xnu/patches/0188-dali-fastboot-supported-sample-intervals.patch'
+BASE_PATCH = ROOT / 'xnu/patches/0180-sweet-dali-pwm-link-policy.patch'
 POLICY_PATH = 'pexpert/arm/DaliFastbootReturnPolicy.h'
-POLICY = apply_exact_hunks(fragment(POLICY_PATH, ROOT / 'xnu/patches/0180-sweet-dali-pwm-link-policy.patch'),
-                           POLICY_PATH, LIMIT_PATCH)
+NATIVE_PATH = 'pexpert/arm/pe_dali_watchdog.c'
+POLICY = apply_exact_hunks(fragment(POLICY_PATH, BASE_PATCH), POLICY_PATH, LIMIT_PATCH)
+NATIVE_BASE = fragment(NATIVE_PATH, BASE_PATCH)
+NATIVE = apply_exact_hunks(NATIVE_BASE, NATIVE_PATH, INTERVAL_PATCH)
 MOCK = r'''
 #include <assert.h>
 #include <stdio.h>
@@ -166,6 +170,96 @@ static const struct dali_fb_ops ops={0,rd,wr,fence,record,now,drain,reset};
 static struct dali_fb_state state;
 static void initial(void){memset(&state,0,sizeof(state));memset(registers,0,sizeof(registers));registers[0]=0x17d;registers[1]=0xf000;registers[9]=0x40002000;writes=resets=drains=records=fences=0;wrong_marker=fail_drain=stale_mode=expire_drain=false;ticks=1000;}
 static bool arm(void){return dali_fb_arm(&state,&ops,true,true,1000,13000000,1080,1140);}
+'''
+
+# Compile the actual patched prepare function and actual policy together; only the
+# boot-argument, device-tree, clock, atomic and register interfaces are faked.
+PREPARE_MOCK = r'''
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+typedef void *DTEntry;
+#define kSuccess 0
+#define DALI_WDT_PA 0x1c010000ULL
+#define DALI_WDT_SIZE 0x1000ULL
+#define os_atomic_store(p,v,order) (*(p)=(v))
+enum { ENABLED=1, HEARTBEAT=2, DELAY=4, INTERVAL=8, NAMES=16 };
+static struct {
+    unsigned int present, enabled, heartbeat, delay, interval;
+    char names[8];
+    bool contract_present, contract_null, policy_present, policy_null;
+    unsigned int contract_size, policy_size;
+} args;
+static uint32_t contract[3], registers[10];
+static uint8_t policy[20];
+static uint64_t ticks, dali_wdt_hz;
+static unsigned int dali_wdt_boot_seconds, reads, writes, fences, records, drains, resets;
+static unsigned int contract_calls, policy_calls, config_refused, contract_refused, budget_refused;
+static struct dali_fb_state dali_fastboot_state;
+static uint32_t dali_fastboot_ready;
+static char dali_fastboot_token[33];
+
+static void set_after(uint32_t after) { memcpy(policy, &after, sizeof(after)); }
+static void fixture_reset(void) {
+    memset(&args, 0, sizeof(args));
+    args.present=ENABLED|HEARTBEAT|DELAY|INTERVAL|NAMES;
+    args.enabled=1; args.heartbeat=1; args.delay=30; args.interval=60;
+    memcpy(args.names, "-", 2);
+    args.contract_present=args.policy_present=true;
+    args.contract_size=sizeof(contract); args.policy_size=sizeof(policy);
+    contract[0]=0x24; contract[1]=15; contract[2]=3;
+    memset(policy, 0, sizeof(policy)); set_after(2280);
+    for (unsigned int i=0; i<16; ++i) policy[4+i]=(uint8_t)(i+1);
+    memset(registers, 0, sizeof(registers));
+    registers[0]=0x17d; registers[1]=0xf000; registers[9]=0x40002000;
+    memset(&dali_fastboot_state, 0, sizeof(dali_fastboot_state));
+    memset(dali_fastboot_token, 0, sizeof(dali_fastboot_token));
+    dali_fastboot_ready=0; dali_wdt_hz=13000000; dali_wdt_boot_seconds=2400; ticks=1000;
+    reads=writes=fences=records=drains=resets=contract_calls=policy_calls=0;
+    config_refused=contract_refused=budget_refused=0;
+}
+static int PE_parse_boot_argn(const char *name, void *out, int size) {
+    unsigned int bit, value=0;
+    if (!strcmp(name, "dalifastboot")) { bit=ENABLED; value=args.enabled; }
+    else if (!strcmp(name, "sweetheartbeat")) { bit=HEARTBEAT; value=args.heartbeat; }
+    else if (!strcmp(name, "sweetsampledelay")) { bit=DELAY; value=args.delay; }
+    else if (!strcmp(name, "sweetsampleinterval")) { bit=INTERVAL; value=args.interval; }
+    else { assert(!strcmp(name, "sweetsample")); bit=NAMES; }
+    if (!(args.present & bit)) return 0;
+    if (bit==NAMES) { assert(size==(int)sizeof(args.names)); memcpy(out,args.names,sizeof(args.names)); }
+    else { assert(size==(int)sizeof(value)); memcpy(out,&value,sizeof(value)); }
+    return 1;
+}
+static int SecureDTGetProperty(DTEntry entry, const char *name, const void **out, unsigned int *size) {
+    assert(entry==&args);
+    if (!strcmp(name,"fastboot-return-contract")) {
+        ++contract_calls; if (!args.contract_present) return -1;
+        *out=args.contract_null ? NULL : contract; *size=args.contract_size; return kSuccess;
+    }
+    assert(!strcmp(name,"fastboot-return-policy")); ++policy_calls;
+    if (!args.policy_present) return -1;
+    *out=args.policy_null ? NULL : policy; *size=args.policy_size; return kSuccess;
+}
+static uint64_t mach_absolute_time(void) { return ticks; }
+static uint32_t rd(void *c,uint32_t off) { (void)c; ++reads; assert(off<sizeof(registers) && off%4==0); return registers[off/4]; }
+static void wr(void *c,uint32_t off,uint32_t value) { (void)c; assert(off==0x24); ++writes; registers[off/4]=value; }
+static void fence(void *c) { (void)c; ++fences; }
+static void record(void *c,const char *stage,uint32_t marker,uint32_t mode) { (void)c; (void)marker; (void)mode; assert(stage); ++records; }
+static uint64_t now(void *c) { (void)c; return ticks; }
+static bool drain(void *c,uint64_t deadline) { (void)c; assert(deadline>ticks); ++drains; return true; }
+static uint32_t reset(void *c) { (void)c; ++resets; return 0; }
+static const struct dali_fb_ops dali_fastboot_ops={0,rd,wr,fence,record,now,drain,reset};
+static int fixture_printf(const char *format, ...) {
+    if (!strcmp(format,"SWEET FASTBOOT: v=1 stage=config-refused\n")) ++config_refused;
+    else if (!strcmp(format,"SWEET FASTBOOT: v=1 stage=contract-refused\n")) ++contract_refused;
+    else { assert(!strcmp(format,"SWEET FASTBOOT: v=1 stage=budget-refused\n")); ++budget_refused; }
+    return 0;
+}
+#define printf fixture_printf
+#define ASSERT_UNTOUCHED() assert(!dali_fastboot_ready && !dali_fastboot_state.phase && !reads && !writes && !fences && !records && !drains && !resets)
+#define ASSERT_CONFIG_REFUSED() do { ASSERT_UNTOUCHED(); assert(config_refused==1 && !contract_refused && !budget_refused); } while (0)
+#define ASSERT_CONTRACT_REFUSED() do { ASSERT_UNTOUCHED(); assert(!config_refused && contract_refused==1 && !budget_refused); } while (0)
+#define ASSERT_BUDGET_REFUSED() do { ASSERT_UNTOUCHED(); assert(!config_refused && !contract_refused && budget_refused==1); } while (0)
 '''
 
 
@@ -189,6 +283,147 @@ class FastbootReturnTests(unittest.TestCase):
             result = subprocess.run([str(binary)], text=True, capture_output=True, timeout=15)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertEqual(result.stdout.strip(), 'PASS')
+
+    def run_prepare_c(self, body, native=NATIVE):
+        body = body.replace('int main(void) {',
+                            'int main(void) { (void)&dali_fb_step; (void)&dali_fb_root_failure;', 1)
+        self.run_c(body, POLICY + PREPARE_MOCK + function(native, 'dali_fastboot_prepare'))
+
+    def test_actual_prepare_supported_intervals_and_old_source_negative_control(self):
+        # Execute the pre-0188 function too: the real 60-second trial must fail there.
+        self.run_prepare_c(r'''
+int main(void) {
+    fixture_reset(); dali_fastboot_prepare(&args); ASSERT_CONFIG_REFUSED();
+    fixture_reset(); args.interval=30; set_after(1080); dali_wdt_boot_seconds=1140;
+    dali_fastboot_prepare(&args);
+    assert(dali_fastboot_ready==1 && dali_fastboot_state.phase==1 && writes==1);
+    puts("PASS");
+}
+''', NATIVE_BASE)
+        self.run_prepare_c(r'''
+int main(void) {
+    for (unsigned int interval=0; interval<=3600; ++interval) {
+        if (interval==30 || interval==60) continue;
+        fixture_reset(); args.interval=interval; dali_fastboot_prepare(&args);
+        ASSERT_CONFIG_REFUSED(); assert(!contract_calls && !policy_calls);
+    }
+    fixture_reset(); args.interval=UINT32_MAX; dali_fastboot_prepare(&args);
+    ASSERT_CONFIG_REFUSED();
+    for (unsigned int interval=30; interval<=60; interval+=30) {
+        fixture_reset(); args.interval=interval;
+        if (interval==30) { set_after(1080); dali_wdt_boot_seconds=1140; }
+        dali_fastboot_prepare(&args);
+        unsigned int after=interval==30 ? 1080 : 2280;
+        unsigned int lease=interval==30 ? 1140 : 2400;
+        assert(!config_refused && !contract_refused && !budget_refused);
+        assert(contract_calls==1 && policy_calls==1 && dali_fastboot_ready==1);
+        assert(dali_fastboot_state.phase==1 && dali_fastboot_state.after==after);
+        assert(dali_fastboot_state.lease==lease && dali_fastboot_state.frequency==13000000);
+        assert(!strcmp(dali_fastboot_token,"0102030405060708090a0b0c0d0e0f10"));
+        assert(writes==1 && fences==1 && records==1 && registers[9]==0x40002003);
+        assert(registers[0]==0x17d && registers[1]==0xf000 && !drains && !resets);
+        ticks=1000+(uint64_t)(after-1)*13000000;
+        assert(!dali_fb_step(&dali_fastboot_state,&dali_fastboot_ops) && !drains && !resets);
+        /* Synthetic sampler alignment: 30s delay, then 30s/60s intervals. */
+        ticks=1000+(uint64_t)(interval==30 ? 1080 : 2310)*13000000;
+        assert(!dali_fb_step(&dali_fastboot_state,&dali_fastboot_ops));
+        assert(drains==1 && resets==1 && dali_fastboot_state.phase==3);
+        assert(registers[9]==0x40002000 && registers[0]==0x17d && registers[1]==0xf000);
+    }
+    /* A late poll at the unchanged lease cutoff must not attempt a reset. */
+    fixture_reset(); set_after(120); dali_wdt_boot_seconds=180;
+    dali_fastboot_prepare(&args); assert(dali_fastboot_ready==1);
+    ticks=1000+170ULL*13000000;
+    assert(!dali_fb_step(&dali_fastboot_state,&dali_fastboot_ops));
+    assert(dali_fastboot_state.phase==5 && !drains && !resets && registers[9]==0x40002003);
+    puts("PASS");
+}
+''')
+
+    def test_actual_prepare_preserves_opt_in_contract_and_budget_guards(self):
+        self.run_prepare_c(r'''
+int main(void) {
+    const unsigned int bits[]={ENABLED,HEARTBEAT,DELAY,INTERVAL,NAMES};
+    const unsigned int bad_heartbeat[]={0,2,UINT32_MAX};
+    const unsigned int bad_delay[]={0,29,31,60,UINT32_MAX};
+    const char *bad_names[]={"", "--", "-x", "SpringB", "--------"};
+    for (unsigned int interval=30; interval<=60; interval+=30) {
+        for (unsigned int i=0; i<sizeof(bits)/sizeof(bits[0]); ++i) {
+            fixture_reset(); args.interval=interval; args.present &= ~bits[i];
+            dali_fastboot_prepare(&args);
+            if (bits[i]==ENABLED) { ASSERT_UNTOUCHED(); assert(!config_refused); }
+            else ASSERT_CONFIG_REFUSED();
+            assert(!contract_calls && !policy_calls);
+        }
+        for (unsigned int enabled=0; enabled<=2; enabled+=2) {
+            fixture_reset(); args.interval=interval; args.enabled=enabled;
+            dali_fastboot_prepare(&args); ASSERT_UNTOUCHED();
+            assert(!config_refused && !contract_calls && !policy_calls);
+        }
+        for (unsigned int i=0; i<sizeof(bad_heartbeat)/sizeof(bad_heartbeat[0]); ++i) {
+            fixture_reset(); args.interval=interval; args.heartbeat=bad_heartbeat[i];
+            dali_fastboot_prepare(&args); ASSERT_CONFIG_REFUSED(); assert(!contract_calls);
+        }
+        for (unsigned int i=0; i<sizeof(bad_delay)/sizeof(bad_delay[0]); ++i) {
+            fixture_reset(); args.interval=interval; args.delay=bad_delay[i];
+            dali_fastboot_prepare(&args); ASSERT_CONFIG_REFUSED(); assert(!contract_calls);
+        }
+        for (unsigned int i=0; i<sizeof(bad_names)/sizeof(bad_names[0]); ++i) {
+            fixture_reset(); args.interval=interval; memset(args.names,0,sizeof(args.names));
+            size_t n=strlen(bad_names[i]); if (n>sizeof(args.names)) n=sizeof(args.names);
+            memcpy(args.names,bad_names[i],n);
+            dali_fastboot_prepare(&args); ASSERT_CONFIG_REFUSED(); assert(!contract_calls);
+        }
+        for (unsigned int i=0; i<4; ++i) {
+            fixture_reset(); args.interval=interval;
+            if (i==0) args.contract_present=false;
+            if (i==1) args.contract_null=true;
+            if (i==2) --args.contract_size;
+            if (i==3) ++args.contract_size;
+            dali_fastboot_prepare(&args); ASSERT_CONFIG_REFUSED(); assert(contract_calls==1 && !policy_calls);
+        }
+        for (unsigned int i=0; i<3; ++i) {
+            fixture_reset(); args.interval=interval; ++contract[i];
+            dali_fastboot_prepare(&args); ASSERT_CONTRACT_REFUSED(); assert(contract_calls==1 && !policy_calls);
+        }
+        for (unsigned int i=0; i<4; ++i) {
+            fixture_reset(); args.interval=interval;
+            if (i==0) args.policy_present=false;
+            if (i==1) args.policy_null=true;
+            if (i==2) --args.policy_size;
+            if (i==3) ++args.policy_size;
+            dali_fastboot_prepare(&args); ASSERT_CONTRACT_REFUSED(); assert(contract_calls==1 && policy_calls==1);
+        }
+        const uint32_t bad_after[]={0,119,2281,UINT32_MAX};
+        for (unsigned int i=0; i<sizeof(bad_after)/sizeof(bad_after[0]); ++i) {
+            fixture_reset(); args.interval=interval; set_after(bad_after[i]);
+            dali_fastboot_prepare(&args); ASSERT_BUDGET_REFUSED();
+        }
+        for (unsigned int i=0; i<5; ++i) {
+            fixture_reset(); args.interval=interval;
+            if (i==0) memset(policy+4,0,16);
+            if (i==1) dali_wdt_hz=0;
+            if (i==2) --dali_wdt_hz;
+            if (i==3) dali_wdt_boot_seconds=2339;
+            if (i==4) dali_wdt_boot_seconds=2401;
+            dali_fastboot_prepare(&args); ASSERT_BUDGET_REFUSED();
+        }
+        const uint32_t valid[][2]={{120,180},{2280,2340},{2280,2400}};
+        for (unsigned int i=0; i<sizeof(valid)/sizeof(valid[0]); ++i) {
+            fixture_reset(); args.interval=interval; set_after(valid[i][0]);
+            dali_wdt_boot_seconds=valid[i][1]; dali_fastboot_prepare(&args);
+            assert(dali_fastboot_ready==1 && dali_fastboot_state.phase==1 && writes==1);
+        }
+        fixture_reset(); args.interval=interval; ticks=UINT64_MAX;
+        dali_fastboot_prepare(&args); ASSERT_UNTOUCHED();
+        assert(!config_refused && !contract_refused && !budget_refused);
+        fixture_reset(); args.interval=interval; registers[0]=0x17c;
+        dali_fastboot_prepare(&args);
+        assert(!dali_fastboot_ready && !dali_fastboot_state.phase && reads==3 && !writes);
+    }
+    puts("PASS");
+}
+''')
 
     def test_default_off_and_exact_contract_budget(self):
         self.run_c(r'''
@@ -388,7 +623,12 @@ in_irq=false;preempt=1;assert(!sweet_log_fastboot_drain(100));puts("PASS");}
             '#define DALI_FB_MAX_LEASE 1140u', '#define DALI_FB_MAX_LEASE 2400u'))
         self.assertEqual(hashlib.sha256(POLICY.encode()).hexdigest(),
                          'e293a1a0b051ba7724cfcbaa7fce15189f2ac4e54df417fd24a1184663c26297')
-        native = fragment('pexpert/arm/pe_dali_watchdog.c')
+        old_guard = '    if (heartbeat != 1 || delay_seconds != 30 || interval != 30 ||\n'
+        new_guard = ('    if (heartbeat != 1 || delay_seconds != 30 ||\n'
+                     '        (interval != 30 && interval != 60) ||\n')
+        self.assertEqual(NATIVE_BASE.count(old_guard), 1)
+        self.assertEqual(NATIVE, NATIVE_BASE.replace(old_guard, new_guard))
+        native = NATIVE
         sampler = fragment('bsd/dev/sweet_sample.c')
         self.assertIn('"dalifastboot"', native)
         self.assertIn('enabled != 1', native)
@@ -408,9 +648,10 @@ in_irq=false;preempt=1;assert(!sweet_log_fastboot_drain(100));puts("PASS");}
                                      '766a96a35bf41796efc3ea6541b9af4d324532d6e99610cd9ab5dcd619dcfd1d')
                 elif path == POLICY_PATH:
                     expected = POLICY
-                elif path in ('bsd/dev/sweet_ufs.c', 'pexpert/arm/pe_dali_watchdog.c',
-                              'osfmk/arm64/dali_watchdog.h'):
-                    expected = fragment(path, ROOT/'xnu/patches/0180-sweet-dali-pwm-link-policy.patch')
+                elif path == NATIVE_PATH:
+                    expected = NATIVE
+                elif path in ('bsd/dev/sweet_ufs.c', 'osfmk/arm64/dali_watchdog.h'):
+                    expected = fragment(path, BASE_PATCH)
                 else:
                     expected = fragment(path)
                 self.assertEqual((Path(source_dir) / path).read_text(), expected, path)
