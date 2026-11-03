@@ -8,7 +8,7 @@ struct mock {
  unsigned reads,writes,smcs,acquires,releases,clock_checks,polls;
  unsigned fail_read,fail_smc,complete_at,fail_clock,order[3],order_count;
  uint64_t now;
- bool write_fail,release_fail,freeze,opaque_resource,never_idle;
+ bool write_fail,freeze,opaque_resource,never_idle,minus_one_resource;
 };
 static int read32(void *p,uint32_t offset,uint32_t *value){
  struct mock *m=p;assert(!(offset&3) && offset<0x1000);++m->reads;
@@ -27,8 +27,9 @@ static int smc(void *p,uint32_t cmd,uint32_t index,uint64_t *a0,uint64_t *a1){
  struct mock *m=p;++m->smcs;if(m->smcs==m->fail_smc)return 1;*a0=*a1=0;
  if(cmd==4){unsigned count=(m->reg[HSF_COUNT/4]&7u)+1u;assert(count<=HSF_OPPS && index<count && !m->acquires && !m->writes);*a1=m->cal[index];}
  else if(cmd==0x40){assert(!index && !m->acquires && !m->releases && m->order_count==m->writes);m->order[m->order_count++]=2;++m->acquires;}
- else{assert(cmd==0x41 && !index && m->acquires==1 && !m->releases && m->order_count<3);m->order[m->order_count++]=3;++m->releases;if(m->release_fail)*a0=UINT64_MAX;}
- if(m->opaque_resource && cmd!=4)*a0=3; /* No zero-only resource ABI is assumed. */
+ else{assert(cmd==0x41 && !index && m->acquires==1 && !m->releases && m->order_count<3);m->order[m->order_count++]=3;++m->releases;}
+ if(m->opaque_resource && cmd!=4)*a0=3; /* No status ABI is assumed. */
+ if(m->minus_one_resource && cmd!=4)*a0=UINT64_MAX;
  return 0;
 }
 static int clock_ok(void *p){struct mock *m=p;++m->clock_checks;return m->clock_checks==m->fail_clock;}
@@ -98,8 +99,14 @@ int main(void){struct hsf_state s;struct mock m;
   reset(&s,&m);m.fail_read=fail;
   assert(hsf_acquire(&s,true,&ops,&m)==HSF_READ && !m.writes && !m.acquires && !m.releases);
  }
- reset(&s,&m);m.release_fail=true;
- assert(hsf_acquire(&s,true,&ops,&m)==HSF_RELEASE && m.writes==1 && m.releases==1 && s.resource_requested);
+ reset(&s,&m);m.fail_smc=8;
+ assert(hsf_acquire(&s,true,&ops,&m)==HSF_RELEASE && m.writes==1 && !m.releases && s.resource_requested);
+ assert(s.resource_request_valid && !s.resource_release_valid);
+ reset(&s,&m);m.minus_one_resource=true;
+ assert(!hsf_acquire(&s,true,&ops,&m) && s.phase==HSF_ACTIVE && m.acquires==1 && m.releases==1 && !s.resource_requested);
+ assert(s.resource_request_result==UINT64_MAX && s.resource_release_result==UINT64_MAX && s.resource_request_valid && s.resource_release_valid);
+ reset(&s,&m);m.minus_one_resource=true;m.reg[HSF_TARGET/4]=1u<<16;m.never_idle=true;
+ assert(hsf_acquire(&s,true,&ops,&m)==HSF_TIMEOUT && m.writes==1 && m.acquires==1 && m.releases==1 && s.phase==HSF_FAILED);
  reset(&s,&m);m.complete_at=100000;
  assert(hsf_acquire(&s,true,&ops,&m)==HSF_TIMEOUT && m.writes==1 && m.releases==1 && m.polls==1001);
  reset(&s,&m);m.freeze=true;m.complete_at=100000;

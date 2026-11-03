@@ -102,6 +102,10 @@ UFS_REQUEST_PATCH = ROOT/'xnu/patches/0203-dali-ufs-vcore-request-before-idle.pa
 HS_PRE_REQUEST_ORDER = {path: SOURCE[path] for path in HS_PRE_FW_INIT}
 for path, previous in HS_PRE_REQUEST_ORDER.items():
     SOURCE[path] = apply_exact_hunks(previous, path, UFS_REQUEST_PATCH)
+UFS_RESOURCE_PATCH = ROOT/'xnu/patches/0204-dali-ufs-vendor-resource-result-contract.patch'
+HS_PRE_RESOURCE_RESULTS = {path: SOURCE[path] for path in HS_PRE_REQUEST_ORDER}
+for path, previous in HS_PRE_RESOURCE_RESULTS.items():
+    SOURCE[path] = apply_exact_hunks(previous, path, UFS_RESOURCE_PATCH)
 LOCK = SOURCE['osfmk/kern/lock_mtx.c']
 SAMPLER, UFS, EXCEPTION, GUI_POLICY, IO_POLICY = (SOURCE[p] for p in PATHS)
 RW_POLICY = SOURCE['osfmk/kern/SweetRWWaitProgress.h']

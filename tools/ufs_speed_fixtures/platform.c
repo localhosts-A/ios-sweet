@@ -6,6 +6,13 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#include <stdarg.h>
+static int checked_printf(const char *,...) __attribute__((format(printf,1,2)));
+static int checked_printf(const char *format,...){
+ char buffer[1024];va_list ap;va_start(ap,format);int n=vsnprintf(buffer,sizeof(buffer),format,ap);va_end(ap);
+ assert(n>=0 && n<256);return fputs(buffer,stdout);
+}
+#define printf checked_printf
 typedef uintptr_t vm_offset_t;
 #define DALI_UFS_AO_GATE0 0x104u
 #define DALI_UFS_AO_GATE1 0x4u
@@ -14,7 +21,7 @@ typedef uintptr_t vm_offset_t;
 static uint32_t dvfs[0x1000/4],top[0x800/4],pll[0x1000/4],hci[0x3000/4],ao[0x1000/4];
 static struct {bool dali,ready,command_poisoned;vm_offset_t regs,ao_regs;}su;
 static unsigned maps,smcs,acquires,releases,fail_map,fail_smc,barriers,inits,flag_reads;
-static bool allow_init,init_populates,init_clock_change,complete_requests,init_target_busy,never_idle,android_calibration;
+static bool allow_init,init_populates,init_clock_change,complete_requests,init_target_busy,never_idle,android_calibration,minus_one_resource;
 static uint64_t microseconds,init_fw_status;
 static bool ufs_dali_speed_flag(const char *key){assert(!strcmp(key,"dali-dvfsrc-init"));++flag_reads;return allow_init;}
 static vm_offset_t ml_io_map(uint64_t pa,unsigned size){
@@ -35,7 +42,7 @@ static void reset(void){
  memset(dvfs,0,sizeof(dvfs));memset(top,0,sizeof(top));memset(pll,0,sizeof(pll));
  memset(hci,0,sizeof(hci));memset(ao,0,sizeof(ao));
  maps=smcs=acquires=releases=fail_map=fail_smc=barriers=inits=flag_reads=0;microseconds=1;
- allow_init=init_clock_change=init_target_busy=never_idle=android_calibration=false;init_populates=complete_requests=true;init_fw_status=0;
+ allow_init=init_clock_change=init_target_busy=never_idle=android_calibration=minus_one_resource=false;init_populates=complete_requests=true;init_fw_status=0;
  su.dali=true;su.regs=(uintptr_t)hci;su.ao_regs=(uintptr_t)ao;
  dvfs[0]=86u<<20;dvfs[0xfc/4]=5;dvfs[0x6ac/4]=2u<<8;dvfs[0x18/4]=0x52000;
  top[0xd0/4]=6u<<8;pll[0x3c/4]=1u<<6;pll[0x268/4]=0x180000;
@@ -105,6 +112,12 @@ int main(void){
  reset();unconfigured();allow_init=true;init_target_busy=true;never_idle=true;
  assert(ufs_dali_hs_platform_adopt()==EIO && inits==1 && acquires==1 && releases==1);
  assert(dali_hs_platform.floor.failure==HSF_TIMEOUT && dali_hs_platform.floor.health_valid==31);
- puts("PASS exact platform adapter: INIT once, busy-before-vote, vote-resource-idle-gear, no START, bounded failure and retained minimum; firmware mocked");
+ reset();unconfigured();allow_init=true;init_target_busy=true;android_calibration=minus_one_resource=true;
+ assert(!ufs_dali_hs_platform_adopt() && inits==1 && acquires==1 && releases==1 && dvfs[0x18/4]==0x50030);
+ assert(dali_hs_platform.floor.phase==HSF_ACTIVE && dali_hs_platform.floor.resource_request_result==UINT64_MAX && dali_hs_platform.floor.resource_release_result==UINT64_MAX);
+ assert(dali_hs_platform.floor.resource_request_valid && dali_hs_platform.floor.resource_release_valid && !dali_hs_platform.floor.resource_requested);
+ reset();unconfigured();allow_init=true;init_target_busy=true;minus_one_resource=never_idle=true;
+ assert(ufs_dali_hs_platform_adopt()==EIO && acquires==1 && releases==1 && dali_hs_platform.floor.failure==HSF_TIMEOUT);
+ puts("PASS exact adapter: resource raw is not grant, hardware completion required, transport errors stop, no START, all printf messages below256B; firmware mocked");
  return 0;
 }

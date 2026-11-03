@@ -1,0 +1,132 @@
+diff --git a/bsd/dev/SweetUFSHSFloor.h b/bsd/dev/SweetUFSHSFloor.h
+--- a/bsd/dev/SweetUFSHSFloor.h
++++ b/bsd/dev/SweetUFSHSFloor.h
+@@ -47,17 +47,18 @@
+     void *context;
+     uint32_t phase, failed_stage, failure;
+     uint32_t request, completed, nominal_uv, calibrated_uv;
+     uint32_t raw_basic, max_opp;
+     uint32_t raw_count, opp_count; /* Live firmware table, not nominal capacity. */
+     uint32_t calibrated_count, calibrated[HSF_OPPS];
+     uint32_t health_valid, raw_request, raw_target, raw_gear, raw_force, raw_halt;
+     uint64_t resource_request_result, resource_release_result;
+-    bool resource_requested, wrote_request, count_read;
++    bool resource_requested; /* Pending paired release, not a firmware grant. */
++    bool resource_request_valid, resource_release_valid, wrote_request, count_read;
+ };
+ 
+ static inline int
+ hsf_fail(struct hsf_state *s, unsigned int error)
+ {
+     if (s->phase != HSF_FAILED) {
+         s->failed_stage = s->phase;
+         s->failure = error;
+@@ -180,19 +181,22 @@
+     if (error) return hsf_fail(s, (unsigned int)error);
+     /* Exact vendor ordering: AP vote, temporary memory resource, bounded idle
+      * wait, 1us separation, completed gear, then temporary resource release.
+      * No rollback lowers this boot's requested minimum, even on later failure. */
+     s->phase = HSF_ACQUIRE;
+     uint64_t a0 = UINT64_MAX, a1 = UINT64_MAX;
+     int resource_error = s->ops.smc(context, 0x40, 0, &a0, &a1);
+     s->resource_request_result = a0;
+-    /* Resource a0 is opaque, unlike GET4 status. Pair every otherwise returned
+-     * request with one release; actual AP/idle/gear, not a0, prove completion. */
+-    if (resource_error || a0 == UINT64_MAX) return hsf_fail(s, HSF_RESOURCE);
++    s->resource_request_valid = resource_error == 0;
++    /* The exact MT6991 caller ignores both resource a0 results, including -1;
++     * they are not GET4/INIT status or proof of a resource grant. Keep the calls
++     * paired like that caller and require actual AP/idle/gear/clock completion.
++     * A local transport error is different: no returned firmware result. */
++    if (resource_error) return hsf_fail(s, HSF_RESOURCE);
+     s->resource_requested = true;
+     s->phase = HSF_WAITING;
+     s->ops.delay_us(context, 1);
+     uint64_t begin = error ? 0 : s->ops.now_us(context);
+     bool idle_separated = false;
+     for (unsigned int poll = 0; !error && poll <= HSF_WAIT_US; ++poll) {
+         uint64_t now = s->ops.now_us(context);
+         if (now < begin || now - begin > HSF_WAIT_US) { error = HSF_TIME; break; }
+@@ -209,18 +213,19 @@
+     }
+     /* The AP minimum vote stays in SW_REQ. Release only the vendor temporary
+      * memory resource request, exactly as mtk_dvfsrc_send_request does. */
+     uint32_t failed_stage = s->phase;
+     s->phase = HSF_RELEASING;
+     a0 = a1 = UINT64_MAX;
+     int release_error = s->ops.smc(context, 0x41, 0, &a0, &a1);
+     s->resource_release_result = a0;
+-    if (!release_error && a0 != UINT64_MAX) s->resource_requested = false;
+-    if (!error && (release_error || a0 == UINT64_MAX)) { error = HSF_RELEASE; failed_stage = HSF_RELEASING; }
++    s->resource_release_valid = release_error == 0;
++    if (!release_error) s->resource_requested = false;
++    if (!error && release_error) { error = HSF_RELEASE; failed_stage = HSF_RELEASING; }
+     if (error) {
+         s->phase = failed_stage;
+         return hsf_fail(s, (unsigned int)error);
+     }
+     s->completed = completed;
+     s->phase = HSF_ACTIVE;
+     return hsf_validate(s);
+ }
+diff --git a/bsd/dev/SweetUFSHSPlatform.h b/bsd/dev/SweetUFSHSPlatform.h
+--- a/bsd/dev/SweetUFSHSPlatform.h
++++ b/bsd/dev/SweetUFSHSPlatform.h
+@@ -189,23 +189,23 @@
+         error = EIO;
+         goto out;
+     }
+     after_valid = true;
+     /* hsf_acquire independently validates max/count, direct-index firmware
+      * calibration and actual AP request/completion before any HS attribute. */
+ out:
+     printf("SWEET UFS HSFW: allowed=%u attempted=%u action=%s result=%d "
+-        "before-valid=%u basic-before=0x%x count-before=0x%x "
+-        "after-valid=%u basic-after=0x%x count-after=0x%x "
+         "status=0x%llx dram-type=0x%llx start-called=0 scope=vendor-init-not-adc\n",
+         enabled ? 1u : 0u, dali_hs_platform.init_attempted ? 1u : 0u, action, error,
+-        before_valid ? 1u : 0u, basic, count, after_valid ? 1u : 0u, after_basic, after_count,
+         (unsigned long long)dali_hs_platform.init_status,
+         (unsigned long long)dali_hs_platform.init_dram_type);
++    printf("SWEET UFS HSFWREG: before-valid=%u basic-before=0x%x count-before=0x%x "
++        "after-valid=%u basic-after=0x%x count-after=0x%x\n",
++        before_valid ? 1u : 0u, basic, count, after_valid ? 1u : 0u, after_basic, after_count);
+     return error;
+ }
+ 
+ static int
+ ufs_dali_hs_platform_adopt(void)
+ {
+     if (dali_hs_platform.failure) return dali_hs_platform.failure;
+     if (dali_hs_platform.started) return EBUSY;
+@@ -222,23 +222,26 @@
+     dali_hs_platform.reference = second;
+     int error = ufs_hs_firmware_prepare(ufs_dali_speed_flag("dali-dvfsrc-init"));
+     if (error) return (dali_hs_platform.failure = error);
+     const struct hsf_ops ops = {ufs_hs_floor_read, ufs_hs_floor_write, ufs_hs_smc,
+         ufs_hs_clock_ok, ufs_hs_now_us, ufs_hs_delay_us};
+     error = hsf_acquire(&dali_hs_platform.floor, true, &ops, NULL);
+     struct hsf_state *s = &dali_hs_platform.floor;
+     printf("SWEET UFS HSFLOOR: result=%d stage=%u request=%u completed=%u nominal=%u calibrated=%u "
+-        "write-attempted=%u clock=%llu resource-raw=0x%llx/0x%llx raw-count=0x%x opp-count=%u "
+-        "basic=0x%x max-opp=%u count-read=%u scope=ap-min-request-not-adc\n", error,
++        "write-attempted=%u clock=%llu scope=ap-min-request-not-adc\n", error,
+         error ? s->failed_stage : s->phase, s->request, s->completed, s->nominal_uv,
+         s->calibrated_uv, s->wrote_request ? 1u : 0u,
+-        (unsigned long long)sweet_pwm_clock_hz(&second.pll, &second.pll),
++        (unsigned long long)sweet_pwm_clock_hz(&second.pll, &second.pll));
++    printf("SWEET UFS HSCFG: basic=0x%x max-opp=%u count-read=%u raw-count=0x%x opp-count=%u "
++        "resource-valid=%u/%u resource-raw=0x%llx/0x%llx pair-pending=%u scope=call-results-not-grant\n",
++        s->raw_basic, s->max_opp, s->count_read ? 1u : 0u, s->raw_count, s->opp_count,
++        s->resource_request_valid ? 1u : 0u, s->resource_release_valid ? 1u : 0u,
+         (unsigned long long)s->resource_request_result, (unsigned long long)s->resource_release_result,
+-        s->raw_count, s->opp_count, s->raw_basic, s->max_opp, s->count_read ? 1u : 0u);
++        s->resource_requested ? 1u : 0u);
+     printf("SWEET UFS HSHW: valid=0x%x stage=%u request-raw=0x%x target-raw=0x%x "
+         "gear-raw=0x%x force-raw=0x%x halt-raw=0x%x flow=vote-resource-idle-gear\n",
+         s->health_valid, error ? s->failed_stage : s->phase, s->raw_request, s->raw_target,
+         s->raw_gear, s->raw_force, s->raw_halt);
+     for (unsigned int i = 0; i < s->calibrated_count; ++i)
+         printf("SWEET UFS HSCAL: selector=%u uv=%u index-domain=raw-selector not-adc=1\n",
+             i, s->calibrated[i]);
+     if (error) dali_hs_platform.failure = EIO;

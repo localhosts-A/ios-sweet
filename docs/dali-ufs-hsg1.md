@@ -62,23 +62,26 @@ Unknown, out-of-table and insufficient-voltage states remain errors. It uses the
 standard temporary memory-resource request/release and writes only
 `SW_REQ[6:4]`, preserving unrelated bits. It waits for target idle and
 `CUR_TAR_GEAR[10:8] >= request`, with a 1000-us clock budget and a separate
-1001-poll bound. An unsupported firmware command, forced/halted controller,
-invalid table, failed write or incomplete transition prevents HS configuration.
+1001-poll bound. A failed INIT/GET4 status, forced/halted controller,
+invalid table, failed write or incomplete hardware transition prevents HS configuration.
 The initial health read does not require an idle target: the actual vendor
 request path submits the AP minimum vote **before** its temporary memory-resource
 request, then waits for idle and sufficient completed gear. A transition in
 progress before the vote is not a reason to reject this standard request. The
 implementation follows that order without relaxing its bounded post-vote
-idle/gear/clock checks. An unsupported resource call may therefore leave the
+idle/gear/clock checks. A local resource-transport failure may therefore leave the
 higher AP vote in place; a failed write returns before resource acquisition.
 There is no lowering rollback, retry, START or fallback. This applies only to
 acquisition; a busy target during later HS validation remains a fault.
 The AP minimum request stays in the register until reboot; temporary memory
 resource release does not withdraw that minimum request. The resource SMC
-return values are recorded raw, not interpreted using GET4's separate status
-ABI. Standard SMCCC NOT_SUPPORTED and local transport errors stop the path;
-actual AP request/readback/target/gear, not an opaque resource return value,
-prove completion. A 1-us delay after an idle observation preserves the vendor's
+return values are recorded raw with per-call validity. The fixed MT6991 source
+and actual module call 0x40 and 0x41 without checking either a0, including -1;
+these are not INIT/GET4 status values. Returned calls remain paired, and a raw
+-1 is neither relabeled a grant nor accepted as voltage completion. Only the
+actual AP request/readback, idle target, sufficient gear and unchanged clock
+can activate the floor. Local transport errors still stop the path and a failed
+release transport is recorded as a pending pair, not as a successful release. A 1-us delay after an idle observation preserves the vendor's
 separation from a prior transition before completed gear is accepted.
 
 The UFS mutex serializes this tree's sole AP-request writer. There is no new
@@ -92,7 +95,10 @@ change or a reason to retry. Firmware table values are not ADC measurements. The
 raw request/target/gear/force/halt values with a per-read validity mask (bits
 3/2/4/0/1 respectively). These are sequential reads from the last health check,
 not an atomic snapshot or extra diagnostic reads; absent bits must not be
-interpreted as observed zero values.
+interpreted as observed zero values. Firmware state and floor/configuration
+records use separate short lines; the actual adapter fixture enforces every
+formatted printf below 256 bytes, including -1/opaque resource values and error
+paths, to avoid the retained early-console line truncation observed on hardware.
 
 ## Optional standard firmware initialization
 
