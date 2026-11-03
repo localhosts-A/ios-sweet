@@ -127,11 +127,14 @@ with tempfile.TemporaryDirectory(prefix='sweet-ipcsend-ring-') as td:
 helper_start = sample.index('void\nsweet_ipcsend_receiver_name(int pid')
 helper_end = sample.index('\n}\n#endif', helper_start) + 2
 name_helper = sample[helper_start:helper_end]
-name_fixture = r'''#define strlcpy sweet_fixture_strlcpy
-#include <assert.h>
+name_fixture = r'''#include <assert.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
+/* Model Darwin's public declaration even on hosts without strlcpy. */
+size_t strlcpy(char *dst, const char *src, size_t size);
+/* Alias only our fixture and extracted helper, never SDK declarations. */
+#define strlcpy sweet_fixture_strlcpy
 static int looked_up = -1;
 static void proc_name(int pid, char *name, int size) {
     looked_up = pid;
