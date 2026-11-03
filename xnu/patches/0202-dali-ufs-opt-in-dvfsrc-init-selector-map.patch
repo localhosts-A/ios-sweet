@@ -1,0 +1,295 @@
+diff --git a/bsd/dev/SweetUFSHSFloor.h b/bsd/dev/SweetUFSHSFloor.h
+--- a/bsd/dev/SweetUFSHSFloor.h
++++ b/bsd/dev/SweetUFSHSFloor.h
+@@ -7,31 +7,33 @@
+  * not a supported transition. Callers serialize all calls with the UFS mutex.
+  */
+ #ifndef SWEET_UFS_HS_FLOOR_H
+ #define SWEET_UFS_HS_FLOOR_H
+ #include <stdbool.h>
+ #include <stdint.h>
+ #include <stddef.h>
+ 
++#define HSF_BASIC_CONTROL 0x0u
+ #define HSF_REQUEST 0x18u
+ #define HSF_TARGET 0x5f0u
+ #define HSF_GEAR 0x6acu
+ #define HSF_COUNT 0xfcu
+ #define HSF_FORCE_REQUEST 0x604u
+ #define HSF_HALT 0xc4u
+ #define HSF_REQUEST_MASK 0x70u
+ #define HSF_OPPS 6u
+ #define HSF_MIN_UV 650000u
+ #define HSF_WAIT_US 1000u
+ 
+ enum hsf_error {
+     HSF_OK, HSF_ARGUMENT, HSF_STATE, HSF_CLOCK, HSF_READ, HSF_FORCE,
+     HSF_COUNT_ERROR, HSF_TABLE, HSF_REQUEST_ERROR, HSF_RESOURCE,
+-    HSF_WRITE, HSF_TIME, HSF_TIMEOUT, HSF_RELEASE, HSF_LOST_FLOOR
++    HSF_WRITE, HSF_TIME, HSF_TIMEOUT, HSF_RELEASE, HSF_LOST_FLOOR,
++    HSF_CONFIGURATION
+ };
+ enum hsf_stage {
+     HSF_OFF, HSF_BEGIN, HSF_CAPABILITY, HSF_ACQUIRE, HSF_REQUESTING,
+     HSF_WAITING, HSF_RELEASING, HSF_ACTIVE, HSF_VALIDATING, HSF_FAILED
+ };
+ struct hsf_ops {
+     int (*read)(void *, uint32_t, uint32_t *);
+     int (*write_request)(void *, uint32_t);
+@@ -40,20 +42,21 @@
+     uint64_t (*now_us)(void *);
+     void (*delay_us)(void *, uint32_t);
+ };
+ struct hsf_state {
+     struct hsf_ops ops;
+     void *context;
+     uint32_t phase, failed_stage, failure;
+     uint32_t request, completed, nominal_uv, calibrated_uv;
++    uint32_t raw_basic, max_opp;
+     uint32_t raw_count, opp_count; /* Live firmware table, not nominal capacity. */
+-    uint32_t calibrated[HSF_OPPS];
++    uint32_t calibrated_count, calibrated[HSF_OPPS];
+     uint64_t resource_request_result, resource_release_result;
+-    bool resource_requested, wrote_request;
++    bool resource_requested, wrote_request, count_read;
+ };
+ 
+ static inline int
+ hsf_fail(struct hsf_state *s, unsigned int error)
+ {
+     if (s->phase != HSF_FAILED) {
+         s->failed_stage = s->phase;
+         s->failure = error;
+@@ -109,33 +112,41 @@
+     if (!enabled) return HSF_OK; /* No callback, map, SMC or write. */
+     if (ops == NULL || !ops->read || !ops->write_request || !ops->smc ||
+         !ops->clock_ok || !ops->now_us || !ops->delay_us) return hsf_fail(s, HSF_ARGUMENT);
+     s->ops = *ops;
+     s->context = context;
+     s->phase = HSF_BEGIN;
+     int error = s->ops.clock_ok(context);
+     if (error) return hsf_fail(s, HSF_CLOCK);
+-    uint32_t count = 0;
++    uint32_t basic = 0, count = 0;
+     s->phase = HSF_CAPABILITY;
++    if (s->ops.read(context, HSF_BASIC_CONTROL, &basic)) return hsf_fail(s, HSF_READ);
++    s->raw_basic = basic;
++    s->max_opp = (basic >> 20) & 0x7fu;
++    /* The actual v4 helper rejects zero max_opp before using its gear header.
++     * Zero-initialized +0xfc alone is not a usable one-voltage configuration. */
++    if (s->max_opp == 0) return hsf_fail(s, HSF_CONFIGURATION);
+     if (s->ops.read(context, HSF_COUNT, &count)) return hsf_fail(s, HSF_READ);
+     s->raw_count = count;
++    s->count_read = true;
+     s->opp_count = (count & 7u) + 1u;
+-    /* The regulator publishes six possible AP selectors, while the v4 helper
+-     * obtains the configured firmware count dynamically. Never assume the
+-     * nominal table length is the live reverse-index base. Below three gears
+-     * cannot express nominal selector2; above six lacks a known nominal map.
++    /* Six nominal selectors are a capacity, not a live table length. Below
++     * three cannot express nominal selector2; above six has no nominal map.
++     * GET4 indexes the raw selector directly, as does the vendor voltage check.
++     * Reversing a logical OPP is a different exported helper's interface.
+      */
+     if (s->opp_count < 3 || s->opp_count > HSF_OPPS) return hsf_fail(s, HSF_COUNT_ERROR);
+     for (unsigned int i = 0; i < s->opp_count; ++i) {
+         uint64_t a0 = UINT64_MAX, a1 = UINT64_MAX;
+-        if (s->ops.smc(context, 4, s->opp_count - i - 1u, &a0, &a1) || a0 != 0 ||
++        if (s->ops.smc(context, 4, i, &a0, &a1) || a0 != 0 ||
+             a1 < 500000 || a1 > 1000000 || (i && a1 < s->calibrated[i-1]))
+             return hsf_fail(s, HSF_TABLE);
+         s->calibrated[i] = (uint32_t)a1;
++        s->calibrated_count = i + 1u;
+     }
+     uint32_t minimum = s->opp_count;
+     for (unsigned int i = 0; i < s->opp_count; ++i) {
+         if (nominal[i] >= HSF_MIN_UV && s->calibrated[i] >= HSF_MIN_UV) {
+             minimum = i;
+             break;
+         }
+     }
+diff --git a/bsd/dev/SweetUFSHSPlatform.h b/bsd/dev/SweetUFSHSPlatform.h
+--- a/bsd/dev/SweetUFSHSPlatform.h
++++ b/bsd/dev/SweetUFSHSPlatform.h
+@@ -1,36 +1,39 @@
+ /* SPDX-License-Identifier: BSD-2-Clause-Patent
+  * Dali MT6991 standard AP minimum-VCORE request with the existing UFS clock.
+- * Include after su, ufs_rd/ufs_ao_rd and ordinary UIC helpers. No new PLL,
+- * PMIF, PMIC, DVFSRC INIT, clock switch, suspend or downward-voltage operation.
++ * Include after su, ufs_rd/ufs_ao_rd and ordinary UIC helpers. The explicit
++ * dali-dvfsrc-init opt-in permits one vendor INIT(flag=0,vmode=0) only for an
++ * unconfigured controller. No START/free-run, PLL, PMIF, PMIC, clock switch,
++ * suspend, forced OPP or downward AP minimum-request operation is added.
+  */
+ #ifndef SWEET_UFS_HS_PLATFORM_H
+ #define SWEET_UFS_HS_PLATFORM_H
+ #include "SweetUFSHSFloor.h"
+ #include "SweetUFSPWMClock.h"
+ 
+ struct dali_hs_clock {
+     struct sweet_pwm_clock_snapshot pll;
+     uint32_t gate0, gate1, refclk;
+ };
+ static struct {
+     vm_offset_t dvfsrc, top, apmixed;
+     struct dali_hs_clock reference;
+     struct hsf_state floor;
+-    bool started;
++    bool started, init_attempted;
++    uint64_t init_status, init_dram_type;
+     int failure;
+ } dali_hs_platform;
+ 
+ static int
+ ufs_hs_smc(void *context, uint32_t command, uint32_t index, uint64_t *a0, uint64_t *a1)
+ {
+     (void)context;
+     if (a0 == NULL || a1 == NULL ||
+-        (command != 4 && command != 0x40 && command != 0x41) ||
++        (command != 0 && command != 4 && command != 0x40 && command != 0x41) ||
+         (command == 4 ? index >= HSF_OPPS : index != 0)) return EINVAL;
+     register uint64_t x0 __asm__("x0") = 0xc2000506u;
+     register uint64_t x1 __asm__("x1") = command;
+     register uint64_t x2 __asm__("x2") = index;
+     register uint64_t x3 __asm__("x3") = 0;
+     register uint64_t x4 __asm__("x4") = 0;
+     register uint64_t x5 __asm__("x5") = 0;
+     register uint64_t x6 __asm__("x6") = 0;
+@@ -51,17 +54,17 @@
+     return value;
+ }
+ 
+ static int
+ ufs_hs_floor_read(void *context, uint32_t offset, uint32_t *out)
+ {
+     (void)context;
+     if (!dali_hs_platform.dvfsrc || out == NULL ||
+-        (offset != HSF_REQUEST && offset != HSF_TARGET && offset != HSF_GEAR &&
++        (offset != HSF_BASIC_CONTROL && offset != HSF_REQUEST && offset != HSF_TARGET && offset != HSF_GEAR &&
+          offset != HSF_COUNT && offset != HSF_FORCE_REQUEST && offset != HSF_HALT)) return EINVAL;
+     *out = ufs_hs_reg(dali_hs_platform.dvfsrc, offset);
+     return *out == UINT32_MAX ? EIO : 0;
+ }
+ 
+ static int
+ ufs_hs_floor_write(void *context, uint32_t value)
+ {
+@@ -124,44 +127,115 @@
+ 
+ static void
+ ufs_hs_delay_us(void *context, uint32_t microseconds)
+ {
+     (void)context;
+     delay(microseconds);
+ }
+ 
++/* Standard parent INIT only, not the separate enable-free-run START. Actual
++ * MT6991 DT has flag=0/vmode=0; these are x2/x3 and x4..x7 stay zero. The
++ * explicit property is consumed only by the already opt-in pre-root HS path.
++ * An existing configuration or an inherited AP vote is never reinitialized.
++ */
++static int
++ufs_hs_firmware_prepare(bool enabled)
++{
++    if (dali_hs_platform.init_attempted) return EBUSY;
++    uint32_t basic = 0, count = 0, after_basic = 0, after_count = 0;
++    uint32_t request = 0, force = 0, halt = 0, target = 0;
++    bool before_valid = false, after_valid = false;
++    const char *action = "read-failed";
++    int error = ufs_hs_floor_read(NULL, HSF_BASIC_CONTROL, &basic);
++    if (!error) error = ufs_hs_floor_read(NULL, HSF_COUNT, &count);
++    if (error) goto out;
++    before_valid = true;
++    after_basic = basic;
++    after_count = count;
++    after_valid = true;
++    if (((basic >> 20) & 0x7fu) != 0 || !enabled) {
++        action = enabled ? "adopt-configured" : "init-disabled";
++        goto out;
++    }
++    action = "refuse-active-request";
++    if (ufs_hs_clock_ok(NULL) ||
++        ufs_hs_floor_read(NULL, HSF_REQUEST, &request) ||
++        ufs_hs_floor_read(NULL, HSF_FORCE_REQUEST, &force) ||
++        ufs_hs_floor_read(NULL, HSF_HALT, &halt) ||
++        ufs_hs_floor_read(NULL, HSF_TARGET, &target) ||
++        (request & HSF_REQUEST_MASK) || force || (halt & 2u) || (target & (1u << 16))) {
++        error = EIO;
++        goto out;
++    }
++    action = "vendor-init-once";
++    dali_hs_platform.init_attempted = true;
++    dali_hs_platform.init_status = UINT64_MAX;
++    dali_hs_platform.init_dram_type = UINT64_MAX;
++    after_valid = false;
++    error = ufs_hs_smc(NULL, 0, 0, &dali_hs_platform.init_status,
++        &dali_hs_platform.init_dram_type);
++    if (error || dali_hs_platform.init_status != 0) {
++        if (!error) error = EIO;
++        goto out;
++    }
++    if (ufs_hs_clock_ok(NULL) ||
++        ufs_hs_floor_read(NULL, HSF_BASIC_CONTROL, &after_basic) ||
++        ufs_hs_floor_read(NULL, HSF_COUNT, &after_count)) {
++        error = EIO;
++        goto out;
++    }
++    after_valid = true;
++    /* hsf_acquire independently validates max/count, direct-index firmware
++     * calibration and actual AP request/completion before any HS attribute. */
++out:
++    printf("SWEET UFS HSFW: allowed=%u attempted=%u action=%s result=%d "
++        "before-valid=%u basic-before=0x%x count-before=0x%x "
++        "after-valid=%u basic-after=0x%x count-after=0x%x "
++        "status=0x%llx dram-type=0x%llx start-called=0 scope=vendor-init-not-adc\n",
++        enabled ? 1u : 0u, dali_hs_platform.init_attempted ? 1u : 0u, action, error,
++        before_valid ? 1u : 0u, basic, count, after_valid ? 1u : 0u, after_basic, after_count,
++        (unsigned long long)dali_hs_platform.init_status,
++        (unsigned long long)dali_hs_platform.init_dram_type);
++    return error;
++}
++
+ static int
+ ufs_dali_hs_platform_adopt(void)
+ {
+     if (dali_hs_platform.failure) return dali_hs_platform.failure;
+     if (dali_hs_platform.started) return EBUSY;
+     dali_hs_platform.started = true;
+     if (!su.dali || su.ready || su.command_poisoned) return (dali_hs_platform.failure = EIO);
+     dali_hs_platform.dvfsrc = ml_io_map(0x1c013000ull, 0x1000);
+     dali_hs_platform.top = ml_io_map(0x10000000ull, 0x800);
+     dali_hs_platform.apmixed = ml_io_map(0x10000800ull, 0x1000);
+     if (!dali_hs_platform.dvfsrc || !dali_hs_platform.top || !dali_hs_platform.apmixed)
+         return (dali_hs_platform.failure = ENOMEM);
+     struct dali_hs_clock first, second;
+     if (ufs_hs_clock_read(&first) || ufs_hs_clock_read(&second) || !ufs_hs_clock_equal(&first, &second))
+         return (dali_hs_platform.failure = EIO);
+     dali_hs_platform.reference = second;
++    int error = ufs_hs_firmware_prepare(ufs_dali_speed_flag("dali-dvfsrc-init"));
++    if (error) return (dali_hs_platform.failure = error);
+     const struct hsf_ops ops = {ufs_hs_floor_read, ufs_hs_floor_write, ufs_hs_smc,
+         ufs_hs_clock_ok, ufs_hs_now_us, ufs_hs_delay_us};
+-    int error = hsf_acquire(&dali_hs_platform.floor, true, &ops, NULL);
++    error = hsf_acquire(&dali_hs_platform.floor, true, &ops, NULL);
+     struct hsf_state *s = &dali_hs_platform.floor;
+     printf("SWEET UFS HSFLOOR: result=%d stage=%u request=%u completed=%u nominal=%u calibrated=%u "
+         "write-attempted=%u clock=%llu resource-raw=0x%llx/0x%llx raw-count=0x%x opp-count=%u "
+-        "scope=ap-min-request-not-adc\n", error,
++        "basic=0x%x max-opp=%u count-read=%u scope=ap-min-request-not-adc\n", error,
+         error ? s->failed_stage : s->phase, s->request, s->completed, s->nominal_uv,
+         s->calibrated_uv, s->wrote_request ? 1u : 0u,
+         (unsigned long long)sweet_pwm_clock_hz(&second.pll, &second.pll),
+         (unsigned long long)s->resource_request_result, (unsigned long long)s->resource_release_result,
+-        s->raw_count, s->opp_count);
++        s->raw_count, s->opp_count, s->raw_basic, s->max_opp, s->count_read ? 1u : 0u);
++    for (unsigned int i = 0; i < s->calibrated_count; ++i)
++        printf("SWEET UFS HSCAL: selector=%u uv=%u index-domain=raw-selector not-adc=1\n",
++            i, s->calibrated[i]);
+     if (error) dali_hs_platform.failure = EIO;
+     return dali_hs_platform.failure;
+ }
+ 
+ static int
+ ufs_dali_hs_platform_validate(void)
+ {
+     if (dali_hs_platform.failure) return dali_hs_platform.failure;

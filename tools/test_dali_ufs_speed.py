@@ -51,14 +51,18 @@ def main():
     # The source fixture must reconstruct, not read unchecked mutable bytes.
     assert sources.apply_exact_hunks(sources.UFS_PRE_SPEED,'bsd/dev/sweet_ufs.c',PATCH)==expected[PATHS[0]]
     assert sources.apply_exact_hunks(sources.PE_PRE_SPEED,'pexpert/arm/pe_dali_watchdog.c',PATCH)==expected[PATHS[1]]
-    for path, previous in sources.HS_PRE_LIVE_OPP.items():
-        assert sources.apply_exact_hunks(previous,path,sources.UFS_OPP_PATCH)==expected[path]
-        try:
-            sources.apply_exact_hunks('\n'+previous,path,sources.UFS_OPP_PATCH)
-        except AssertionError:
-            pass
-        else:
-            raise AssertionError('Offset accepted in live OPP patch: '+path)
+    for previous_map,patch,next_map in (
+        (sources.HS_PRE_LIVE_OPP,sources.UFS_OPP_PATCH,sources.HS_PRE_FW_INIT),
+        (sources.HS_PRE_FW_INIT,sources.UFS_FW_PATCH,expected),
+    ):
+        for path,previous in previous_map.items():
+            assert sources.apply_exact_hunks(previous,path,patch)==next_map[path]
+            try:
+                sources.apply_exact_hunks('\n'+previous,path,patch)
+            except AssertionError:
+                pass
+            else:
+                raise AssertionError('Offset accepted in floor/firmware patch: '+path)
     with tempfile.TemporaryDirectory(prefix='dali-ufs-speed-') as name:
         folder=Path(name)
         if len(sys.argv)>1:
@@ -80,12 +84,17 @@ def main():
         # register access, clock check and minimum-request callback stays actual.
         native_smc=function(adapter,'ufs_hs_smc')
         assert '0xc2000506u' in native_smc and 'smc #0' in native_smc
-        mock_smc=r'''
-static int
-ufs_hs_smc(void *context,uint32_t command,uint32_t index,uint64_t *a0,uint64_t *a1)
-{
- (void)context;++smcs;if(smcs==fail_smc)return EIO;*a0=*a1=0;
- if(command==4){const uint32_t table[]={875000,825000,725000,650000,600000,575000};assert(index<6);*a1=table[index];}
+        # Retain the production command/index/NULL guard; replace only the
+        # ARM register/assembly and firmware-result boundary below that guard.
+        prefix=native_smc[:native_smc.index('    register uint64_t x0')]
+        mock_smc=prefix+r'''
+ ++smcs;if(smcs==fail_smc)return EIO;*a0=*a1=0;
+ if(command==0){
+  assert(index==0 && !inits && !acquires && !releases);++inits;*a0=init_fw_status;
+  if(!*a0 && init_populates){dvfs[0]=86u<<20;dvfs[0xfc/4]=5;}
+  if(init_clock_change)top[0xd0/4]^=1;
+ }
+ else if(command==4){const uint32_t table[]={575000,600000,650000,725000,825000,875000};assert(index<6);*a1=table[index];}
  else if(command==0x40){assert(index==0);++acquires;}
  else{assert(command==0x41 && index==0);++releases;}
  return 0;

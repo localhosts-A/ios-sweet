@@ -11,6 +11,9 @@ Two exact 4-byte little-endian ADT properties under the Dali `sweet-ufs` node:
 - `dali-speed-probe = 1`: run a pre-root read-only comparison and return. This
   requires the HS-G1 flag. Conflicts with `ufspwm` or the older two-lane flag
   are rejected before initialization.
+- `dali-dvfsrc-init = 1`: within that HS path only, permit one standard vendor
+  firmware INIT for an unconfigured controller. This flag alone cannot start
+  UFS/HS, and it does not enable the separate START/free-run operation.
 
 Absent/malformed flags and non-Dali compatible do not map the new platform
 ranges, issue new firmware requests, change the link, allocate the probe buffer,
@@ -20,8 +23,9 @@ or start the short return. Existing PWM/two-lane opt-ins remain separate.
 
 The implementation follows the MT6991 AP minimum-request interface used by the
 fixed vendor DVFSRC regulator. It does not directly program a PMIC voltage,
-change a PLL/clock parent, initialize DVFSRC firmware, force an OPP, or support
-runtime suspend/DVFS transitions.
+change a PLL/clock parent, force an OPP, or support runtime suspend/DVFS
+transitions. The additional INIT entry described below is separately opt-in;
+its source-backed call ABI is not a claim of verified secure-firmware behavior.
 
 Fixed public reference:
 `MiCode/mtk_kernel_device_modules` commit
@@ -40,16 +44,21 @@ The actual Dali DT requires 650000 uV for the maximum UFS controller clock.
 existing exact MT6991 decoder, with stable clock/gate/reference snapshots.
 It maps only the actual DVFSRC, CKSYS and APMIXED ranges.
 
-`SweetUFSHSFloor.h` reads the live configured gear count and that many
-calibrated firmware entries. The nominal regulator has six possible selectors;
-this is a ceiling, not proof that the active firmware table always has six
-entries. Counts 3 through 6 use the vendor's `count - 1 - selector` reverse
-index. Fewer than three cannot express nominal selector 2 (650000 uV), and
-more than six lacks a known nominal selector map, so both are rejected before
-any request write. The raw count and decoded number are logged even on a
-capability rejection. It chooses the lowest configured selector whose nominal
-and calibrated values both satisfy 650000 uV, never lowering an inherited AP
-request. Unknown, out-of-table and insufficient-voltage states remain errors. It uses the
+`SweetUFSHSFloor.h` first requires the actual v4 helper's nonzero max-OPP
+field, `BASIC_CONTROL[26:20]`, before reading the gear header at +0xfc. A zero
+header without this precondition is not an established usable one-level table.
+The nominal regulator has six possible selectors, a capacity rather than a
+fixed live count. Configured counts 3 through 6 query GET_VCORE_UV with the
+**raw selector itself**, exactly as the vendor fills and checks its voltage
+table. The separately exported logical-OPP conversion reverses its argument;
+that conversion must not be applied to a raw regulator/SW_REQ selector. Fewer
+than three cannot express nominal selector 2 (650000 uV), and more than six
+lacks a known nominal selector map; both remain errors before an AP write.
+The basic register/max field, count-read validity, raw count and decoded number
+are logged. Successful table entries are logged as firmware calibration values,
+not ADC readings. It chooses the lowest configured selector whose nominal and
+calibrated values both satisfy 650000 uV, never lowering an inherited AP request.
+Unknown, out-of-table and insufficient-voltage states remain errors. It uses the
 standard temporary memory-resource request/release and writes only
 `SW_REQ[6:4]`, preserving unrelated bits. It waits for target idle and
 `CUR_TAR_GEAR[10:8] >= request`, with a 1000-us clock budget and a separate
@@ -71,6 +80,33 @@ Before each HS SCSI command, request/clock/completion loss latches an error
 before descriptor, DMA, cache or doorbell access. A reset, unsupported power
 transition or external request modification is a fault, not a supported mode
 change or a reason to retry. Firmware table values are not ADC measurements.
+
+## Optional standard firmware initialization
+
+The fixed MT6991 parent driver and actual module call SMC `0xc2000506`, command
+0, with x2=flag and x3=vmode. Both properties are absent on this board, so both
+arguments and x4–x7 are zero. `dali-dvfsrc-init=1` permits that call once only
+when the observed max-OPP field is zero, the AP VCORE request is zero, and
+force/halt/target-busy are absent with the checked clock unchanged. A configured
+controller is adopted without INIT, even with the property enabled. An existing
+AP vote is never discarded to make initialization possible.
+
+The code records valid before/after basic/count snapshots, whether a call was
+attempted, and raw INIT status/DRAM-type returns. A transport error or nonzero
+status is terminal. A zero status is **not** accepted as table/voltage success:
+the ordinary floor code must independently validate configuration, direct-index
+calibration and the retained AP request/completion before HS. An unchanged zero
+configuration, unknown table or lost clock still stops the attempt, without a
+retry, fallback, diagnostic write on an unknown link, or extra START call.
+
+Command 1, implemented by Linux's separate enable-free-run driver, is not in
+the allowed SMC set. The host tests retain the production command/index/NULL
+guard and replace only ARM register/assembly/result handling with a firmware
+mock. They cover opt-in/disabled behavior, existing configuration/vote,
+unsupported/failed/no-effect INIT, changed clock, post-INIT timeout and exactly
+one attempt. This source-backed managed INIT interface is not proof of secure
+firmware side effects, physical voltage, a working HS transition or performance
+on this XNU boot; the opt-in candidate requires its own hardware trial.
 
 ## Link transition
 

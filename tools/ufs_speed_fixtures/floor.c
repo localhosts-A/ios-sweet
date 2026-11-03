@@ -24,7 +24,7 @@ static int write32(void *p,uint32_t value){
 }
 static int smc(void *p,uint32_t cmd,uint32_t index,uint64_t *a0,uint64_t *a1){
  struct mock *m=p;++m->smcs;if(m->smcs==m->fail_smc)return 1;*a0=*a1=0;
- if(cmd==4){unsigned count=(m->reg[HSF_COUNT/4]&7u)+1u;assert(count<=HSF_OPPS && index<count && !m->acquires && !m->writes);*a1=m->cal[count-index-1];}
+ if(cmd==4){unsigned count=(m->reg[HSF_COUNT/4]&7u)+1u;assert(count<=HSF_OPPS && index<count && !m->acquires && !m->writes);*a1=m->cal[index];}
  else if(cmd==0x40){assert(!index && !m->acquires && !m->writes);++m->acquires;}
  else{assert(cmd==0x41 && !index && m->acquires==1 && !m->releases);++m->releases;if(m->release_fail)*a0=UINT64_MAX;}
  if(m->opaque_resource && cmd!=4)*a0=3; /* No zero-only resource ABI is assumed. */
@@ -35,7 +35,7 @@ static uint64_t now_us(void *p){return ((struct mock *)p)->now;}
 static void delay_us(void *p,uint32_t usec){struct mock *m=p;assert(usec<=2);if(!m->freeze)m->now+=usec;}
 static const struct hsf_ops ops={read32,write32,smc,clock_ok,now_us,delay_us};
 static void reset(struct hsf_state *s,struct mock *m){
- memset(s,0,sizeof(*s));memset(m,0,sizeof(*m));m->reg[HSF_COUNT/4]=5;
+ memset(s,0,sizeof(*s));memset(m,0,sizeof(*m));m->reg[HSF_BASIC_CONTROL/4]=86u<<20;m->reg[HSF_COUNT/4]=5;
  const uint32_t cal[]={575000,600000,650000,725000,825000,875000};memcpy(m->cal,cal,sizeof(cal));
  m->reg[HSF_REQUEST/4]=0x52000;m->complete_at=2;m->now=1;
 }
@@ -46,6 +46,12 @@ int main(void){struct hsf_state s;struct mock m;
  assert(m.writes==1 && m.acquires==1 && m.releases==1 && (m.reg[HSF_REQUEST/4]&~HSF_REQUEST_MASK)==0x52000);
  assert(!hsf_validate(&s) && m.writes==1 && m.smcs==8);
  assert(hsf_acquire(&s,true,&ops,&m)==HSF_STATE && m.writes==1);
+ assert(s.raw_basic==(86u<<20) && s.max_opp==86 && s.count_read && s.calibrated_count==6);
+ reset(&s,&m);m.reg[HSF_BASIC_CONTROL/4]=0;
+ assert(hsf_acquire(&s,true,&ops,&m)==HSF_CONFIGURATION && !m.smcs && !m.writes && !s.count_read && s.max_opp==0);
+ reset(&s,&m);const uint32_t android_cal[]={570000,590000,620000,705000,765000,875000};memcpy(m.cal,android_cal,sizeof(android_cal));
+ assert(!hsf_acquire(&s,true,&ops,&m) && s.request==3 && s.nominal_uv==725000 && s.calibrated_uv==705000);
+ assert(!memcmp(s.calibrated,android_cal,sizeof(android_cal)) && s.calibrated_count==6);
  reset(&s,&m);m.opaque_resource=true;assert(!hsf_acquire(&s,true,&ops,&m));
  assert(s.resource_request_result==3 && s.resource_release_result==3 && !s.resource_requested);
  reset(&s,&m);m.reg[HSF_REQUEST/4]|=5u<<4;m.reg[HSF_GEAR/4]=5u<<8;

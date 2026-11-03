@@ -94,6 +94,10 @@ HS_PRE_LIVE_OPP = {path: SOURCE[path] for path in
                    ('bsd/dev/SweetUFSHSFloor.h', 'bsd/dev/SweetUFSHSPlatform.h')}
 for path, previous in HS_PRE_LIVE_OPP.items():
     SOURCE[path] = apply_exact_hunks(previous, path, UFS_OPP_PATCH)
+UFS_FW_PATCH = ROOT/'xnu/patches/0202-dali-ufs-opt-in-dvfsrc-init-selector-map.patch'
+HS_PRE_FW_INIT = {path: SOURCE[path] for path in HS_PRE_LIVE_OPP}
+for path, previous in HS_PRE_FW_INIT.items():
+    SOURCE[path] = apply_exact_hunks(previous, path, UFS_FW_PATCH)
 LOCK = SOURCE['osfmk/kern/lock_mtx.c']
 SAMPLER, UFS, EXCEPTION, GUI_POLICY, IO_POLICY = (SOURCE[p] for p in PATHS)
 RW_POLICY = SOURCE['osfmk/kern/SweetRWWaitProgress.h']
