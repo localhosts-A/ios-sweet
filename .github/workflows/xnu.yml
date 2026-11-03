@@ -609,8 +609,8 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET BBPC: svc-progress sample=%u selected_svc_total=%u'
           grep -Fq 'sweet_ff_enabled = sweet_ff_svc_mode(enabled)' xnu/bsd/dev/sweet_sample.c
           grep -Fq 'sweet_ff_fault_enabled = sweet_ff_mode(enabled)' xnu/bsd/dev/sweet_sample.c
-          grep -Fq 'return requested == 3 ? requested : sweet_ff_mode(requested);' xnu/bsd/dev/SweetFeatureTrace.h
-          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'svc3=backboardd fault3=off'
+          grep -Fq 'return requested == 3 || requested == 4 ? requested : sweet_ff_mode(requested);' xnu/bsd/dev/SweetFeatureTrace.h
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'svc3=backboardd svc4=lsd fault3+=off'
           grep -Fq 'return requested == 1 || requested == 2 ? requested : 0;' xnu/bsd/dev/SweetFeatureTrace.h
           grep -Fq '(unsigned int)(uint16_t)psa->psa_flags' xnu/bsd/kern/kern_exec.c
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET UENTRY CONFIG: svc=%u fault=%u'
