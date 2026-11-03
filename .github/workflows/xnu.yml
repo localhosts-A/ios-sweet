@@ -78,6 +78,7 @@ on:
       - "tools/test_dali_cpu_count_adt.py"
       - "tools/test_dali_cpu_activity.py"
       - "tools/test_dali_lsd_context.py"
+      - "tools/test_dali_touch_handoff_logging.py"
 
 concurrency:
   group: xnu-${{ github.ref }}
@@ -236,6 +237,7 @@ jobs:
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_cpu_activity.py" "$SWEET_LOAD_SOURCE_DIR"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_lsd_context.py" "$SWEET_LOAD_SOURCE_DIR"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_touch_handoff.py" "$SWEET_LOAD_SOURCE_DIR"
+          python3 -I "$GITHUB_WORKSPACE/tools/test_dali_touch_handoff_logging.py" "$SWEET_LOAD_SOURCE_DIR"
           python3 tools/test_dali_watchdog_lease.py
 
       - name: Compiler cache statistics

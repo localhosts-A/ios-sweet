@@ -1,0 +1,15 @@
+diff --git a/iokit/Kernel/arm/DaliTouchHandoff.cpp b/iokit/Kernel/arm/DaliTouchHandoff.cpp
+--- a/iokit/Kernel/arm/DaliTouchHandoff.cpp
++++ b/iokit/Kernel/arm/DaliTouchHandoff.cpp
+@@ -51,9 +51,9 @@
+     int rc = dali_touch_handoff(compatible->getBytesNoCopy(), compatible->getLength(),
+         enabled->getBytesNoCopy(), enabled->getLength(), &io, &s);
+     if (rc < 0) {
+-        kprintf("DALI TOUCH HANDOFF: mapping/read failed\n");
++        IOLog("DALI TOUCH HANDOFF: mapping/read failed\n");
+     } else if (rc > 0) {
+-        kprintf("DALI TOUCH HANDOFF: pin81-84=%x,%x,%x,%x parent=%x vote=%u done=%u fence=%u gate-vote=%u done=%u gated=%u; ownership and touch unknown\n",
++        IOLog("DALI TOUCH HANDOFF: pin81-84=%x,%x,%x,%x parent=%x vote=%u done=%u fence=%u gate-vote=%u done=%u gated=%u; ownership and touch unknown\n",
+             (s.gpio >> 4) & 15, (s.gpio >> 8) & 15, (s.gpio >> 12) & 15, (s.gpio >> 16) & 15,
+             (s.mux >> 16) & 7, (s.parentVote >> 23) & 1, (s.parentDone >> 23) & 1,
+             (s.fence >> 29) & 1, (s.gateVote >> 7) & 1, (s.gateDone >> 7) & 1,
