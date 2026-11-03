@@ -42,7 +42,9 @@ prefix = r'''
 #include <stdio.h>
 #include <stddef.h>
 #include <sys/types.h>
-#define __unused __attribute__((unused))
+#ifndef __unused
+#define __unused __attribute__((__unused__))
+#endif
 #define IOC_VOID 0x20000000u
 #define IOC_OUT  0x40000000u
 #define IOC_IN   0x80000000u
