@@ -1,0 +1,98 @@
+diff --git a/iokit/Kernel/arm/SweetCPU.cpp b/iokit/Kernel/arm/SweetCPU.cpp
+--- a/iokit/Kernel/arm/SweetCPU.cpp
++++ b/iokit/Kernel/arm/SweetCPU.cpp
+@@ -1,7 +1,7 @@
+ /*
+- * A55 SMP bring-up for sweet using XNU's legacy IOCPU interface and PSCI.
+- * The architected timer and SGI1 already enter through pe_fiq/sleh_irq.
+- * CPU_OFF, suspend and the A76 cores still require separate platform work.
++ * ARM SMP bring-up for sweet/Dali using legacy IOCPU and PSCI.
++ * The architected timer and SGI1 enter through pe_fiq/sleh_irq.
++ * CPU_OFF and suspend are not implemented.
+  */
+ #include <pexpert/arm64/board_config.h>
+ 
+@@ -16,6 +16,7 @@
+ #include <kern/processor.h>
+ #include <kern/thread.h>
+ #include <mach/mach_time.h>
++#include <mach/processor_info.h>
+ #include <pexpert/pexpert.h>
+ 
+ extern "C" void sweet_secondary_entry(void);
+@@ -47,6 +48,7 @@
+ 
+ public:
+ 	static void startAll(void *arg, wait_result_t result);
++	static void dumpActivity(unsigned int sample);
+ 	bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
+ 	void free(void) APPLE_KEXT_OVERRIDE;
+ 	void initCPU(bool boot) APPLE_KEXT_OVERRIDE;
+@@ -213,6 +215,55 @@
+ 	thread_terminate(current_thread());
+ }
+ 
++/* Ordinary sampler only; read existing counters, never add IRQ-path work.
++ * Separate processor_info queries are not a coherent scheduler snapshot.
++ * An IPI count includes self-SGI and is not proof of a particular sender.
++ */
++void
++SweetCPU::dumpActivity(unsigned int sample)
++{
++	if (sample >= 40 || sample % 10 != 0) return;
++	const ml_topology_info_t *topology = ml_get_topology_info();
++	if (topology->num_cpus == 0 || topology->num_cpus > SWEET_SMP_MAX_CPUS) return;
++	SweetCPU *boot = __atomic_load_n(&sweet_cpus[0], __ATOMIC_ACQUIRE);
++	if (boot == NULL || !boot->daliCPU) return;
++	for (unsigned int i = 0; i < topology->num_cpus; ++i) {
++		SweetCPU *cpu = __atomic_load_n(&sweet_cpus[i], __ATOMIC_ACQUIRE);
++		if (cpu == NULL || !__atomic_load_n(&cpu->initialized, __ATOMIC_ACQUIRE)) {
++			IOLog("DALI CPUACT: v=1 s=%u cpu=%u ready=0\n", sample, i);
++			continue;
++		}
++		host_t host = HOST_NULL;
++		processor_basic_info_data_t basic = {};
++		processor_cpu_load_info_data_t load = {};
++		processor_cpu_stat64_data_t stat = {};
++		mach_msg_type_number_t count = PROCESSOR_BASIC_INFO_COUNT;
++		kern_return_t a = processor_info(cpu->machProcessor, PROCESSOR_BASIC_INFO, &host,
++		    reinterpret_cast<processor_info_t>(&basic), &count);
++		count = PROCESSOR_CPU_LOAD_INFO_COUNT;
++		kern_return_t b = processor_info(cpu->machProcessor, PROCESSOR_CPU_LOAD_INFO, &host,
++		    reinterpret_cast<processor_info_t>(&load), &count);
++		count = PROCESSOR_CPU_STAT64_COUNT;
++		kern_return_t c = processor_info(cpu->machProcessor, PROCESSOR_CPU_STAT64, &host,
++		    reinterpret_cast<processor_info_t>(&stat), &count);
++		if (a != KERN_SUCCESS || b != KERN_SUCCESS || c != KERN_SUCCESS) {
++			IOLog("DALI CPUACT: v=1 s=%u cpu=%u query=%d,%d,%d\n", sample, i, a, b, c);
++			continue;
++		}
++		IOLog("DALI CPUACT: v=1 s=%u cpu=%u run=%u user=%u sys=%u idle=%u irq=%llu ipi=%llu timer=%llu\n",
++		    sample, i, (unsigned int)basic.running, load.cpu_ticks[CPU_STATE_USER],
++		    load.cpu_ticks[CPU_STATE_SYSTEM], load.cpu_ticks[CPU_STATE_IDLE],
++		    (unsigned long long)stat.irq_ex_cnt, (unsigned long long)stat.ipi_cnt,
++		    (unsigned long long)stat.timer_cnt);
++	}
++}
++
++extern "C" void
++sweet_cpu_activity_dump(unsigned int sample)
++{
++	SweetCPU::dumpActivity(sample);
++}
++
+ void
+ SweetCPU::free(void)
+ {
+diff --git a/bsd/dev/sweet_sample.c b/bsd/dev/sweet_sample.c
+--- a/bsd/dev/sweet_sample.c
++++ b/bsd/dev/sweet_sample.c
+@@ -507,6 +507,8 @@
+     sweet_ipcsend_dump(sample, sample == SWEET_LOAD_SAMPLES - 1);
+     extern void sweet_ulock_dump(unsigned int, unsigned int);
+     sweet_ulock_dump(sample, sample == SWEET_LOAD_SAMPLES - 1);
++    extern void sweet_cpu_activity_dump(unsigned int);
++    sweet_cpu_activity_dump(sample);
+ #endif
+ }
+ 

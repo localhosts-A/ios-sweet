@@ -647,7 +647,7 @@ in_irq=false;preempt=1;assert(!sweet_log_fastboot_drain(100));puts("PASS");}
                 if path == 'bsd/dev/sweet_sample.c':
                     expected = (Path(source_dir) / path).read_text()
                     self.assertEqual(hashlib.sha256(expected.encode()).hexdigest(),
-                                     '021bf0b0c785abd81cbc358722fa3a72965a5ca1206b36eb04500cf52aae3b16')
+                                     '47a4b8c966c3d156a596da1e0181d046bc09ddd7eb788a8892944380e0cfe7e2')
                 elif path == POLICY_PATH:
                     expected = POLICY
                 elif path == NATIVE_PATH:

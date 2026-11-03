@@ -65,6 +65,13 @@ SOURCE['bsd/dev/sweet_ufs.c'] = apply_exact_hunks(
 for path in ('bsd/dev/SweetBBContextPolicy.h', 'bsd/dev/SweetBBContextRuntime.h',
              'bsd/sys/SweetBBContext.h'):
     SOURCE[path] = fixture.fragment(path, BBCTX_PATCH)
+SAMPLER_PRE_LSD = SOURCE['bsd/dev/sweet_sample.c']
+LSD_CONTEXT_PATCH = ROOT/'xnu/patches/0197-sweet-lsd-context-mode4.patch'
+CPU_ACTIVITY_PATCH = ROOT/'xnu/patches/0198-sweet-dali-cpu-activity.patch'
+for path in ('bsd/dev/sweet_sample.c', 'bsd/dev/SweetBBContextRuntime.h'):
+    SOURCE[path] = apply_exact_hunks(SOURCE[path], path, LSD_CONTEXT_PATCH)
+SOURCE['bsd/dev/sweet_sample.c'] = apply_exact_hunks(
+    SOURCE['bsd/dev/sweet_sample.c'], 'bsd/dev/sweet_sample.c', CPU_ACTIVITY_PATCH)
 LOCK = SOURCE['osfmk/kern/lock_mtx.c']
 SAMPLER, UFS, EXCEPTION, GUI_POLICY, IO_POLICY = (SOURCE[p] for p in PATHS)
 RW_POLICY = SOURCE['osfmk/kern/SweetRWWaitProgress.h']
@@ -328,6 +335,11 @@ GUI_HELPERS = GUI_HELPERS.replace('#include "SweetBBContextRuntime.h"\n', '')
 GUI_MOCK = ipc.MOCK.replace('static struct process process=', 'static _Thread_local struct process process=')
 GUI_MOCK += r'''
 struct task {unsigned references;};typedef struct task *task_t;
+struct sweet_lsd_identity_view {task_t task;int32_t pid;uint32_t version;uint64_t uniqueid,registered;};
+/* Mode 4 has a separate actual-function fixture; these exercise GUI modes. */
+struct sweet_bbctx_identity {unsigned unused;};
+static bool sweet_bbctx_identity_now(struct sweet_bbctx_identity *out){(void)out;return false;}
+void sweet_cpu_activity_dump(unsigned int sample){assert(sample<40);}
 #define TASK_NULL NULL
 static struct task target_task;
 static bool eligible=true;static unsigned task_lookups,ident_reads,collector_calls,io_calls,io_closes,io_begins,ulock_calls,ulock_final;
@@ -520,6 +532,9 @@ int main(void){
         replayed = apply_exact_hunks(replayed, 'bsd/dev/sweet_sample.c', IPCSEND_PATCH)
         replayed = apply_exact_hunks(replayed, 'bsd/dev/sweet_sample.c', IPCSEND_CONTEXT_PATCH)
         replayed = apply_exact_hunks(replayed, 'bsd/dev/sweet_sample.c', ULOCK_PATCH)
+        self.assertEqual(replayed, SAMPLER_PRE_LSD)
+        replayed = apply_exact_hunks(replayed, 'bsd/dev/sweet_sample.c', LSD_CONTEXT_PATCH)
+        replayed = apply_exact_hunks(replayed, 'bsd/dev/sweet_sample.c', CPU_ACTIVITY_PATCH)
         self.assertEqual(replayed, SAMPLER)
         with self.assertRaises(AssertionError):
             apply_exact_hunks('\n' + previous, 'bsd/dev/sweet_sample.c', BBCTX_PATCH)
@@ -535,9 +550,13 @@ int main(void){
             for path,text in SOURCE.items(): self.assertEqual((directory/path).read_text(encoding='latin-1'),text,path)
             self.assertEqual((directory/'osfmk/kern/Makefile').read_text(),SOURCE['osfmk/kern/Makefile'])
         old=old_fragment(PATHS[0])
-        for name in ('sweet_bbpc_trace','sweet_bbvm_enter','sweet_bbvm_leave','sweet_ff_fault_trace','sweet_ff_screen_dump','sweet_ff_dump'):
+        for name in ('sweet_bbpc_trace','sweet_bbvm_enter','sweet_bbvm_leave','sweet_ff_fault_trace','sweet_ff_screen_dump'):
             self.assertEqual(function(SAMPLER,name),function(old,name),name)
-        trace = function(SAMPLER,'sweet_ff_trace')
+        # 0197 intentionally adds the lsd identity message and SVC target. Its
+        # exact replay and actual mode4 fixture cover those final functions;
+        # retain the previous byte-level no-change contract for GUI mode3.
+        self.assertEqual(function(SAMPLER_PRE_LSD,'sweet_ff_dump'),function(old,'sweet_ff_dump'))
+        trace = function(SAMPLER_PRE_LSD,'sweet_ff_trace')
         for addition in ('    sweet_load_register(phase, state);\n',
                          '    /* Independent of the legacy SVC ring\'s admission and quota. */\n'
                          '    sweet_bbctx_trace_mach(phase, call, state);\n'):

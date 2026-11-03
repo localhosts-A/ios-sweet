@@ -249,15 +249,17 @@ assert(fwrite(captured,1,captured_len,stdout)==captured_len);
         directory = os.environ.get('SWEET_BBCTX_SOURCE_DIR')
         if not directory:
             self.skipTest('pre-build: no materialized XNU source tree')
-        # sweet_sample.c includes the 0185/0186 IPC and 0189 ulock hooks.
+        # Final source also includes 0197 lsd selection and 0198 CPU activity.
+        # The historical 0181 runtime fixture above remains intentionally fixed;
+        # test_dali_lsd_context executes the actual final mode4 implementation.
         expected = {
-            'bsd/dev/sweet_sample.c': '021bf0b0c785abd81cbc358722fa3a72965a5ca1206b36eb04500cf52aae3b16',
+            'bsd/dev/sweet_sample.c': '47a4b8c966c3d156a596da1e0181d046bc09ddd7eb788a8892944380e0cfe7e2',
             'bsd/dev/arm/systemcalls.c': '236d1c88f4b21c3bfa6ebf6515b48ea47514c119f1aed2886b26fbadcedd71f6',
             'bsd/vfs/vfs_lookup.c': 'f358de08b87531aaac31b049722284d93519f6932615cbc9d059db3e7d7b18b7',
             'osfmk/arm64/sleh.c': 'af9ea337637806b4dad91ba65da83ec809e1ba01f4b8351323eb0f63aa191c3b',
             'bsd/sys/Makefile': '4f33af1f3768241e92d90755f54fc277469fd88f5b911fa32e3c123befef6b57',
             'bsd/dev/SweetBBContextPolicy.h': 'fa67dc3baebf5daabc19d601bca832d439a9fa25a0099666e875a29ffdf52d17',
-            'bsd/dev/SweetBBContextRuntime.h': '531556e315e757093d8057920d97eef622b480ac3ca87600000f06d28c3a393c',
+            'bsd/dev/SweetBBContextRuntime.h': '0c062280dbf83e9f2f735f1ec4359777d43c15b41b9d5d156dfa735ed1512a18',
             'bsd/sys/SweetBBContext.h': '76c3fc654418553aad42d05f86be9d568eff403c8ecfd829c721726368e21d4c',
         }
         for path, digest in expected.items():

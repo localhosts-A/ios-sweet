@@ -74,6 +74,10 @@ on:
       - "tools/dali-touch-handoff-adt.py"
       - "tools/test_dali_touch_handoff.py"
       - "tools/test_dali_touch_handoff.cpp"
+      - "tools/dali-cpu-count-adt.py"
+      - "tools/test_dali_cpu_count_adt.py"
+      - "tools/test_dali_cpu_activity.py"
+      - "tools/test_dali_lsd_context.py"
 
 concurrency:
   group: xnu-${{ github.ref }}
@@ -228,6 +232,9 @@ jobs:
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_cpu_start.py" "$SWEET_LOAD_SOURCE_DIR"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_cpu_on.py" "$SWEET_LOAD_SOURCE_DIR"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_two_cpu_adt.py"
+          python3 -I "$GITHUB_WORKSPACE/tools/test_dali_cpu_count_adt.py"
+          python3 -I "$GITHUB_WORKSPACE/tools/test_dali_cpu_activity.py" "$SWEET_LOAD_SOURCE_DIR"
+          python3 -I "$GITHUB_WORKSPACE/tools/test_dali_lsd_context.py" "$SWEET_LOAD_SOURCE_DIR"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_touch_handoff.py" "$SWEET_LOAD_SOURCE_DIR"
           python3 tools/test_dali_watchdog_lease.py
 
@@ -255,6 +262,8 @@ jobs:
           grep -Fq "'dali-boot-cpu' = <01000000>" xnu/iokit/KernelConfigTables.cpp
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI TOUCH HANDOFF: pin81-84='
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET IPCROUTER:'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'DALI CPUACT:'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'SWEET LSD ID:'
           grep -Fq 'DALI CPU: boot match validated' xnu/iokit/Kernel/arm/SweetCPU.cpp
           grep -Fq 'DALI CPU: CPU completion published' xnu/iokit/Kernel/arm/SweetCPU.cpp
           grep -Fq 'DALI RTC: IORTC published from hardware' xnu/iokit/Kernel/arm/DaliRTC.cpp

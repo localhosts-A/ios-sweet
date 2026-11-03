@@ -1,0 +1,186 @@
+--- a/bsd/dev/SweetFeatureTrace.h
++++ b/bsd/dev/SweetFeatureTrace.h
+@@ -23,11 +23,11 @@
+     return requested == 1 || requested == 2 ? requested : 0;
+ }
+ 
+-/* Mode 3 is SVC-only: fault selection continues to use sweet_ff_mode(). */
++/* Modes 3/4 are SVC-only; fault selection remains sweet_ff_mode(). */
+ static inline unsigned int
+ sweet_ff_svc_mode(unsigned int requested)
+ {
+-    return requested == 3 ? requested : sweet_ff_mode(requested);
++    return requested == 3 || requested == 4 ? requested : sweet_ff_mode(requested);
+ }
+ 
+ static inline bool
+@@ -41,6 +41,8 @@
+         return strncmp(name, "SpringBoard", sizeof("SpringBoard")) == 0;
+     if (enabled == 3)
+         return strncmp(name, "backboardd", sizeof("backboardd")) == 0;
++    if (enabled == 4)
++        return strncmp(name, "lsd", sizeof("lsd")) == 0;
+     return false;
+ }
+ 
+--- a/bsd/dev/SweetBBContextRuntime.h
++++ b/bsd/dev/SweetBBContextRuntime.h
+@@ -11,6 +11,14 @@
+ _Static_assert(SWEET_BBCTX_BSD_ENOENT == ENOENT && ERESTART == -1 && EJUSTRETURN == -2,
+     "raw BSD error contract mismatch");
+ 
++struct sweet_lsd_identity_view {
++    task_t task;
++    int32_t pid;
++    uint32_t version;
++    uint64_t uniqueid, registered;
++};
++extern bool sweet_lsd_identity_read(struct sweet_lsd_identity_view *);
++
+ static uint32_t sweet_bbctx_configured, sweet_bbctx_active;
+ static uint32_t sweet_bbctx_stat_guard, sweet_bbctx_mach_guard;
+ static uint32_t sweet_bbctx_stat_loss, sweet_bbctx_mach_loss;
+@@ -31,7 +39,8 @@
+ sweet_bbctx_prepare(unsigned int requested)
+ {
+     os_atomic_store(&sweet_bbctx_configured,
+-        requested == 1 && sweet_load_configured && sweet_ff_enabled == 3 ? 1u : 0u,
++        requested == 1 && sweet_load_configured &&
++        (sweet_ff_enabled == 3 || sweet_ff_enabled == 4) ? 1u : 0u,
+         release);
+ }
+ 
+@@ -42,7 +51,8 @@
+     sweet_bbctx_stat_book.open = true;
+     sweet_bbctx_mach_book.open = true;
+     os_atomic_store(&sweet_bbctx_active, 1u, release);
+-    printf("SWEET BBCTX CONFIG: v=1 targets=backboardd stat=338 mach=-47 slots=8 path=192\n");
++    printf("SWEET BBCTX CONFIG: v=1 targets=%s stat=338 mach=-47 slots=8 path=192\n",
++        sweet_ff_enabled == 4 ? "lsd" : "backboardd");
+ }
+ 
+ /* Current task/proc only; the slot owns its task reference until reboot. */
+@@ -51,15 +61,24 @@
+ {
+     if (!out || !os_atomic_load(&sweet_bbctx_configured, acquire) ||
+         !os_atomic_load(&sweet_bbctx_active, acquire) || ml_at_interrupt_context() ||
+-        !sweet_load_admitting(os_atomic_load(&sweet_load_control, acquire)) ||
+-        !(os_atomic_load(&sweet_load_ready, acquire) & 1u)) return false;
+-    const struct sweet_load_slot *slot = &sweet_load_slots[0];
+-    if (slot->task == TASK_NULL || slot->task != current_task()) return false;
++        !sweet_load_admitting(os_atomic_load(&sweet_load_control, acquire))) return false;
++    struct sweet_lsd_identity_view selected;
++    if (sweet_ff_enabled == 4) {
++        if (!sweet_lsd_identity_read(&selected)) return false;
++    } else {
++        if (!(os_atomic_load(&sweet_load_ready, acquire) & 1u)) return false;
++        const struct sweet_load_slot *slot = &sweet_load_slots[0];
++        selected = (struct sweet_lsd_identity_view){
++            .task = slot->task, .pid = slot->pid, .version = slot->version,
++            .uniqueid = slot->uniqueid, .registered = slot->registered,
++        };
++    }
++    if (selected.task == TASK_NULL || selected.task != current_task()) return false;
+     proc_t p = current_proc();
+     if (p == PROC_NULL) return false;
+     struct proc_ident ident = proc_ident(p);
+-    if (ident.p_pid != slot->pid || ident.p_uniqueid != slot->uniqueid ||
+-        ident.p_idversion != slot->version) return false;
++    if (ident.p_pid != selected.pid || ident.p_uniqueid != selected.uniqueid ||
++        ident.p_idversion != selected.version) return false;
+     out->uniqueid = ident.p_uniqueid;
+     out->pid = (uint32_t)ident.p_pid;
+     out->idversion = ident.p_idversion;
+--- a/bsd/dev/sweet_sample.c
++++ b/bsd/dev/sweet_sample.c
+@@ -425,8 +425,45 @@
+     os_atomic_or(&sweet_load_ready, 1u << kind, release);
+ }
+ 
++/* Mode 4 owns a separate retained lsd incarnation; never repurpose the GUI slots. */
++static uint32_t sweet_lsd_state; /* 0=unclaimed, 1=claiming, 2=ready */
++static struct sweet_load_slot sweet_lsd_slot;
++
++static void
++sweet_lsd_register(unsigned int phase, struct arm_saved_state *state)
++{
++    if (sweet_ff_enabled != 4 || !sweet_load_configured || phase != 0 ||
++        os_atomic_load(&sweet_lsd_state, acquire) != 0 ||
++        !sweet_load_admitting(os_atomic_load(&sweet_load_control, acquire)) ||
++        state == NULL || !is_saved_state64(state) ||
++        !PSR64_IS_USER64(get_saved_state_cpsr(state))) return;
++    proc_t p = current_proc();
++    if (p == PROC_NULL || !sweet_ff_target(4, p->p_comm)) return;
++    task_t task = current_task();
++    if (task == TASK_NULL || !os_atomic_cmpxchg(&sweet_lsd_state, 0u, 1u, acq_rel)) return;
++    task_reference(task);
++    struct proc_ident ident = proc_ident(p);
++    sweet_lsd_slot = (struct sweet_load_slot){
++        .task = task, .pid = ident.p_pid, .version = ident.p_idversion,
++        .uniqueid = ident.p_uniqueid, .registered = mach_absolute_time(),
++    };
++    os_atomic_store(&sweet_lsd_state, 2u, release);
++}
++
+ #include "SweetBBContextRuntime.h"
+ 
++bool
++sweet_lsd_identity_read(struct sweet_lsd_identity_view *out)
++{
++    if (out == NULL || os_atomic_load(&sweet_lsd_state, acquire) != 2) return false;
++    *out = (struct sweet_lsd_identity_view){
++        .task = sweet_lsd_slot.task, .pid = sweet_lsd_slot.pid,
++        .version = sweet_lsd_slot.version, .uniqueid = sweet_lsd_slot.uniqueid,
++        .registered = sweet_lsd_slot.registered,
++    };
++    return true;
++}
++
+ static void
+ sweet_load_dump(unsigned int sample)
+ {
+@@ -480,6 +517,7 @@
+ sweet_ff_trace(unsigned int phase, int call, struct arm_saved_state *state)
+ {
+     sweet_load_register(phase, state);
++    sweet_lsd_register(phase, state);
+     /* Independent of the legacy SVC ring's admission and quota. */
+     sweet_bbctx_trace_mach(phase, call, state);
+     if (!sweet_ff_svc_mode(sweet_ff_enabled))
+@@ -488,6 +526,10 @@
+     if (p == PROC_NULL || !sweet_ff_target(sweet_ff_enabled, p->p_comm) ||
+         !is_saved_state64(state))
+         return;
++    if (sweet_ff_enabled == 4) {
++        struct sweet_bbctx_identity identity;
++        if (!sweet_bbctx_identity_now(&identity)) return;
++    }
+     if (!OSCompareAndSwap(0, 1, &sweet_ff_guard)) {
+         (void)OSCompareAndSwap(0, 1, &sweet_ff_dropped);
+         return;
+@@ -588,6 +630,16 @@
+ {
+     static struct sweet_ff_event snapshot[SWEET_FF_RECORDS];
+     static struct sweet_bbipc_event ipc_snapshot[SWEET_BBIPC_SELECTED];
++    static bool lsd_identity_emitted;
++    if (sweet_ff_enabled == 4 && !lsd_identity_emitted) {
++        struct sweet_lsd_identity_view identity;
++        if (sweet_lsd_identity_read(&identity)) {
++            printf("SWEET LSD ID: p=%d id=0x%llx iv=0x%x rg=0x%llx\n",
++                identity.pid, (unsigned long long)identity.uniqueid, identity.version,
++                (unsigned long long)identity.registered);
++            lsd_identity_emitted = true;
++        }
++    }
+     _Static_assert(sizeof(sweet_bbipc_events) + sizeof(ipc_snapshot) + 2 * sizeof(UInt32) <= 8192,
+         "bounded BBIPC state and snapshot");
+     bool ipc = sweet_bbipc_is_configured();
+@@ -768,7 +820,7 @@
+     (void)PE_parse_boot_argn("sweetloadrw", &enabled, sizeof(enabled));
+     sweet_load_rw_prepare(enabled);
+     if (sweet_ff_enabled != 0 || sweet_ff_fault_enabled != 0)
+-        printf("SWEET UENTRY CONFIG: svc=%u fault=%u (0=off 1=FeatureFlags 2=SpringBoard svc3=backboardd fault3=off)\n",
++        printf("SWEET UENTRY CONFIG: svc=%u fault=%u (0=off 1=FeatureFlags 2=SpringBoard svc3=backboardd svc4=lsd fault3+=off)\n",
+             sweet_ff_enabled, sweet_ff_fault_enabled);
+ #endif
+ 	thread_t thread;
