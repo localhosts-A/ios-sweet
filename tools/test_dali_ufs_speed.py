@@ -53,7 +53,8 @@ def main():
     assert sources.apply_exact_hunks(sources.PE_PRE_SPEED,'pexpert/arm/pe_dali_watchdog.c',PATCH)==expected[PATHS[1]]
     for previous_map,patch,next_map in (
         (sources.HS_PRE_LIVE_OPP,sources.UFS_OPP_PATCH,sources.HS_PRE_FW_INIT),
-        (sources.HS_PRE_FW_INIT,sources.UFS_FW_PATCH,expected),
+        (sources.HS_PRE_FW_INIT,sources.UFS_FW_PATCH,sources.HS_PRE_REQUEST_ORDER),
+        (sources.HS_PRE_REQUEST_ORDER,sources.UFS_REQUEST_PATCH,expected),
     ):
         for path,previous in previous_map.items():
             assert sources.apply_exact_hunks(previous,path,patch)==next_map[path]
@@ -91,10 +92,10 @@ def main():
  ++smcs;if(smcs==fail_smc)return EIO;*a0=*a1=0;
  if(command==0){
   assert(index==0 && !inits && !acquires && !releases);++inits;*a0=init_fw_status;
-  if(!*a0 && init_populates){dvfs[0]=86u<<20;dvfs[0xfc/4]=5;}
+  if(!*a0 && init_populates){dvfs[0]=86u<<20;dvfs[0xfc/4]=5;if(init_target_busy)dvfs[0x5f0/4]=1u<<16;}
   if(init_clock_change)top[0xd0/4]^=1;
  }
- else if(command==4){const uint32_t table[]={575000,600000,650000,725000,825000,875000};assert(index<6);*a1=table[index];}
+ else if(command==4){const uint32_t table[]={575000,600000,650000,725000,825000,875000},observed[]={570000,590000,620000,705000,765000,875000};assert(index<6);*a1=android_calibration?observed[index]:table[index];}
  else if(command==0x40){assert(index==0);++acquires;}
  else{assert(command==0x41 && index==0);++releases;}
  return 0;

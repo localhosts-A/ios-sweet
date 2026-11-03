@@ -98,6 +98,10 @@ UFS_FW_PATCH = ROOT/'xnu/patches/0202-dali-ufs-opt-in-dvfsrc-init-selector-map.p
 HS_PRE_FW_INIT = {path: SOURCE[path] for path in HS_PRE_LIVE_OPP}
 for path, previous in HS_PRE_FW_INIT.items():
     SOURCE[path] = apply_exact_hunks(previous, path, UFS_FW_PATCH)
+UFS_REQUEST_PATCH = ROOT/'xnu/patches/0203-dali-ufs-vcore-request-before-idle.patch'
+HS_PRE_REQUEST_ORDER = {path: SOURCE[path] for path in HS_PRE_FW_INIT}
+for path, previous in HS_PRE_REQUEST_ORDER.items():
+    SOURCE[path] = apply_exact_hunks(previous, path, UFS_REQUEST_PATCH)
 LOCK = SOURCE['osfmk/kern/lock_mtx.c']
 SAMPLER, UFS, EXCEPTION, GUI_POLICY, IO_POLICY = (SOURCE[p] for p in PATHS)
 RW_POLICY = SOURCE['osfmk/kern/SweetRWWaitProgress.h']

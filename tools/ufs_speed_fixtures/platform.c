@@ -14,7 +14,7 @@ typedef uintptr_t vm_offset_t;
 static uint32_t dvfs[0x1000/4],top[0x800/4],pll[0x1000/4],hci[0x3000/4],ao[0x1000/4];
 static struct {bool dali,ready,command_poisoned;vm_offset_t regs,ao_regs;}su;
 static unsigned maps,smcs,acquires,releases,fail_map,fail_smc,barriers,inits,flag_reads;
-static bool allow_init,init_populates,init_clock_change,complete_requests;
+static bool allow_init,init_populates,init_clock_change,complete_requests,init_target_busy,never_idle,android_calibration;
 static uint64_t microseconds,init_fw_status;
 static bool ufs_dali_speed_flag(const char *key){assert(!strcmp(key,"dali-dvfsrc-init"));++flag_reads;return allow_init;}
 static vm_offset_t ml_io_map(uint64_t pa,unsigned size){
@@ -28,14 +28,14 @@ static uint32_t ufs_rd(uint32_t off){assert(off==REG_MTK_REF_CLOCK);return hci[o
 static uint32_t ufs_ao_rd(uint32_t off){assert(off==DALI_UFS_AO_GATE0 || off==DALI_UFS_AO_GATE1);return ao[off/4];}
 static uint64_t mach_absolute_time(void){return microseconds*1000;}
 static void absolutetime_to_nanoseconds(uint64_t t,uint64_t *out){*out=t;}
-static void delay(uint32_t n){microseconds+=n;if(complete_requests)dvfs[0x6ac/4]=(dvfs[0x18/4]&0x70u)<<4;}
+static void delay(uint32_t n){microseconds+=n;if(complete_requests && acquires && !releases){dvfs[0x6ac/4]=(dvfs[0x18/4]&0x70u)<<4;if(!never_idle)dvfs[0x5f0/4]&=~(1u<<16);}}
 /* ADAPTER */
 static void reset(void){
  memset(&dali_hs_platform,0,sizeof(dali_hs_platform));memset(&su,0,sizeof(su));
  memset(dvfs,0,sizeof(dvfs));memset(top,0,sizeof(top));memset(pll,0,sizeof(pll));
  memset(hci,0,sizeof(hci));memset(ao,0,sizeof(ao));
  maps=smcs=acquires=releases=fail_map=fail_smc=barriers=inits=flag_reads=0;microseconds=1;
- allow_init=init_clock_change=false;init_populates=complete_requests=true;init_fw_status=0;
+ allow_init=init_clock_change=init_target_busy=never_idle=android_calibration=false;init_populates=complete_requests=true;init_fw_status=0;
  su.dali=true;su.regs=(uintptr_t)hci;su.ao_regs=(uintptr_t)ao;
  dvfs[0]=86u<<20;dvfs[0xfc/4]=5;dvfs[0x6ac/4]=2u<<8;dvfs[0x18/4]=0x52000;
  top[0xd0/4]=6u<<8;pll[0x3c/4]=1u<<6;pll[0x268/4]=0x180000;
@@ -58,7 +58,7 @@ int main(void){
   reset();if(i==0)su.dali=false;if(i==1)su.ready=true;if(i==2)su.command_poisoned=true;if(i==3)top[0xd0/4]|=1u<<15;
   assert(ufs_dali_hs_platform_adopt()!=0 && !smcs && !flag_reads && dvfs[0x18/4]==0x52000);
  }
- reset();fail_smc=7;assert(ufs_dali_hs_platform_adopt()!=0 && !acquires && !releases && dvfs[0x18/4]==0x52000);
+ reset();fail_smc=7;assert(ufs_dali_hs_platform_adopt()!=0 && !acquires && !releases && dvfs[0x18/4]==0x52020);
  reset();assert(!ufs_dali_hs_platform_adopt());top[0xd0/4]^=1;
  assert(ufs_dali_hs_platform_validate()==EIO);unsigned calls=smcs;
  assert(ufs_dali_hs_platform_validate()==EIO && smcs==calls);
@@ -98,6 +98,13 @@ int main(void){
  reset();unconfigured();allow_init=true;complete_requests=false;
  assert(ufs_dali_hs_platform_adopt()==EIO && inits==1 && acquires==1 && releases==1);
  assert(dali_hs_platform.floor.failure==HSF_TIMEOUT && dali_hs_platform.failure==EIO);
- puts("PASS exact platform adapter: opt-in INIT once, configured adoption, no START, post-INIT validation, inherited ownership, clock/floor loss; firmware mocked");
+ reset();unconfigured();allow_init=true;init_target_busy=true;android_calibration=true;
+ assert(!ufs_dali_hs_platform_adopt() && inits==1 && smcs==9 && acquires==1 && releases==1);
+ assert(dali_hs_platform.floor.request==3 && dali_hs_platform.floor.calibrated_uv==705000 && dvfs[0x18/4]==0x50030);
+ assert(dali_hs_platform.floor.health_valid==31 && !(dali_hs_platform.floor.raw_target&(1u<<16)));
+ reset();unconfigured();allow_init=true;init_target_busy=true;never_idle=true;
+ assert(ufs_dali_hs_platform_adopt()==EIO && inits==1 && acquires==1 && releases==1);
+ assert(dali_hs_platform.floor.failure==HSF_TIMEOUT && dali_hs_platform.floor.health_valid==31);
+ puts("PASS exact platform adapter: INIT once, busy-before-vote, vote-resource-idle-gear, no START, bounded failure and retained minimum; firmware mocked");
  return 0;
 }

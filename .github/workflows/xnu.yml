@@ -662,6 +662,7 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'scope=ap-min-request-not-adc'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'start-called=0 scope=vendor-init-not-adc'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'index-domain=raw-selector not-adc=1'
+          strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'flow=vote-resource-idle-gear'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'exact-byte-match=1 root-mounted=0 root-writes=0'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'scope=sync-pass-not-quiesced'
           nm fakeroot/System/Library/Kernels/kernel.development.sweet | grep ' _sweet_log_fastboot_drain$'

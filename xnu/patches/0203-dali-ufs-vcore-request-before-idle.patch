@@ -1,0 +1,142 @@
+diff --git a/bsd/dev/SweetUFSHSFloor.h b/bsd/dev/SweetUFSHSFloor.h
+--- a/bsd/dev/SweetUFSHSFloor.h
++++ b/bsd/dev/SweetUFSHSFloor.h
+@@ -45,16 +45,17 @@
+ struct hsf_state {
+     struct hsf_ops ops;
+     void *context;
+     uint32_t phase, failed_stage, failure;
+     uint32_t request, completed, nominal_uv, calibrated_uv;
+     uint32_t raw_basic, max_opp;
+     uint32_t raw_count, opp_count; /* Live firmware table, not nominal capacity. */
+     uint32_t calibrated_count, calibrated[HSF_OPPS];
++    uint32_t health_valid, raw_request, raw_target, raw_gear, raw_force, raw_halt;
+     uint64_t resource_request_result, resource_release_result;
+     bool resource_requested, wrote_request, count_read;
+ };
+ 
+ static inline int
+ hsf_fail(struct hsf_state *s, unsigned int error)
+ {
+     if (s->phase != HSF_FAILED) {
+@@ -64,22 +65,28 @@
+     }
+     return (int)s->failure;
+ }
+ 
+ static inline int
+ hsf_read_health(struct hsf_state *s, uint32_t *request, uint32_t *gear, bool *idle)
+ {
+     uint32_t force, halt, target, req, completed;
++    s->health_valid = 0;
+     if (s->ops.clock_ok(s->context)) return HSF_CLOCK;
+-    if (s->ops.read(s->context, HSF_FORCE_REQUEST, &force) ||
+-        s->ops.read(s->context, HSF_HALT, &halt) ||
+-        s->ops.read(s->context, HSF_TARGET, &target) ||
+-        s->ops.read(s->context, HSF_REQUEST, &req) ||
+-        s->ops.read(s->context, HSF_GEAR, &completed)) return HSF_READ;
++    if (s->ops.read(s->context, HSF_FORCE_REQUEST, &force)) return HSF_READ;
++    s->raw_force = force; s->health_valid |= 1u;
++    if (s->ops.read(s->context, HSF_HALT, &halt)) return HSF_READ;
++    s->raw_halt = halt; s->health_valid |= 2u;
++    if (s->ops.read(s->context, HSF_TARGET, &target)) return HSF_READ;
++    s->raw_target = target; s->health_valid |= 4u;
++    if (s->ops.read(s->context, HSF_REQUEST, &req)) return HSF_READ;
++    s->raw_request = req; s->health_valid |= 8u;
++    if (s->ops.read(s->context, HSF_GEAR, &completed)) return HSF_READ;
++    s->raw_gear = completed; s->health_valid |= 16u;
+     if (force != 0 || (halt & 2u)) return HSF_FORCE;
+     *request = (req >> 4) & 7u;
+     *gear = (completed >> 8) & 7u;
+     *idle = (target & (1u << 16)) == 0;
+     if (s->opp_count < 3 || s->opp_count > HSF_OPPS ||
+         *request >= s->opp_count || *gear >= s->opp_count) return HSF_REQUEST_ERROR;
+     if (s->ops.clock_ok(s->context)) return HSF_CLOCK;
+     return HSF_OK;
+@@ -149,44 +156,46 @@
+             minimum = i;
+             break;
+         }
+     }
+     if (minimum == s->opp_count) return hsf_fail(s, HSF_TABLE);
+     uint32_t request = 0, completed = 0;
+     bool idle = false;
+     error = hsf_read_health(s, &request, &completed, &idle);
+-    if (error || !idle) return hsf_fail(s, error ? (unsigned int)error : HSF_LOST_FLOOR);
++    if (error) return hsf_fail(s, (unsigned int)error);
++    /* A transition already in progress does not forbid an AP minimum request.
++     * The fixed vendor path writes the vote first and waits for idle afterwards.
++     * Only the bounded post-request idle/gear checks can activate this floor. */
+     s->request = request > minimum ? request : minimum; /* Never lower an inherited request. */
+     s->nominal_uv = nominal[s->request];
+     s->calibrated_uv = s->calibrated[s->request];
+-    s->phase = HSF_ACQUIRE;
+-    uint64_t a0 = UINT64_MAX, a1 = UINT64_MAX;
+-    int resource_error = s->ops.smc(context, 0x40, 0, &a0, &a1);
+-    s->resource_request_result = a0;
+-    /* The vendor ignores this command's a0; it is not GET4's status ABI.
+-     * Retain the raw result, reject standard SMCCC NOT_SUPPORTED, and pair
+-     * every otherwise returned request with one release. Completion is still
+-     * proved by the actual AP request/target/gear, never by an opaque a0.
+-     */
+-    if (resource_error || a0 == UINT64_MAX) return hsf_fail(s, HSF_RESOURCE);
+-    s->resource_requested = true;
+     s->phase = HSF_REQUESTING;
+     uint32_t raw = 0;
+     if (s->ops.read(context, HSF_REQUEST, &raw)) error = HSF_READ;
+     if (!error && ((raw >> 4) & 7u) != request) error = HSF_REQUEST_ERROR;
+     if (!error && request < s->request) {
+         uint32_t value = (raw & ~HSF_REQUEST_MASK) | (s->request << 4);
+         s->wrote_request = true; /* Attempt is not a confirmed write. No retry. */
+         if (s->ops.write_request(context, value)) error = HSF_WRITE;
+     }
+-    if (!error) {
+-        s->phase = HSF_WAITING;
+-        s->ops.delay_us(context, 1); /* Fixed vendor request handling. */
+-    }
++    if (error) return hsf_fail(s, (unsigned int)error);
++    /* Exact vendor ordering: AP vote, temporary memory resource, bounded idle
++     * wait, 1us separation, completed gear, then temporary resource release.
++     * No rollback lowers this boot's requested minimum, even on later failure. */
++    s->phase = HSF_ACQUIRE;
++    uint64_t a0 = UINT64_MAX, a1 = UINT64_MAX;
++    int resource_error = s->ops.smc(context, 0x40, 0, &a0, &a1);
++    s->resource_request_result = a0;
++    /* Resource a0 is opaque, unlike GET4 status. Pair every otherwise returned
++     * request with one release; actual AP/idle/gear, not a0, prove completion. */
++    if (resource_error || a0 == UINT64_MAX) return hsf_fail(s, HSF_RESOURCE);
++    s->resource_requested = true;
++    s->phase = HSF_WAITING;
++    s->ops.delay_us(context, 1);
+     uint64_t begin = error ? 0 : s->ops.now_us(context);
+     bool idle_separated = false;
+     for (unsigned int poll = 0; !error && poll <= HSF_WAIT_US; ++poll) {
+         uint64_t now = s->ops.now_us(context);
+         if (now < begin || now - begin > HSF_WAIT_US) { error = HSF_TIME; break; }
+         error = hsf_read_health(s, &request, &completed, &idle);
+         if (error) break;
+         if (request != s->request) { error = HSF_REQUEST_ERROR; break; }
+diff --git a/bsd/dev/SweetUFSHSPlatform.h b/bsd/dev/SweetUFSHSPlatform.h
+--- a/bsd/dev/SweetUFSHSPlatform.h
++++ b/bsd/dev/SweetUFSHSPlatform.h
+@@ -229,16 +229,20 @@
+     printf("SWEET UFS HSFLOOR: result=%d stage=%u request=%u completed=%u nominal=%u calibrated=%u "
+         "write-attempted=%u clock=%llu resource-raw=0x%llx/0x%llx raw-count=0x%x opp-count=%u "
+         "basic=0x%x max-opp=%u count-read=%u scope=ap-min-request-not-adc\n", error,
+         error ? s->failed_stage : s->phase, s->request, s->completed, s->nominal_uv,
+         s->calibrated_uv, s->wrote_request ? 1u : 0u,
+         (unsigned long long)sweet_pwm_clock_hz(&second.pll, &second.pll),
+         (unsigned long long)s->resource_request_result, (unsigned long long)s->resource_release_result,
+         s->raw_count, s->opp_count, s->raw_basic, s->max_opp, s->count_read ? 1u : 0u);
++    printf("SWEET UFS HSHW: valid=0x%x stage=%u request-raw=0x%x target-raw=0x%x "
++        "gear-raw=0x%x force-raw=0x%x halt-raw=0x%x flow=vote-resource-idle-gear\n",
++        s->health_valid, error ? s->failed_stage : s->phase, s->raw_request, s->raw_target,
++        s->raw_gear, s->raw_force, s->raw_halt);
+     for (unsigned int i = 0; i < s->calibrated_count; ++i)
+         printf("SWEET UFS HSCAL: selector=%u uv=%u index-domain=raw-selector not-adc=1\n",
+             i, s->calibrated[i]);
+     if (error) dali_hs_platform.failure = EIO;
+     return dali_hs_platform.failure;
+ }
+ 
+ static int

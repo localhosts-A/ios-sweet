@@ -64,6 +64,15 @@ standard temporary memory-resource request/release and writes only
 `CUR_TAR_GEAR[10:8] >= request`, with a 1000-us clock budget and a separate
 1001-poll bound. An unsupported firmware command, forced/halted controller,
 invalid table, failed write or incomplete transition prevents HS configuration.
+The initial health read does not require an idle target: the actual vendor
+request path submits the AP minimum vote **before** its temporary memory-resource
+request, then waits for idle and sufficient completed gear. A transition in
+progress before the vote is not a reason to reject this standard request. The
+implementation follows that order without relaxing its bounded post-vote
+idle/gear/clock checks. An unsupported resource call may therefore leave the
+higher AP vote in place; a failed write returns before resource acquisition.
+There is no lowering rollback, retry, START or fallback. This applies only to
+acquisition; a busy target during later HS validation remains a fault.
 The AP minimum request stays in the register until reboot; temporary memory
 resource release does not withdraw that minimum request. The resource SMC
 return values are recorded raw, not interpreted using GET4's separate status
@@ -79,7 +88,11 @@ that a read-only observation prevents arbitrary external firmware changes.
 Before each HS SCSI command, request/clock/completion loss latches an error
 before descriptor, DMA, cache or doorbell access. A reset, unsupported power
 transition or external request modification is a fault, not a supported mode
-change or a reason to retry. Firmware table values are not ADC measurements.
+change or a reason to retry. Firmware table values are not ADC measurements. The final health snapshot logs
+raw request/target/gear/force/halt values with a per-read validity mask (bits
+3/2/4/0/1 respectively). These are sequential reads from the last health check,
+not an atomic snapshot or extra diagnostic reads; absent bits must not be
+interpreted as observed zero values.
 
 ## Optional standard firmware initialization
 

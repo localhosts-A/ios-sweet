@@ -6,18 +6,19 @@
 struct mock {
  uint32_t reg[0x1000/4],cal[HSF_OPPS];
  unsigned reads,writes,smcs,acquires,releases,clock_checks,polls;
- unsigned fail_read,fail_smc,complete_at,fail_clock;
+ unsigned fail_read,fail_smc,complete_at,fail_clock,order[3],order_count;
  uint64_t now;
- bool write_fail,release_fail,freeze,opaque_resource;
+ bool write_fail,release_fail,freeze,opaque_resource,never_idle;
 };
 static int read32(void *p,uint32_t offset,uint32_t *value){
  struct mock *m=p;assert(!(offset&3) && offset<0x1000);++m->reads;
  if(m->reads==m->fail_read)return 1;
+ if(offset==HSF_TARGET && m->writes && m->acquires && m->polls>=m->complete_at && !m->never_idle)m->reg[HSF_TARGET/4]&=~(1u<<16);
  if(offset==HSF_GEAR && m->writes){++m->polls;if(m->polls>=m->complete_at)m->reg[HSF_GEAR/4]=m->reg[HSF_REQUEST/4]<<4;}
  *value=m->reg[offset/4];return 0;
 }
 static int write32(void *p,uint32_t value){
- struct mock *m=p;assert(m->acquires==1 && !m->releases);++m->writes;assert(m->writes==1);
+ struct mock *m=p;assert(!m->acquires && !m->releases && !m->order_count);m->order[m->order_count++]=1;++m->writes;assert(m->writes==1);
  uint32_t old=m->reg[HSF_REQUEST/4];assert((value&~HSF_REQUEST_MASK)==(old&~HSF_REQUEST_MASK));
  assert((value&HSF_REQUEST_MASK)>(old&HSF_REQUEST_MASK));if(m->write_fail)return 1;
  m->reg[HSF_REQUEST/4]=value;return 0;
@@ -25,8 +26,8 @@ static int write32(void *p,uint32_t value){
 static int smc(void *p,uint32_t cmd,uint32_t index,uint64_t *a0,uint64_t *a1){
  struct mock *m=p;++m->smcs;if(m->smcs==m->fail_smc)return 1;*a0=*a1=0;
  if(cmd==4){unsigned count=(m->reg[HSF_COUNT/4]&7u)+1u;assert(count<=HSF_OPPS && index<count && !m->acquires && !m->writes);*a1=m->cal[index];}
- else if(cmd==0x40){assert(!index && !m->acquires && !m->writes);++m->acquires;}
- else{assert(cmd==0x41 && !index && m->acquires==1 && !m->releases);++m->releases;if(m->release_fail)*a0=UINT64_MAX;}
+ else if(cmd==0x40){assert(!index && !m->acquires && !m->releases && m->order_count==m->writes);m->order[m->order_count++]=2;++m->acquires;}
+ else{assert(cmd==0x41 && !index && m->acquires==1 && !m->releases && m->order_count<3);m->order[m->order_count++]=3;++m->releases;if(m->release_fail)*a0=UINT64_MAX;}
  if(m->opaque_resource && cmd!=4)*a0=3; /* No zero-only resource ABI is assumed. */
  return 0;
 }
@@ -44,6 +45,7 @@ int main(void){struct hsf_state s;struct mock m;
  assert(hsf_validate(&s)==HSF_STATE);
  reset(&s,&m);assert(!hsf_acquire(&s,true,&ops,&m));assert(s.phase==HSF_ACTIVE && s.request==2 && s.nominal_uv==650000 && s.calibrated_uv==650000);
  assert(m.writes==1 && m.acquires==1 && m.releases==1 && (m.reg[HSF_REQUEST/4]&~HSF_REQUEST_MASK)==0x52000);
+ assert(m.order_count==3 && m.order[0]==1 && m.order[1]==2 && m.order[2]==3 && s.health_valid==31);
  assert(!hsf_validate(&s) && m.writes==1 && m.smcs==8);
  assert(hsf_acquire(&s,true,&ops,&m)==HSF_STATE && m.writes==1);
  assert(s.raw_basic==(86u<<20) && s.max_opp==86 && s.count_read && s.calibrated_count==6);
@@ -78,11 +80,24 @@ int main(void){struct hsf_state s;struct mock m;
   assert(hsf_acquire(&s,true,&ops,&m)!=0 && !m.writes && !m.acquires && s.phase==HSF_FAILED);
   unsigned reads=m.reads;assert(hsf_acquire(&s,true,&ops,&m)!=0 && m.reads==reads);
  }
- for(unsigned fail=1;fail<=7;fail++){
+ for(unsigned fail=1;fail<=6;fail++){
   reset(&s,&m);m.fail_smc=fail;assert(hsf_acquire(&s,true,&ops,&m)!=0 && !m.writes && s.phase==HSF_FAILED);
  }
  reset(&s,&m);m.write_fail=true;
- assert(hsf_acquire(&s,true,&ops,&m)==HSF_WRITE && m.writes==1 && m.releases==1);
+ assert(hsf_acquire(&s,true,&ops,&m)==HSF_WRITE && m.writes==1 && !m.acquires && !m.releases && s.failed_stage==HSF_REQUESTING);
+ reset(&s,&m);m.fail_smc=7;
+ assert(hsf_acquire(&s,true,&ops,&m)==HSF_RESOURCE && m.writes==1 && !m.acquires && !m.releases);
+ assert((m.reg[HSF_REQUEST/4]&HSF_REQUEST_MASK)==(2u<<4));
+ reset(&s,&m);m.reg[HSF_TARGET/4]=1u<<16;
+ assert(!hsf_acquire(&s,true,&ops,&m) && s.phase==HSF_ACTIVE && m.writes==1 && m.acquires==1 && m.releases==1);
+ assert(m.order[0]==1 && m.order[1]==2 && m.order[2]==3 && !(s.raw_target&(1u<<16)));
+ reset(&s,&m);m.reg[HSF_TARGET/4]=1u<<16;m.never_idle=true;
+ assert(hsf_acquire(&s,true,&ops,&m)==HSF_TIMEOUT && m.writes==1 && m.acquires==1 && m.releases==1 && m.polls==1001);
+ assert(s.health_valid==31 && (s.raw_target&(1u<<16)) && s.failed_stage==HSF_WAITING);
+ for(unsigned fail=1;fail<=8;fail++){
+  reset(&s,&m);m.fail_read=fail;
+  assert(hsf_acquire(&s,true,&ops,&m)==HSF_READ && !m.writes && !m.acquires && !m.releases);
+ }
  reset(&s,&m);m.release_fail=true;
  assert(hsf_acquire(&s,true,&ops,&m)==HSF_RELEASE && m.writes==1 && m.releases==1 && s.resource_requested);
  reset(&s,&m);m.complete_at=100000;
