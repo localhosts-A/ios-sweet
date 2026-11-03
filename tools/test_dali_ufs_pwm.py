@@ -277,7 +277,8 @@ c=(struct sweet_pwm_completion){0};assert(sweet_pwm_complete_step(&c,UINT32_MAX,
 c=(struct sweet_pwm_completion){0};assert(sweet_pwm_complete_step(&c,0,0,UINT32_MAX)==SWEET_PWM_STEP_ERROR);
 for(unsigned h=0;h<0x40;++h){c=(struct sweet_pwm_completion){0};
  unsigned q=sweet_pwm_complete_step(&c,0,UINT32_MAX,h);
- assert(q==((h&0x31)==1?SWEET_PWM_STEP_WAIT:SWEET_PWM_STEP_ERROR));}
+ /* This is an in-flight event accumulator, not final readiness admission. */
+ assert(q==((h&0x30)==0?SWEET_PWM_STEP_WAIT:SWEET_PWM_STEP_ERROR));}
 ''')
 
 class PWMHardwareTest(unittest.TestCase):
@@ -323,8 +324,8 @@ class PWMHardwareTest(unittest.TestCase):
    for rel in paths:
     # This checks 0180 alone, before the later return and UFS capability overlays.
     expected = (source.fixture.fragment(rel,source.PWM_PATCH)
-     if rel in ('bsd/dev/sweet_ufs.c','pexpert/arm/DaliFastbootReturnPolicy.h',
-                'pexpert/arm/pe_dali_watchdog.c') else source.SOURCE[rel])
+     if rel in ('bsd/dev/sweet_ufs.c','bsd/dev/SweetUFSPWMPolicy.h',
+                'pexpert/arm/DaliFastbootReturnPolicy.h','pexpert/arm/pe_dali_watchdog.c') else source.SOURCE[rel])
     self.assertEqual((tree/rel).read_text(),expected,rel)
    self.assertTrue((tree/'bsd/dev/SweetUFSPWMPolicy.h').is_file())
    self.assertTrue((tree/'bsd/dev/SweetUFSPWMClock.h').is_file())

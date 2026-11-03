@@ -664,6 +664,7 @@ jobs:
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'index-domain=raw-selector not-adc=1'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'flow=vote-resource-idle-gear'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'scope=call-results-not-grant'
+          grep -Fq '(hcs & 0x30u) != 0u' xnu/bsd/dev/SweetUFSPWMPolicy.h
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'exact-byte-match=1 root-mounted=0 root-writes=0'
           strings fakeroot/System/Library/Kernels/kernel.development.sweet | grep -F 'scope=sync-pass-not-quiesced'
           nm fakeroot/System/Library/Kernels/kernel.development.sweet | grep ' _sweet_log_fastboot_drain$'

@@ -18,7 +18,8 @@ import test_dali_gui_load_progress as sources
 PATHS=('bsd/dev/sweet_ufs.c','pexpert/arm/pe_dali_watchdog.c',
        'bsd/dev/SweetUFSHSG1.h','bsd/dev/SweetUFSSpeedRead.h',
        'bsd/dev/SweetUFSSpeedLog.h','bsd/dev/SweetUFSHSFloor.h',
-       'bsd/dev/SweetUFSHSPlatform.h','pexpert/arm/DaliUFSSpeedReturn.h')
+       'bsd/dev/SweetUFSHSPlatform.h','pexpert/arm/DaliUFSSpeedReturn.h',
+       'bsd/dev/SweetUFSPWMPolicy.h')
 
 
 def function(text,name):
@@ -56,6 +57,7 @@ def main():
         (sources.HS_PRE_FW_INIT,sources.UFS_FW_PATCH,sources.HS_PRE_REQUEST_ORDER),
         (sources.HS_PRE_REQUEST_ORDER,sources.UFS_REQUEST_PATCH,sources.HS_PRE_RESOURCE_RESULTS),
         (sources.HS_PRE_RESOURCE_RESULTS,sources.UFS_RESOURCE_PATCH,expected),
+        (sources.PMC_PRE_POLICY,sources.UFS_PMC_PATCH,expected),
     ):
         for path,previous in previous_map.items():
             assert sources.apply_exact_hunks(previous,path,patch)==next_map[path]
@@ -116,6 +118,7 @@ def main():
         commands=[
             ('bench.py',[bench]),
             ('hsg1.py',[ROOT,view/'bsd/dev/SweetUFSHSG1.h',view]),
+            ('pmc.py',[ROOT,view]),
             ('short_return.py',[policy,probe]),
             ('root_entry.py',[ROOT,view]),
             ('init_flow.py',[ROOT,view]),

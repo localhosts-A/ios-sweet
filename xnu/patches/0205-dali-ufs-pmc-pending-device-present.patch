@@ -1,0 +1,35 @@
+diff --git a/bsd/dev/SweetUFSPWMPolicy.h b/bsd/dev/SweetUFSPWMPolicy.h
+--- a/bsd/dev/SweetUFSPWMPolicy.h
++++ b/bsd/dev/SweetUFSPWMPolicy.h
+@@ -113,27 +113,30 @@
+         after->rx_active == before->rx_active && after->tx_active == before->tx_active &&
+         after->rx_connected == before->rx_connected && after->tx_connected == before->tx_connected &&
+         after->rx_term == before->rx_term && after->tx_term == before->tx_term;
+ }
+ 
+ /* One observation, no loops: consume ARG2 only with UCCS, UPMCRS only with UPMS.
+  * The caller starts this state only after proving no stale completion bits.
+  * Errors win over completion; PWR_OK=0 is NOT a local-request success.
++ * DP/list/UIC readiness are guarded before submission and after completion;
++ * a transient absence of DP while the asynchronous PMC is pending is not, by
++ * itself, evidence of UIC_LINK_LOST or power-mode completion.
+  */
+ static inline uint32_t
+ sweet_pwm_complete_step(struct sweet_pwm_completion *c, uint32_t status,
+     uint32_t arg2, uint32_t hcs)
+ {
+     if (c == 0) {
+         return SWEET_PWM_STEP_ERROR;
+     }
+     if (c->failed || status == UINT32_MAX || hcs == UINT32_MAX ||
+         (status & ~(SWEET_PWM_UCCS | SWEET_PWM_UPMS)) != 0 ||
+-        (hcs & 0x31u) != 1u) { /* Device present, no host/device error indication. */
++        (hcs & 0x30u) != 0u) { /* Reject host/device errors even while PMC is in flight. */
+         c->failed = true;
+         return SWEET_PWM_STEP_ERROR;
+     }
+     if ((status & SWEET_PWM_UCCS) && !c->uccs) {
+         if (arg2 == UINT32_MAX || (arg2 & 0xffu) != 0) {
+             c->failed = true;
+             return SWEET_PWM_STEP_ERROR;
+         }

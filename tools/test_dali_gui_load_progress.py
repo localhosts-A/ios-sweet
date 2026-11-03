@@ -106,6 +106,10 @@ UFS_RESOURCE_PATCH = ROOT/'xnu/patches/0204-dali-ufs-vendor-resource-result-cont
 HS_PRE_RESOURCE_RESULTS = {path: SOURCE[path] for path in HS_PRE_REQUEST_ORDER}
 for path, previous in HS_PRE_RESOURCE_RESULTS.items():
     SOURCE[path] = apply_exact_hunks(previous, path, UFS_RESOURCE_PATCH)
+UFS_PMC_PATCH = ROOT/'xnu/patches/0205-dali-ufs-pmc-pending-device-present.patch'
+PMC_PRE_POLICY = {'bsd/dev/SweetUFSPWMPolicy.h': SOURCE['bsd/dev/SweetUFSPWMPolicy.h']}
+for path, previous in PMC_PRE_POLICY.items():
+    SOURCE[path] = apply_exact_hunks(previous, path, UFS_PMC_PATCH)
 LOCK = SOURCE['osfmk/kern/lock_mtx.c']
 SAMPLER, UFS, EXCEPTION, GUI_POLICY, IO_POLICY = (SOURCE[p] for p in PATHS)
 RW_POLICY = SOURCE['osfmk/kern/SweetRWWaitProgress.h']

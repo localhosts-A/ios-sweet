@@ -5,7 +5,7 @@ are not evidence of physical throughput, link stability, touch, or the desktop.
 
 ## Scope
 
-Two exact 4-byte little-endian ADT properties under the Dali `sweet-ufs` node:
+Exact 4-byte little-endian ADT properties under the Dali `sweet-ufs` node:
 
 - `dali-hs-g1 = 1`: request one-lane HS-G1, FASTAUTO, rate B.
 - `dali-speed-probe = 1`: run a pre-root read-only comparison and return. This
@@ -144,6 +144,17 @@ link must be single-lane PWM G1 with no termination. The target uses:
 - one FASTAUTO (`0x44`) PMC with separately checked UCCS and UPMS;
 - local mode/gear/lane/termination/series readback and platform revalidation.
 
+PMC is asynchronous. While its UCCS/UPMS events are pending, the completion
+accumulator rejects HCS host/device-error indications but does not require DP
+on every intermediate sample. In particular, IS=0x400/HCS=0x8/ARG2=0 reports
+UCCS without DP; it is not by itself a link-lost indication or successful PMC.
+Both completion events, successful ARG2 and PWR_LOCAL remain mandatory. Strict
+HCE/list ownership, doorbell and DP/transfer/UIC-readiness guards still run
+before submission, after both events before ACK, and after ACK. A final absent
+DP, link/UIC/fatal error or missing event still fails without retry; the change
+does not wait again after a failed final-readiness check. HS readback and the
+platform checks remain required after PMC.
+
 The vendor's optional intermediate FASTAUTO transition is for a FAST/G4+
 request and does not apply to this FASTAUTO G1 target. No high gear, second lane,
 PHY version-0 programming or speculative fallback is added. Once configuration
@@ -195,6 +206,12 @@ its own filesystem consistency and real-screen acceptance.
 compiles actual floor, adapter, HS, read/log, init, root-entry, command and return
 functions with host fixtures. Firmware/SMC and MMIO are mocked; the adapter test
 replaces only the assembly SMC boundary. Materialized sources must match the
-formal patch exactly. Existing default-off dynamic UFS regressions remain in
-the full suite, along with independent native compile/link checks. No mock test
+formal patch exactly. The PMC fixture extracts the actual idle, error-latch,
+completion and HS caller functions, then compares the final policy against its
+exact pre-change header. The first-sample regression uses the observed raw
+IS/HCS/ARG2 values; its later UPMS event and restored final readiness are explicit
+mocks, not hardware observations. Both versions also cover strict initial/final
+readiness, ACK, readback, error priority, bounded missing-event waits and no
+second command after a latched failure. Existing default-off dynamic UFS
+regressions remain in the full suite, along with independent native compile/link checks. No mock test
 is reported as physical voltage, line speed or desktop validation.
