@@ -77,13 +77,20 @@ bool run(int32_t x,int32_t y,int32_t pw,int32_t ph,int32_t lw,int32_t lh,
     def test_swipe_is_gated_bounded_client_ready_and_one_shot(self):
         text = PATCH.read_text(encoding='latin-1')
         for marker in ['"daligui"', '"sweethidswipe"', 'fSwipeDelay <= 300',
-                       'self->fSwipeTicks >= 600', 'self->fSwipeStep >= 24',
-                       'self->fSwipeStep = 24', 'IOLockLock(self->_clientLock)',
-                       'self->fDown[0]', 'self->fSwipeTicks < self->fSwipeReady',
+                       'self->fSwipeStep >= 24', 'self->fSwipeStep = 24',
+                       'IOLockLock(self->_clientLock)', 'self->fDown[0]',
+                       'self->fSwipeTicks < self->fSwipeReady',
                        'ready = ready && sweet_dali_gui_presented()',
                        'physical input remains unverified']:
             self.assertIn(marker, text)
         self.assertNotIn('kHIDUsage_Csmr_Power, true', text)
+        wait_patch = (Path(__file__).resolve().parents[1] /
+                      'xnu/patches/0170-dali-finite-late-gui-startup-budgets.patch').read_text(encoding='latin-1')
+        for marker in ['self->fSwipeTicks >= self->fSwipeLimit',
+                       'PE_parse_boot_argn("sweethidwait"',
+                       '#define SWEET_HID_WAIT_DEFAULT_SECONDS 600u',
+                       '#define SWEET_HID_WAIT_MAX_SECONDS 1200u']:
+            self.assertIn(marker, wait_patch)
 
 
 if __name__ == '__main__':

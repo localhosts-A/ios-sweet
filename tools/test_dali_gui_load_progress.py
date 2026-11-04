@@ -5,8 +5,12 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'tools'))
 import test_dali_gui_user_entry as fixture
 import test_dali_backboard_ipc_context as ipc
 import test_dali_backboard_vm_fault as vm
@@ -85,6 +89,7 @@ UFS_PRE_SPEED = SOURCE['bsd/dev/sweet_ufs.c']
 PE_PRE_SPEED = SOURCE['pexpert/arm/pe_dali_watchdog.c']
 for path in ('bsd/dev/sweet_ufs.c', 'pexpert/arm/pe_dali_watchdog.c'):
     SOURCE[path] = apply_exact_hunks(SOURCE[path], path, UFS_SPEED_PATCH)
+UFS_POST_SPEED = SOURCE['bsd/dev/sweet_ufs.c']
 for path in ('bsd/dev/SweetUFSHSG1.h', 'bsd/dev/SweetUFSSpeedRead.h',
              'bsd/dev/SweetUFSSpeedLog.h', 'bsd/dev/SweetUFSHSFloor.h',
              'bsd/dev/SweetUFSHSPlatform.h', 'pexpert/arm/DaliUFSSpeedReturn.h'):
@@ -110,11 +115,26 @@ UFS_PMC_PATCH = ROOT/'xnu/patches/0205-dali-ufs-pmc-pending-device-present.patch
 PMC_PRE_POLICY = {'bsd/dev/SweetUFSPWMPolicy.h': SOURCE['bsd/dev/SweetUFSPWMPolicy.h']}
 for path, previous in PMC_PRE_POLICY.items():
     SOURCE[path] = apply_exact_hunks(previous, path, UFS_PMC_PATCH)
-# Preserve 0205 snapshots for historical function fixtures while checking that
-# the materialized source contains the separately tested extended probe.
+# Preserve 0205 snapshots for historical function fixtures. Replay 0206, then
+# the exact trial-linked UFS source delta. Its base/post hashes are checked by
+# the dedicated integration test; do not split its uncommitted intermediates.
 UFS_EXT_PATCH = ROOT/'xnu/patches/0206-dali-ufs-extended-read-probe.patch'
+UFS_PRE_EXT = SOURCE['bsd/dev/sweet_ufs.c']
 UFS_POST_EXT = {path: apply_exact_hunks(SOURCE[path], path, UFS_EXT_PATCH)
                 for path in ('bsd/dev/sweet_ufs.c', 'bsd/dev/SweetUFSSpeedRead.h')}
+UFS_TRIAL_PATCH = ROOT/'xnu/patches/0207-dali-ufs-g4-root-slot-logger-v6.patch'
+UFS_POST_TRIAL = {
+    'bsd/dev/sweet_ufs.c': apply_exact_hunks(
+        UFS_POST_EXT['bsd/dev/sweet_ufs.c'], 'bsd/dev/sweet_ufs.c', UFS_TRIAL_PATCH),
+    'bsd/dev/SweetUFSHSG1.h': apply_exact_hunks(
+        SOURCE['bsd/dev/SweetUFSHSG1.h'], 'bsd/dev/SweetUFSHSG1.h', UFS_TRIAL_PATCH),
+    'bsd/dev/SweetUFSSpeedRead.h': UFS_POST_EXT['bsd/dev/SweetUFSSpeedRead.h'],
+}
+# Preserve the established 0200-0206 host suite's source contract while also
+# exposing the exact trial-linked 0207 materialization to dedicated tests.
+TRIAL_SOURCE = dict(SOURCE)
+TRIAL_SOURCE.update(UFS_POST_TRIAL)
+SOURCE['bsd/dev/sweet_ufs.c'] = UFS_PRE_EXT
 LOCK = SOURCE['osfmk/kern/lock_mtx.c']
 SAMPLER, UFS, EXCEPTION, GUI_POLICY, IO_POLICY = (SOURCE[p] for p in PATHS)
 RW_POLICY = SOURCE['osfmk/kern/SweetRWWaitProgress.h']
@@ -594,7 +614,8 @@ int main(void){
              '#include "DaliFastbootReturnSMC.h"\n'),
         ):
             with self.subTest(path=path):
-                self.assertEqual(apply_exact_hunks(previous, path, UFS_SPEED_PATCH), SOURCE[path])
+                expected = UFS_POST_SPEED if path == 'bsd/dev/sweet_ufs.c' else SOURCE[path]
+                self.assertEqual(apply_exact_hunks(previous, path, UFS_SPEED_PATCH), expected)
                 with self.assertRaises(AssertionError):
                     apply_exact_hunks('\n' + previous, path, UFS_SPEED_PATCH)
                 self.assertEqual(previous.count(context), 1)
@@ -606,7 +627,7 @@ int main(void){
         if os.environ.get('SWEET_LOAD_SOURCE_DIR'):
             directory=Path(os.environ['SWEET_LOAD_SOURCE_DIR'])
             for path,text in SOURCE.items():
-                self.assertEqual((directory/path).read_text(encoding='latin-1'), UFS_POST_EXT.get(path, text), path)
+                self.assertEqual((directory/path).read_text(encoding='latin-1'), TRIAL_SOURCE.get(path, text), path)
             self.assertEqual((directory/'osfmk/kern/Makefile').read_text(),SOURCE['osfmk/kern/Makefile'])
         old=old_fragment(PATHS[0])
         for name in ('sweet_bbpc_trace','sweet_bbvm_enter','sweet_bbvm_leave','sweet_ff_fault_trace','sweet_ff_screen_dump'):

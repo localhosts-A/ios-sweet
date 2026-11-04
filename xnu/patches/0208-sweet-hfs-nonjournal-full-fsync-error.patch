@@ -1,0 +1,17 @@
+--- a/bsd/sweet_hfs/core/hfs_vnops.c
++++ b/bsd/sweet_hfs/core/hfs_vnops.c
+@@ -3302,9 +3302,13 @@
+ 				else
+ 					hfs_flush(hfsmp, HFS_FLUSH_JOURNAL_BARRIER);
+ 			} else {
++				int flush_error;
+ 				retval = hfs_metasync_all(hfsmp);
+ 				/* XXX need to pass context! */
+-				hfs_flush(hfsmp, HFS_FLUSH_CACHE);
++				flush_error = hfs_flush(hfsmp, HFS_FLUSH_CACHE);
++				/* Preserve the metadata error while reporting a failed flush. */
++				if (retval == 0)
++					retval = flush_error;
+ 			}
+ 		}
+ 	}

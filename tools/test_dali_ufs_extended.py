@@ -12,18 +12,35 @@ sys.path.insert(0, str(ROOT / 'tools'))
 import test_dali_gui_load_progress as sources
 PATCH = ROOT / 'xnu/patches/0206-dali-ufs-extended-read-probe.patch'
 PATHS = ('bsd/dev/sweet_ufs.c', 'bsd/dev/SweetUFSSpeedRead.h')
-expected = {path: sources.apply_exact_hunks(sources.SOURCE[path], path, PATCH) for path in PATHS}
+previous = {'bsd/dev/sweet_ufs.c': sources.UFS_PRE_EXT,
+            'bsd/dev/SweetUFSSpeedRead.h': sources.SOURCE['bsd/dev/SweetUFSSpeedRead.h']}
+expected = {path: sources.apply_exact_hunks(previous[path], path, PATCH) for path in PATHS}
+
+
+def function_in(source, name):
+    m = re.search(r'(?:static )?(?:bool|int)\n' + name + r'\(', source)
+    assert m, name
+    start = source.index('{', m.start())
+    pos, depth = start + 1, 1
+    while depth:
+        depth += (source[pos] == '{') - (source[pos] == '}')
+        pos += 1
+    return source[m.start():pos] + '\n'
+
+
 for path in PATHS:
     try:
-        sources.apply_exact_hunks('\n' + sources.SOURCE[path], path, PATCH)
+        sources.apply_exact_hunks('\n' + previous[path], path, PATCH)
     except AssertionError:
         pass
     else:
         raise AssertionError('offset patch accepted: ' + path)
 if len(sys.argv) > 1:
     view = Path(sys.argv[1])
-    for path in PATHS:
-        assert (view / path).read_text(encoding='latin-1') == expected[path], path
+    actual_ufs = (view / PATHS[0]).read_text(encoding='latin-1')
+    for name in ('ufs_dali_speed_flag',):
+        assert function_in(actual_ufs, name) == function_in(expected[PATHS[0]], name), name
+    assert (view / PATHS[1]).read_text(encoding='latin-1') == expected[PATHS[1]], PATHS[1]
 work = tempfile.TemporaryDirectory(prefix='dali-ufs-extended-')
 BUILD = Path(work.name)
 HEADER = BUILD / 'SweetUFSSpeedRead.h'

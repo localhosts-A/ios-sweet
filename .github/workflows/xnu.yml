@@ -86,6 +86,23 @@ on:
       - "tools/test_dali_cpu_activity.py"
       - "tools/test_dali_lsd_context.py"
       - "tools/test_dali_touch_handoff_logging.py"
+      - "tools/test_dali_sweet_log.py"
+      - "tools/test_dali_g4_root_integration.py"
+      - "tools/test_dali_hfs_fsync_host.py"
+      - "tools/test_dali_input_patch_replay.py"
+      - "tools/test_dali_formal_source_identity.py"
+      - "tools/test_dali_formal_patch_replay.py"
+      - "tools/dali_input_tests/**"
+      - "tools/dali_volume_tests/**"
+      - "tools/dali_touch_guard_tests/**"
+      - "tools/hfs_fsync_tests/**"
+      - "tools/sweet_log_tests/**"
+      - "tools/sweet_log_v6_tests/**"
+      - "tools/sweet-log.py"
+      - "tools/sweet-log-pull.sh"
+      - "tools/sweet_log_evidence.py"
+      - "tools/sweet_preboot_capture.py"
+      - "tools/wait_return_recover.py"
 
 concurrency:
   group: xnu-${{ github.ref }}
@@ -212,6 +229,11 @@ jobs:
           python3 -I tools/test_dali_ufs_poll_adt.py
           python3 -I tools/test_dali_ufs_two_lane.py
           python3 -I tools/test_dali_ufs_two_lane_adt.py
+          python3 -I tools/test_dali_sweet_log.py
+          python3 -I tools/test_dali_g4_root_integration.py
+          python3 -I tools/test_dali_hfs_fsync_host.py
+          python3 -I tools/test_dali_input_patch_replay.py
+          python3 -I tools/test_dali_formal_patch_replay.py
 
       - name: Build
         working-directory: dxb
@@ -254,6 +276,7 @@ jobs:
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_lsd_context.py" "$SWEET_LOAD_SOURCE_DIR"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_touch_handoff.py" "$SWEET_LOAD_SOURCE_DIR"
           python3 -I "$GITHUB_WORKSPACE/tools/test_dali_touch_handoff_logging.py" "$SWEET_LOAD_SOURCE_DIR"
+          python3 -I "$GITHUB_WORKSPACE/tools/test_dali_formal_source_identity.py" "$SWEET_LOAD_SOURCE_DIR"
           python3 tools/test_dali_watchdog_lease.py
 
       - name: Compiler cache statistics

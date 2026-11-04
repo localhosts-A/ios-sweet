@@ -1,0 +1,1735 @@
+diff --git a/bsd/dev/SweetUFSHSG1.h b/bsd/dev/SweetUFSHSG1.h
+index f1e2ebb..4dab831 100644
+--- a/bsd/dev/SweetUFSHSG1.h
++++ b/bsd/dev/SweetUFSHSG1.h
+@@ -68,3 +68,351 @@ ufs_dali_prepare_hsg1(bool requested)
+     printf("SWEET UFS HSG1: verified mode=0x44 gear=1/1 lanes=1/1 series=B readback=1\n");
+     return 0;
+ }
++
++/* G4x2 is a private probe/root trial, not a voltage or signal
++ * integrity guarantee. Linux's MT6991 DT requests a 650mV VCORE minimum; the
++ * existing platform code retains that AP policy and validates its clock.
++ * Neither request/completed selector nor firmware calibration proves rail ADC.
++ * Current PWM has no active HS series (Linux initializes hs_rate to zero), so
++ * always take the vendor's series-change G1B FASTAUTO intermediate. No retry,
++ * same-boot rollback, automatic G5, or fallback to a lower gear is permitted.
++ */
++/* The context is set before each existing operation. Report only the first
++ * failing operation, without extra UIC commands or speculative recovery.
++ * The retained console may drop chunks, so a missing line is not proof that a
++ * command or phase did not run. A range is inclusive; "pwm-mode" means 0x22
++ * or 0x55, not all intervening values. */
++static void
++ufs_hsg4_context(const char *operation, const char *endpoint, uint32_t attribute,
++    const char *expectation, bool expected_valid, uint32_t low, uint32_t high)
++{
++    sweet_hsg4_diag.operation = operation;
++    sweet_hsg4_diag.endpoint = endpoint;
++    sweet_hsg4_diag.attribute = attribute;
++    sweet_hsg4_diag.expectation = expectation;
++    sweet_hsg4_diag.expected_valid = expected_valid;
++    sweet_hsg4_diag.expected_min = low;
++    sweet_hsg4_diag.expected_max = high;
++    sweet_hsg4_diag.observed_valid = false;
++    sweet_hsg4_diag.observed = 0;
++}
++
++static void
++ufs_hsg4_compare(bool peer, uint32_t attr, const char *expectation,
++    uint32_t low, uint32_t high, uint32_t observed)
++{
++    ufs_hsg4_context("compare", peer ? "peer" : "local", attr,
++        expectation, true, low, high);
++    sweet_hsg4_diag.observed = observed;
++    sweet_hsg4_diag.observed_valid = true;
++}
++
++static int
++ufs_hsg4_get(bool peer, uint32_t attr, uint32_t *value, uint64_t until,
++    const char *operation, const char *expectation, bool expected_valid,
++    uint32_t low, uint32_t high)
++{
++    ufs_hsg4_context(operation, peer ? "peer" : "local", attr,
++        expectation, expected_valid, low, high);
++    int error = ufs_pwm_get(peer, attr, value, until);
++    if (!error) {
++        sweet_hsg4_diag.observed = *value;
++        sweet_hsg4_diag.observed_valid = true;
++    }
++    return error;
++}
++
++static int
++ufs_hsg4_set(bool peer, uint32_t attr, uint32_t value, uint64_t until)
++{
++    ufs_hsg4_context("set", peer ? "peer" : "local", attr, "eq", true, value, value);
++    return peer ? ufs_pwm_peer_set(attr, value, until) : ufs_pwm_set(attr, value, until);
++}
++
++static int
++ufs_hsg4_floor(uint32_t next_attribute)
++{
++    /* Attribute identifies the next intended UIC operation, not a DVFS register. */
++    ufs_hsg4_context("floor-before", "platform", next_attribute, "none", false, 0, 0);
++    return ufs_dali_hs_platform_validate();
++}
++
++static void
++ufs_hsg4_report(int error)
++{
++    if (!sweet_hsg4_diag.first_error_valid) {
++        sweet_hsg4_diag.first_error = error;
++        sweet_hsg4_diag.first_error_valid = true;
++    }
++    error = sweet_hsg4_diag.first_error;
++    printf("SWEET UFS HSG4 FAIL: v=1 error=%d phase=%s op=%s endpoint=%s attr=0x%x "
++        "expect=%s expected-valid=%u expected-min=0x%x expected-max=0x%x "
++        "observed-valid=%u observed=0x%x repeat=%u\n", error,
++        sweet_hsg4_diag.phase, sweet_hsg4_diag.operation, sweet_hsg4_diag.endpoint,
++        sweet_hsg4_diag.attribute, sweet_hsg4_diag.expectation,
++        sweet_hsg4_diag.expected_valid ? 1u : 0u, sweet_hsg4_diag.expected_min,
++        sweet_hsg4_diag.expected_max, sweet_hsg4_diag.observed_valid ? 1u : 0u,
++        sweet_hsg4_diag.observed, sweet_hsg4_diag.terminal_reemitted ? 1u : 0u);
++    printf("SWEET UFS HSG4 PMC: submit=0x%x complete=0x%x ack=0x%x idle=0x%x "
++        "mode=0x%x stage=%s error=%d polls=%u sampled=%u IS=0x%x HCS=0x%x arg2-valid=%u "
++        "ARG2=0x%x uccs=%u upms=%u ack-valid=%u ack-IS=0x%x\n",
++        sweet_hsg4_diag.pmc_submitted, sweet_hsg4_diag.pmc_completed,
++        sweet_hsg4_diag.pmc_acknowledged, sweet_hsg4_diag.pmc_idle_ok,
++        sweet_hsg4_diag.pmc_mode,
++        sweet_hsg4_diag.pmc_failure_stage ? sweet_hsg4_diag.pmc_failure_stage : "none",
++        sweet_hsg4_diag.pmc_error, sweet_hsg4_diag.pmc_polls,
++        sweet_hsg4_diag.pmc_sampled ? 1u : 0u, sweet_hsg4_diag.pmc_status,
++        sweet_hsg4_diag.pmc_hcs, sweet_hsg4_diag.pmc_arg2_valid ? 1u : 0u,
++        sweet_hsg4_diag.pmc_arg2, sweet_hsg4_diag.pmc_uccs ? 1u : 0u,
++        sweet_hsg4_diag.pmc_upms ? 1u : 0u,
++        sweet_hsg4_diag.pmc_ack_status_valid ? 1u : 0u, sweet_hsg4_diag.pmc_ack_status);
++}
++
++/* The caller has already observed an HS read/compare error after the G4
++ * transition returned success. Do not infer which suboperation caused it. */
++static void
++ufs_hsg4_post_probe_error(int error)
++{
++    if (sweet_hsg4_diag.first_error_valid) return;
++    sweet_hsg4_diag.phase = "post-transition-probe";
++    ufs_hsg4_context(su.failure_stage ? su.failure_stage : "unknown", "probe", 0,
++        "none", false, 0, 0);
++    ufs_hsg4_report(error);
++}
++
++/* Only used after an existing snapshot comparison has failed. */
++static void
++ufs_hsg4_snapshot_mismatch(bool peer, const struct sweet_pwm_snapshot *s,
++    uint32_t mode, uint32_t gear, uint32_t lanes, uint32_t term)
++{
++    const uint32_t attrs[] = {0x1571, 0x1583, 0x1568, 0x1580, 0x1560,
++        0x1581, 0x1561, 0x1584, 0x1569};
++    const uint32_t actual[] = {s->mode, s->rx_gear, s->tx_gear, s->rx_active,
++        s->tx_active, s->rx_connected, s->tx_connected, s->rx_term, s->tx_term};
++    const uint32_t expected[] = {mode, gear, gear, lanes, lanes, 2, 2, term, term};
++    for (unsigned int i = 0; i < sizeof(attrs) / sizeof(attrs[0]); ++i) {
++        if (actual[i] != expected[i]) {
++            ufs_hsg4_compare(peer, attrs[i], "eq", expected[i], expected[i], actual[i]);
++            return;
++        }
++    }
++    /* Defensive: no extra reads, and do not assert a specific mismatch. */
++    ufs_hsg4_context("snapshot-invalid", peer ? "peer" : "local", 0, "none", false, 0, 0);
++}
++
++static int
++ufs_hsg4_snapshot(bool peer, struct sweet_pwm_snapshot *s, uint64_t until,
++    uint32_t mode, uint32_t gear, uint32_t lanes, uint32_t term)
++{
++    const uint32_t attrs[] = {0x1571, 0x1583, 0x1568, 0x1580, 0x1560,
++        0x1581, 0x1561, 0x1584, 0x1569};
++    uint32_t *values[] = {&s->mode, &s->rx_gear, &s->tx_gear, &s->rx_active,
++        &s->tx_active, &s->rx_connected, &s->tx_connected, &s->rx_term, &s->tx_term};
++    const uint32_t expected[] = {mode, gear, gear, lanes, lanes, 2, 2, term, term};
++    for (unsigned int i = 0; i < sizeof(attrs) / sizeof(attrs[0]); ++i) {
++        bool pwm_mode = i == 0 && mode == 0;
++        int error = ufs_hsg4_get(peer, attrs[i], values[i], until, "snapshot-get",
++            pwm_mode ? "pwm-mode" : "eq", true,
++            pwm_mode ? 0x22 : expected[i], pwm_mode ? 0x55 : expected[i]);
++        if (error) return error;
++    }
++    if (sweet_pwm_snapshot_valid(s)) return 0;
++    if (mode == 0 && s->mode != 0x22 && s->mode != 0x55)
++        ufs_hsg4_compare(peer, 0x1571, "pwm-mode", 0x22, 0x55, s->mode);
++    else ufs_hsg4_snapshot_mismatch(peer, s, mode ? mode : s->mode, gear, lanes, term);
++    return EIO;
++}
++
++static bool
++ufs_hsg4_matches(const struct sweet_pwm_snapshot *s, uint32_t mode,
++    uint32_t gear, uint32_t lanes, uint32_t term)
++{
++    return s->mode == mode && s->rx_gear == gear && s->tx_gear == gear &&
++        s->rx_active == lanes && s->tx_active == lanes &&
++        s->rx_connected == 2 && s->tx_connected == 2 &&
++        s->rx_term == term && s->tx_term == term;
++}
++
++/* Require real runtime GETs on both ends; connected lanes alone are not AVAIL. */
++static int
++ufs_hsg4_capabilities(uint64_t until, uint32_t max_gear[2])
++{
++    for (unsigned int peer = 0; peer < 2; ++peer) {
++        uint32_t rx = 0, tx = 0, unipro_version = 0;
++        int error = ufs_hsg4_get(peer != 0, 0x1540, &rx, until, "cap-get", "eq", true, 2, 2);
++        if (!error) error = ufs_hsg4_get(peer != 0, 0x1520, &tx, until, "cap-get", "eq", true, 2, 2);
++        if (!error) error = ufs_hsg4_get(peer != 0, 0x1587, &max_gear[peer], until, "cap-get", "range", true, 4, 5);
++        if (!error) error = ufs_hsg4_get(peer != 0, 0x15a9, &unipro_version, until, "cap-get", "range", true, 5, 6);
++        if (error) return error;
++        sweet_hsg4_diag.avail_rx[peer] = rx;
++        sweet_hsg4_diag.avail_tx[peer] = tx;
++        sweet_hsg4_diag.unipro_version[peer] = unipro_version;
++        if (rx != 2 || tx != 2 || max_gear[peer] < 4 || max_gear[peer] > 5 ||
++            (unipro_version & ~0xfu) != 0 || unipro_version < 5 || unipro_version > 6) {
++            if (rx != 2) ufs_hsg4_compare(peer != 0, 0x1540, "eq", 2, 2, rx);
++            else if (tx != 2) ufs_hsg4_compare(peer != 0, 0x1520, "eq", 2, 2, tx);
++            else if (max_gear[peer] < 4 || max_gear[peer] > 5)
++                ufs_hsg4_compare(peer != 0, 0x1587, "range", 4, 5, max_gear[peer]);
++            else ufs_hsg4_compare(peer != 0, 0x15a9, "range", 5, 6, unipro_version);
++            return ENOTSUP;
++        }
++    }
++    return 0;
++}
++
++/* All ten sync lengths are read at each endpoint. Preserve values already
++ * above 0x48; check the exact post-SET value and again after final PMC. */
++static int
++ufs_hsg4_sync(uint64_t until, uint32_t expected[2][5], bool program)
++{
++    static const uint32_t attrs[] = {0x1552, 0x1554, 0x1556, 0x15d0, 0x15d6};
++    sweet_hsg4_diag.phase = program ? "sync-prepare" : "sync-final";
++    for (unsigned int i = 0; i < 5; ++i) {
++        for (unsigned int peer = 0; peer < 2; ++peer) {
++            uint32_t value = 0;
++            int error = ufs_hsg4_get(peer != 0, attrs[i], &value, until, "sync-get",
++                program ? "none" : "eq", !program, expected[peer][i], expected[peer][i]);
++            if (error) return error;
++            if (program) {
++                expected[peer][i] = value < 0x48 ? 0x48 : value;
++                if (value < 0x48) {
++                    error = ufs_hsg4_floor(attrs[i]);
++                    if (!error) error = ufs_hsg4_set(peer != 0, attrs[i], 0x48, until);
++                    if (!error) error = ufs_hsg4_get(peer != 0, attrs[i], &value, until,
++                        "sync-readback", "eq", true, 0x48, 0x48);
++                    if (error) return error;
++                }
++            }
++            if (value != expected[peer][i] || value < 0x48) {
++                ufs_hsg4_compare(peer != 0, attrs[i], "eq", expected[peer][i], expected[peer][i], value);
++                return EIO;
++            }
++        }
++    }
++    return 0;
++}
++
++/* Stage the vendor timeout defaults plus symmetric link attributes, then
++ * issue exactly one PMC. Actual link settings are checked after completion. */
++static int
++ufs_hsg4_stage(uint64_t until, uint32_t gear, uint32_t mode)
++{
++    if (!((gear == 1 && mode == 0x44) || (gear == 4 && mode == 0x11))) return EINVAL;
++    const uint32_t attrs[] = {0x15d4, 0x1583, 0x1580, 0x1584, 0x1568,
++        0x1560, 0x1569, 0x156a, 0x15b0, 0x15b1, 0x15b2, 0x15b3,
++        0x15b4, 0x15b5, 0xd041, 0xd042, 0xd043};
++    const uint32_t values[] = {gear >= 4 ? 1u : 3u, gear, 2, 1, gear,
++        2, 1, 2, 8191, 65535, 32767, 8191, 65535, 32767, 8191, 65535, 32767};
++    _Static_assert(sizeof(attrs) == sizeof(values), "HS G4 attribute/value mismatch");
++    sweet_hsg4_diag.phase = gear == 1 ? "stage-g1" : "stage-g4";
++    for (unsigned int i = 0; i < sizeof(attrs) / sizeof(attrs[0]); ++i) {
++        int error = ufs_hsg4_floor(attrs[i]);
++        if (!error) error = ufs_hsg4_set(false, attrs[i], values[i], until);
++        if (error) return error;
++    }
++    int error = ufs_hsg4_floor(0x1571);
++    if (error) return error;
++    ufs_hsg4_context("pmc", "local", 0x1571, "eq", true, mode, mode);
++    return ufs_pwm_pmc(mode, until);
++}
++
++static int
++ufs_hsg4_verify(uint64_t until, uint32_t gear, uint32_t mode)
++{
++    struct sweet_pwm_snapshot local = {0}, peer = {0};
++    uint32_t local_series = 0, peer_series = 0, adapt = 0;
++    uint32_t expected_adapt = gear >= 4 ? 1u : 3u;
++    sweet_hsg4_diag.phase = gear == 1 ? "verify-g1" : "verify-g4";
++    int error = ufs_hsg4_snapshot(false, &local, until, mode, gear, 2, 1);
++    if (!error) error = ufs_hsg4_snapshot(true, &peer, until, mode, gear, 2, 1);
++    if (!error) error = ufs_hsg4_get(false, 0x156a, &local_series, until, "verify-get", "eq", true, 2, 2);
++    if (!error) error = ufs_hsg4_get(true, 0x156a, &peer_series, until, "verify-get", "eq", true, 2, 2);
++    if (!error) error = ufs_hsg4_get(false, 0x15d4, &adapt, until, "verify-get", "eq", true, expected_adapt, expected_adapt);
++    if (error) return error;
++    if (!ufs_hsg4_matches(&local, mode, gear, 2, 1) ||
++        !ufs_hsg4_matches(&peer, mode, gear, 2, 1) ||
++        local_series != 2 || peer_series != 2 || adapt != expected_adapt) {
++        if (!ufs_hsg4_matches(&local, mode, gear, 2, 1))
++            ufs_hsg4_snapshot_mismatch(false, &local, mode, gear, 2, 1);
++        else if (!ufs_hsg4_matches(&peer, mode, gear, 2, 1))
++            ufs_hsg4_snapshot_mismatch(true, &peer, mode, gear, 2, 1);
++        else if (local_series != 2) ufs_hsg4_compare(false, 0x156a, "eq", 2, 2, local_series);
++        else if (peer_series != 2) ufs_hsg4_compare(true, 0x156a, "eq", 2, 2, peer_series);
++        else ufs_hsg4_compare(false, 0x15d4, "eq", expected_adapt, expected_adapt, adapt);
++        return EIO;
++    }
++    return ufs_hsg4_floor(0);
++}
++
++static int
++ufs_dali_prepare_hsg4(bool requested)
++{
++    if (!requested || !su.dali) return 0;
++    int error = ufs_pwm_reentry_error();
++    if (error) return error;
++    sweet_hsg4_diag = (struct sweet_hsg4_diagnostic){0};
++    sweet_hsg4_diag.phase = "adopt";
++    ufs_hsg4_context("floor-adopt", "platform", 0, "none", false, 0, 0);
++    error = ufs_dali_hs_platform_adopt();
++    if (error) { ufs_hsg4_report(error); return ufs_pwm_failure(error); }
++    uint64_t span = 0, now = mach_absolute_time();
++    nanoseconds_to_absolutetime(30ull * NSEC_PER_SEC, &span);
++    if (span == 0 || now > UINT64_MAX - span) {
++        sweet_hsg4_diag.phase = "deadline";
++        ufs_hsg4_context("deadline", "platform", 0, "none", false, 0, 0);
++        ufs_hsg4_report(ETIMEDOUT);
++        return ufs_pwm_latch(ETIMEDOUT, false);
++    }
++    uint64_t until = now + span;
++    struct sweet_pwm_snapshot local = {0}, peer = {0};
++    uint32_t max_gear[2] = {0}, after_max[2] = {0}, local_series = 0, peer_series = 0;
++    uint32_t sync[2][5] = {{0}};
++    sweet_hsg4_diag.phase = "before-snapshot";
++    error = ufs_hsg4_snapshot(false, &local, until, 0, 1, 1, 0);
++    if (!error) error = ufs_hsg4_snapshot(true, &peer, until, local.mode, 1, 1, 0);
++    if (!error) { sweet_hsg4_diag.phase = "before-capability"; error = ufs_hsg4_capabilities(until, max_gear); }
++    if (!error) { sweet_hsg4_diag.phase = "before-series";
++        error = ufs_hsg4_get(false, 0x156a, &local_series, until, "series-get", "range", true, 0, 2); }
++    if (!error) error = ufs_hsg4_get(true, 0x156a, &peer_series, until, "series-get", "range", true, 0, 2);
++    if (error) { ufs_hsg4_report(error); return ufs_pwm_failure(error); }
++    printf("SWEET UFS HSG4: before local=0x%x peer=0x%x series=%u/%u hsmax=%u/%u avail=2/2\n",
++        local.mode, peer.mode, local_series, peer_series, max_gear[0], max_gear[1]);
++    printf("SWEET UFS HSG4 CAP: local-rx=%u local-tx=%u peer-rx=%u peer-tx=%u "
++        "local-ver=%u peer-ver=%u\n", sweet_hsg4_diag.avail_rx[0], sweet_hsg4_diag.avail_tx[0],
++        sweet_hsg4_diag.avail_rx[1], sweet_hsg4_diag.avail_tx[1],
++        sweet_hsg4_diag.unipro_version[0], sweet_hsg4_diag.unipro_version[1]);
++    sweet_hsg4_diag.phase = "before-admission";
++    if ((local.mode != 0x55 && local.mode != 0x22) ||
++        !ufs_hsg4_matches(&local, local.mode, 1, 1, 0) ||
++        !ufs_hsg4_matches(&peer, local.mode, 1, 1, 0) ||
++        local_series > 2 || peer_series > 2) {
++        if (local.mode != 0x55 && local.mode != 0x22)
++            ufs_hsg4_compare(false, 0x1571, "pwm-mode", 0x22, 0x55, local.mode);
++        else if (!ufs_hsg4_matches(&local, local.mode, 1, 1, 0))
++            ufs_hsg4_snapshot_mismatch(false, &local, local.mode, 1, 1, 0);
++        else if (!ufs_hsg4_matches(&peer, local.mode, 1, 1, 0))
++            ufs_hsg4_snapshot_mismatch(true, &peer, local.mode, 1, 1, 0);
++        else if (local_series > 2) ufs_hsg4_compare(false, 0x156a, "range", 0, 2, local_series);
++        else ufs_hsg4_compare(true, 0x156a, "range", 0, 2, peer_series);
++        ufs_hsg4_report(ENOTSUP);
++        return ufs_pwm_latch(ENOTSUP, false);
++    }
++    sweet_hsg4_diag.phase = "before-floor";
++    error = ufs_hsg4_floor(0);
++    if (!error) error = ufs_hsg4_sync(until, sync, true);
++    if (!error) error = ufs_hsg4_stage(until, 1, 0x44);
++    if (!error) error = ufs_hsg4_verify(until, 1, 0x44);
++    if (!error) error = ufs_hsg4_stage(until, 4, 0x11);
++    if (!error) error = ufs_hsg4_verify(until, 4, 0x11);
++    if (!error) { sweet_hsg4_diag.phase = "final-capability"; error = ufs_hsg4_capabilities(until, after_max); }
++    if (!error && (after_max[0] != max_gear[0] || after_max[1] != max_gear[1])) {
++        unsigned int side = after_max[0] != max_gear[0] ? 0u : 1u;
++        ufs_hsg4_compare(side != 0, 0x1587, "eq", max_gear[side], max_gear[side], after_max[side]);
++        error = EIO;
++    }
++    if (!error) error = ufs_hsg4_sync(until, sync, false);
++    if (!error) { sweet_hsg4_diag.phase = "final-floor"; error = ufs_hsg4_floor(0); }
++    if (error) { ufs_hsg4_report(error); return ufs_pwm_failure(error); }
++    printf("SWEET UFS HSG4: verified mode=0x11 gear=4/4 lanes=2/2 series=B readback=1 hardware-stability=unproven\n");
++    return 0;
++}
+diff --git a/bsd/dev/sweet_ufs.c b/bsd/dev/sweet_ufs.c
+index 7c4dfa6..ecbfd99 100644
+--- a/bsd/dev/sweet_ufs.c
++++ b/bsd/dev/sweet_ufs.c
+@@ -38,6 +38,7 @@
+ #include <pexpert/pexpert.h>
+ #include <pexpert/device_tree.h>
+ #include <libkern/libkern.h>
++#include <libkern/crypto/sha2.h>
+ #include <machine/atomic.h>
+ #include "SweetUFSCompletion.h"
+ #include "SweetUFSPWMPolicy.h"
+@@ -126,6 +127,16 @@ extern void sweet_usb_probe(void);
+ 
+ #define UFS_BLOCK       4096u
+ #define BOUNCE_SIZE     (1u << 20)
++/* On the G4 root path only, preserve the older logs and bound new slots. */
++#define DALI_LOG_OFFSET_BYTES (16ull << 20)
++#define DALI_LOG_SPAN_BLOCKS  ((16ull << 20) / UFS_BLOCK)
++#define DALI_LOG_SLOT_COUNT    3u
++#define DALI_LOG_SCAN_TIMEOUT_NS (90ull * NSEC_PER_SEC)
++#define DALI_ROOT_COMPARE_TIMEOUT_NS (90ull * NSEC_PER_SEC)
++/* Independently observed Dali LUN 2 unixnu_logs GPT extent, 4 KiB LBAs. */
++#define DALI_LOG_LUN           2u
++#define DALI_LOG_FIRST_BLOCK   0x3d92ff8ull
++#define DALI_LOG_PART_BLOCKS   8192u
+ #define DALI_ROOT_MAX_BYTES (16ull * 1024ull * 1024ull * 1024ull)
+ #define DALI_ROOT_MAX_BLOCKS (DALI_ROOT_MAX_BYTES / UFS_BLOCK)
+ #define PRDT_CHUNK      (256u << 10)            /* PRDT byte count field: 18 bits */
+@@ -173,6 +184,9 @@ static struct {
+ 	uint8_t lun;
+ 	uint8_t tag;
+ 	uint64_t first_block, nblocks;          /* exposed root view, in 4 KiB device blocks */
++	/* Initial root GPT metadata, checked only by optional G4 logger validation. */
++	uint64_t root_gpt_first, root_gpt_last;
++	uint8_t root_gpt_type[16], root_gpt_guid[16], gpt_disk_guid[16];
+ 	uint64_t last_lba, capacity_blocks;
+ 	uint64_t log_first_block, log_nblocks;
+ 	uint64_t log_offset_bytes;
+@@ -183,7 +197,9 @@ static struct {
+ 	bool cache;                             /* boot-arg ufscache=1 */
+ 	bool wait;                              /* boot-arg ufswait=1 */
+ 	bool pwm_two_lanes;                     /* Dali ADT opt-in, evaluated before init */
+-	bool hsg1_requested, hsg1_active;        /* Explicit Dali HS-G1 functional opt-in */
++	bool hsg1_requested, hsg1_active;        /* HS active: retained floor checked at I/O */
++	bool hsg4_requested;                   /* Explicit G4x2 probe or root opt-in */
++	bool hsg4_root, hsg4_root_verified;      /* Root opt-in and pre-write byte comparison */
+ 	bool speed_probe, speed_probe_done;     /* Read-only, pre-root trial */
+ 	bool speed_extended;                   /* Separately opted-in longer reads */
+ 	bool dali;                              /* MT6991 HCI profile from ADT compatible */
+@@ -438,21 +454,89 @@ ufs_dali_speed_flag(const char *key)
+ 	return value == 1;
+ }
+ 
+-/* Bind an extended result to a fresh host-supplied nonce, even with auto-return
+- * disabled. All three boot arguments must be explicitly zero. The run-id is
+- * 32 lowercase ASCII hex bytes without a terminator in the device tree.
++/* Explicit target; 5 is reserved and rejected until a separately reviewed
++ * candidate follows a verified G4x2 trial. Absence never changes the link.
++ */
++static int
++ufs_dali_hs_target(uint32_t *target)
++{
++	DTEntry node;
++	const void *compat = NULL, *prop = NULL;
++	unsigned int size = 0;
++	*target = 0;
++	if (SecureDTLookupEntry(NULL, "/sweet-ufs", &node) != kSuccess ||
++	    SecureDTGetProperty(node, "compatible", &compat, &size) != kSuccess ||
++	    compat == NULL || size < sizeof("mediatek,mt6991-ufshc") ||
++	    memcmp(compat, "mediatek,mt6991-ufshc", sizeof("mediatek,mt6991-ufshc")) != 0)
++		return 0;
++	if (SecureDTGetProperty(node, "dali-hs-target-gear", &prop, &size) != kSuccess)
++		return 0;
++	if (prop == NULL || size != sizeof(*target)) return EINVAL;
++	memcpy(target, prop, sizeof(*target));
++	if (*target == 5) return ENOTSUP;
++	if (*target != 4) return EINVAL;
++	return 0;
++}
++
++/* A root trial requires a second, explicit ADT opt-in. Reject malformed values
++ * rather than silently turning a requested trial into another link mode. */
++static int
++ufs_dali_hsg4_root_requested(bool *requested)
++{
++	DTEntry node;
++	const void *compat = NULL, *prop = NULL;
++	unsigned int size = 0;
++	uint32_t value = 0;
++	*requested = false;
++	if (SecureDTLookupEntry(NULL, "/sweet-ufs", &node) != kSuccess ||
++	    SecureDTGetProperty(node, "compatible", &compat, &size) != kSuccess ||
++	    compat == NULL || size < sizeof("mediatek,mt6991-ufshc") ||
++	    memcmp(compat, "mediatek,mt6991-ufshc", sizeof("mediatek,mt6991-ufshc")) != 0)
++		return 0;
++	if (SecureDTGetProperty(node, "dali-hs-g4-root", &prop, &size) != kSuccess)
++		return 0;
++	if (prop == NULL || size != sizeof(value)) return EINVAL;
++	memcpy(&value, prop, sizeof(value));
++	if (value > 1) return EINVAL;
++	*requested = value == 1;
++	return 0;
++}
++
++/* A malformed read-only/probe property must not be mistaken for "off" and
++ * accidentally turn a requested probe into a writable root boot. This stricter
++ * rule applies only to the new G4 root opt-in, not legacy G1/PWM/probe paths.
+  */
+ static bool
+-ufs_dali_extended_configuration(char run_id[33])
++ufs_dali_hsg4_root_flag_off(DTEntry node, const char *name)
++{
++	const void *prop = NULL;
++	unsigned int size = 0;
++	uint32_t value = 0;
++	if (SecureDTGetProperty(node, name, &prop, &size) != kSuccess) return true;
++	if (prop == NULL || size != sizeof(value)) return false;
++	memcpy(&value, prop, sizeof(value));
++	return value == 0;
++}
++
++static bool
++ufs_dali_hsg4_root_no_conflicts(void)
++{
++	DTEntry node;
++	if (SecureDTLookupEntry(NULL, "/sweet-ufs", &node) != kSuccess) return false;
++	return ufs_dali_hsg4_root_flag_off(node, "dali-hs-g1") &&
++	    ufs_dali_hsg4_root_flag_off(node, "dali-speed-probe") &&
++	    ufs_dali_hsg4_root_flag_off(node, "dali-speed-extended") &&
++	    ufs_dali_hsg4_root_flag_off(node, "dali-pwm-two-lanes");
++}
++
++/* Bind observations to 32 lowercase ASCII hex bytes without a terminator. */
++static bool
++ufs_dali_run_id(char run_id[33])
+ {
+-	uint32_t auto_return = 1, rw = 1, logger = 1;
+ 	DTEntry node;
+ 	const void *prop = NULL;
+ 	unsigned int size = 0;
+-	if (!PE_parse_boot_argn("dalifastboot", &auto_return, sizeof(auto_return)) || auto_return ||
+-	    !PE_parse_boot_argn("ufsrw", &rw, sizeof(rw)) || rw ||
+-	    !PE_parse_boot_argn("sweetlog", &logger, sizeof(logger)) || logger ||
+-	    SecureDTLookupEntry(NULL, "/sweet-ufs", &node) != kSuccess ||
++	if (SecureDTLookupEntry(NULL, "/sweet-ufs", &node) != kSuccess ||
+ 	    SecureDTGetProperty(node, "dali-ufs-run-id", &prop, &size) != kSuccess ||
+ 	    prop == NULL || size != 32) return false;
+ 	const uint8_t *bytes = prop;
+@@ -464,6 +548,56 @@ ufs_dali_extended_configuration(char run_id[33])
+ 	return true;
+ }
+ 
++/* Stronger identity policy applies to optional slot writes, not root admission. */
++static bool
++ufs_dali_log_run_id(char run_id[33])
++{
++	if (!ufs_dali_run_id(run_id)) return false;
++	for (unsigned int i = 0; i < 32; i++) if (run_id[i] != '0') return true;
++	return false;
++}
++
++/* Probe configuration retains the existing explicit read-only contract. */
++static bool
++ufs_dali_extended_configuration(char run_id[33])
++{
++	uint32_t auto_return = 1, rw = 1, logger = 1;
++	if (!PE_parse_boot_argn("dalifastboot", &auto_return, sizeof(auto_return)) || auto_return ||
++	    !PE_parse_boot_argn("ufsrw", &rw, sizeof(rw)) || rw ||
++	    !PE_parse_boot_argn("sweetlog", &logger, sizeof(logger)) || logger) return false;
++	return ufs_dali_run_id(run_id);
++}
++
++/* PE_parse_boot_argn also accepts strings and truncates into the numeric
++ * destination. For this new write-capable opt-in require unambiguous 0/1
++ * string and numeric interpretations; the existing default path is unchanged.
++ */
++static bool
++ufs_dali_root_boot_bool(const char *key, uint32_t *value)
++{
++	char text[4] = {0};
++	uint32_t number = 2;
++	if (!PE_parse_boot_arg_str(key, text, sizeof(text)) ||
++	    (strcmp(text, "0") != 0 && strcmp(text, "1") != 0) ||
++	    !PE_parse_boot_argn(key, &number, sizeof(number)) ||
++	    number != (uint32_t)(text[0] - '0')) return false;
++	*value = number;
++	return true;
++}
++
++static bool
++ufs_dali_hsg4_root_configuration(char run_id[33], uint32_t *rw, uint32_t *logger)
++{
++	uint32_t auto_return = 1, pwm = 0;
++	char pwm_text[4] = {0};
++	if (PE_parse_boot_arg_str("ufspwm", pwm_text, sizeof(pwm_text)) &&
++	    (!ufs_dali_root_boot_bool("ufspwm", &pwm) || pwm != 0)) return false;
++	return ufs_dali_hsg4_root_no_conflicts() &&
++	    ufs_dali_root_boot_bool("dalifastboot", &auto_return) && auto_return == 0 &&
++	    ufs_dali_root_boot_bool("ufsrw", rw) &&
++	    ufs_dali_root_boot_bool("sweetlog", logger) && ufs_dali_run_id(run_id);
++}
++
+ /* Optional Dali-only polling budget; malformed input keeps the old default. */
+ static uint32_t
+ ufs_dali_spin_us(DTEntry node, bool dali)
+@@ -487,6 +621,16 @@ static int
+ ufs_scsi_on_lun_timeout(uint8_t lun, const uint8_t *cdb, unsigned cdb_len,
+ 	uint32_t len, bool write, uint64_t timeout_ns)
+ {
++	/* Fail closed even for an unexpected caller before a G4 transition has
++	 * completed. SYNCHRONIZE CACHE also changes persistence without data-out.
++	 */
++	if (su.hsg4_requested && !su.hsg1_active) {
++		int error = ufs_pwm_reentry_error();
++		if (error) return error;
++	}
++	if ((su.speed_probe || (su.hsg4_requested && !su.hsg1_active) ||
++	    (su.hsg4_root && !su.hsg4_root_verified)) &&
++	    (write || (cdb_len && cdb[0] == 0x35))) return EROFS;
+ 	/* After a verified HS transition retain the adopted AP vote and clock.
+ 	 * Check only at command boundaries: no new DMA/doorbell on a lost floor.
+ 	 */
+@@ -681,6 +825,17 @@ ufs_scsi(const uint8_t *cdb, unsigned cdb_len, uint32_t len, bool write)
+     uint64_t begin = observe ? mach_absolute_time() : 0;
+ #endif
+     int result = ufs_scsi_on_lun_timeout(su.lun, cdb, cdb_len, len, write, CMD_TIMEOUT_NS);
++    /* G4 root I/O errors are terminal for this boot: do not submit another
++     * command to an uncertain link or silently retry a possibly partial write.
++     * Existing G1 behaviour and read-only probe completion are unchanged.
++     */
++    if (result && su.hsg4_requested && !su.speed_probe && su.hsg1_active) {
++        if (!ufs_pwm_reentry_error())
++            printf("SWEET UFS HSG4 IO: op=0x%02x write=%u error=%d poisoned=%u retry=0\n",
++                cdb_len ? (unsigned int)cdb[0] : 0u, write ? 1u : 0u, result,
++                su.command_poisoned ? 1u : 0u);
++        result = ufs_pwm_failure(result);
++    }
+ #if DEVELOPMENT
+     if (observe && sweet_ufs_load_open()) {
+         uint64_t end = mach_absolute_time();
+@@ -1093,6 +1248,298 @@ ufs_log_region_available(uint64_t first)
+ 	return true;
+ }
+ 
++/* Match exactly the legacy discovery parser, including its non-ASCII stop. */
++static bool
++ufs_gpt_name_legacy_match(const uint8_t *entry, const char *name)
++{
++	for (unsigned int i = 0; i < 36; i++) {
++		uint16_t ch = (uint16_t)(entry[56 + 2 * i] | entry[57 + 2 * i] << 8);
++		if (ch == 0 || ch > 0x7f) return name[i] == '\0';
++		if (ch != (uint8_t)name[i]) return false;
++	}
++	return name[36] == '\0';
++}
++
++/* Exact ASCII partition name encoded as zero-padded GPT UTF-16LE. */
++static bool
++ufs_gpt_name_exact(const uint8_t *entry, const char *name)
++{
++	bool ended = false;
++	for (unsigned int i = 0; i < 36; i++) {
++		uint16_t ch = (uint16_t)(entry[56 + 2 * i] | entry[57 + 2 * i] << 8);
++		if (!ended && *name == '\0') ended = true;
++		if (ended) {
++			if (ch != 0) return false;
++		} else if (ch != (uint8_t)*name++) return false;
++	}
++	return ended || *name == '\0';
++}
++
++/* Validate optional logging metadata independently of the legacy root parser.
++ * A CRC is corruption detection, not authentication or device identity. This is
++ * called with the UFS mutex held, only after the G4 comparison has succeeded.
++ */
++static int
++ufs_dali_validate_log_gpt(void)
++{
++	uint8_t *b = (uint8_t *)(su.dma + DMA_BOUNCE);
++	uint64_t expected_first = su.log_first_block;
++	uint64_t entries_lba, first_usable, last_usable, current, backup;
++	uint32_t revision, reserved, header_size, header_crc, nent, esz, entries_crc;
++	int error = ufs_read_blocks(1, 1);
++	if (error) return error;
++	if (memcmp(b, "EFI PART", 8) != 0) goto invalid;
++	memcpy(&revision, b + 8, 4);
++	memcpy(&header_size, b + 12, 4);
++	memcpy(&header_crc, b + 16, 4);
++	memcpy(&reserved, b + 20, 4);
++	memcpy(&current, b + 24, 8);
++	memcpy(&backup, b + 32, 8);
++	memcpy(&first_usable, b + 40, 8);
++	memcpy(&last_usable, b + 48, 8);
++	memcpy(&entries_lba, b + 72, 8);
++	memcpy(&nent, b + 80, 4);
++	memcpy(&esz, b + 84, 4);
++	memcpy(&entries_crc, b + 88, 4);
++	if (revision != 0x00010000 || reserved != 0 || header_size < 92 ||
++	    header_size > UFS_BLOCK || current != 1 || !su.capacity_valid ||
++	    backup != su.capacity_blocks - 1 || backup <= last_usable ||
++	    first_usable > last_usable || last_usable >= su.capacity_blocks ||
++	    esz != 128 || nent == 0 || nent > 256 || (uint64_t)nent * esz > BOUNCE_SIZE) goto invalid;
++	bzero(b + 16, 4);
++	uint32_t computed = crc32(0, b, header_size);
++	if (computed != header_crc) goto invalid;
++	if (memcmp(b + 56, su.gpt_disk_guid, sizeof(su.gpt_disk_guid)) != 0) goto root_changed;
++	uint64_t entry_bytes = (uint64_t)nent * esz;
++	uint32_t entry_blocks = (uint32_t)((entry_bytes + UFS_BLOCK - 1) / UFS_BLOCK);
++	if (entries_lba < 2 || entries_lba >= first_usable ||
++	    entry_blocks > first_usable - entries_lba) goto invalid;
++	error = ufs_read_blocks(entries_lba, entry_blocks);
++	if (error) return error;
++	if (crc32(0, b, (size_t)entry_bytes) != entries_crc) goto invalid;
++	uint64_t log_first = 0, log_last = 0;
++	unsigned int roots = 0, logs = 0;
++	for (uint32_t i = 0; i < nent; i++) {
++		const uint8_t *e = b + (uint64_t)i * esz;
++		bool used = false;
++		for (unsigned int j = 0; j < 16; j++) used |= e[j] != 0;
++		if (!used) continue;
++		uint64_t first, last;
++		memcpy(&first, e + 32, 8);
++		memcpy(&last, e + 40, 8);
++		if (last < first || first < first_usable || last > last_usable) goto invalid;
++		if (ufs_gpt_name_exact(e, "unixnu_data")) {
++			roots++;
++			if (first != su.first_block || first != su.root_gpt_first ||
++			    last != su.root_gpt_last ||
++			    su.nblocks != MIN(last - first + 1, DALI_ROOT_MAX_BLOCKS) ||
++			    memcmp(e, su.root_gpt_type, sizeof(su.root_gpt_type)) != 0 ||
++			    memcmp(e + 16, su.root_gpt_guid, sizeof(su.root_gpt_guid)) != 0)
++				goto root_changed;
++		}
++		if (ufs_gpt_name_exact(e, "unixnu_logs")) {
++			logs++;
++			log_first = first;
++			log_last = last;
++		}
++	}
++	if (roots != 1) goto root_changed;
++	/* Root-involving overlaps are fatal even if logging metadata is invalid.
++	 * Other overlaps only disable the optional logger.
++	 */
++	bool unrelated_overlap = false;
++	/* Reject any used-entry overlap, not only overlap with the log. */
++	for (uint32_t i = 0; i < nent; i++) {
++		const uint8_t *e = b + (uint64_t)i * esz;
++		bool used = false;
++		for (unsigned int k = 0; k < 16; k++) used |= e[k] != 0;
++		if (!used) continue;
++		uint64_t first, last;
++		memcpy(&first, e + 32, 8);
++		memcpy(&last, e + 40, 8);
++		for (uint32_t j = i + 1; j < nent; j++) {
++			const uint8_t *other = b + (uint64_t)j * esz;
++			bool other_used = false;
++			for (unsigned int k = 0; k < 16; k++) other_used |= other[k] != 0;
++			if (!other_used) continue;
++			uint64_t other_first, other_last;
++			memcpy(&other_first, other + 32, 8);
++			memcpy(&other_last, other + 40, 8);
++			if (first <= other_last && other_first <= last) {
++				if (ufs_gpt_name_exact(e, "unixnu_data") ||
++				    ufs_gpt_name_exact(other, "unixnu_data")) goto root_changed;
++				unrelated_overlap = true;
++			}
++		}
++	}
++	if (unrelated_overlap || logs != 1 || su.lun != DALI_LOG_LUN ||
++	    log_first != DALI_LOG_FIRST_BLOCK || log_last - log_first + 1 != DALI_LOG_PART_BLOCKS ||
++	    expected_first != log_first + DALI_LOG_OFFSET_BYTES / UFS_BLOCK) goto invalid;
++	return 0;
++root_changed:
++	su.log_first_block = su.log_nblocks = 0;
++	su.log_partition_ready = false;
++	printf("SWEET UFS: CRC-valid GPT contradicts selected root identity or extent\n");
++	return EPROTO;
++invalid:
++	su.log_first_block = su.log_nblocks = 0;
++	su.log_partition_ready = false;
++	printf("SWEET LOG: G4 GPT validation failed; persistent logging disabled\n");
++	return 0;
++}
++
++/* Recognize an existing slot, but never reuse it or certify its payload. */
++static bool
++ufs_dali_known_log_header(const uint8_t *b)
++{
++	uint32_t version, size, check;
++	uint64_t total, seq;
++	if (memcmp(b, "SWEETLOG", 8) != 0) return false;
++	memcpy(&version, b + 8, 4); memcpy(&size, b + 12, 4);
++	memcpy(&total, b + 16, 8); memcpy(&seq, b + 24, 8);
++	if (version != 1 || size != SWEET_LOG_SIZE || total == 0 || seq == 0) return false;
++	bool v1 = memcmp(b + 32, "SWIDv001", 8) == 0;
++	bool v2 = memcmp(b + 32, "SWIDv002", 8) == 0;
++	if (v1 || v2) {
++		for (unsigned int i = 40; i < 72; i++)
++			if (!((b[i] >= '0' && b[i] <= '9') || (b[i] >= 'a' && b[i] <= 'f'))) return false;
++		uint32_t checksum_offset = v2 ? 88 : 72;
++		memcpy(&check, b + checksum_offset, 4);
++		return crc32(0, b, checksum_offset) == check;
++	}
++	for (unsigned int i = 32; i < 92; i++) if (b[i] != 0) return false;
++	return true;
++}
++
++/* All deadlines are absolute; false rejects an unusable or overflowing clock. */
++static bool
++ufs_dali_deadline_after(uint64_t timeout_ns, uint64_t *deadline)
++{
++	uint64_t span = 0;
++	nanoseconds_to_absolutetime(timeout_ns, &span);
++	uint64_t now = mach_absolute_time();
++	if (span == 0 || now > UINT64_MAX - span) return false;
++	*deadline = now + span;
++	return true;
++}
++
++/* A full or visibly unknown region can be disabled after only three header
++ * reads; a possible free slot still requires the complete PWM/G4 digest.
++ */
++static int
++ufs_dali_log_candidate_present(bool *maybe, uint64_t deadline, const char run_id[33])
++{
++	const uint8_t *b = (const uint8_t *)(su.dma + DMA_BOUNCE);
++	*maybe = false;
++	if (su.log_nblocks < (uint64_t)DALI_LOG_SLOT_COUNT * SWEET_LOG_BLOCKS) return 0;
++	for (uint32_t slot = 0; slot < DALI_LOG_SLOT_COUNT; slot++) {
++		if (mach_absolute_time() >= deadline) return ETIMEDOUT;
++		int error = ufs_read_blocks(su.log_first_block + (uint64_t)slot * SWEET_LOG_BLOCKS, 1);
++		if (error) return error;
++		if (mach_absolute_time() >= deadline) return ETIMEDOUT;
++		if (ufs_dali_known_log_header(b)) {
++			if ((memcmp(b + 32, "SWIDv001", 8) == 0 ||
++			    memcmp(b + 32, "SWIDv002", 8) == 0) &&
++			    memcmp(b + 40, run_id, 32) == 0) {
++				printf("SWEET LOG: image run ID already retained; logging disabled\n");
++				*maybe = false;
++				return 0;
++			}
++			continue;
++		}
++		if (slot == 0) { *maybe = false; return 0; }
++		for (uint32_t i = 0; i < UFS_BLOCK; i++) {
++			if (b[i] != 0) { *maybe = false; return 0; }
++		}
++		*maybe = true;
++	}
++	return mach_absolute_time() >= deadline ? ETIMEDOUT : 0;
++}
++
++/* Full PWM reference over all candidate bytes, with the UFS mutex held. */
++static int
++ufs_dali_log_pwm_digest(uint8_t digest[SHA256_DIGEST_LENGTH], uint64_t deadline)
++{
++	const uint8_t *b = (const uint8_t *)(su.dma + DMA_BOUNCE);
++	SHA256_CTX context;
++	SHA256_Init(&context);
++	for (uint32_t done = 0; done < DALI_LOG_SLOT_COUNT * SWEET_LOG_BLOCKS;) {
++		if (mach_absolute_time() >= deadline) return ETIMEDOUT;
++		uint32_t n = MIN(DALI_LOG_SLOT_COUNT * SWEET_LOG_BLOCKS - done, BOUNCE_SIZE / UFS_BLOCK);
++		int error = ufs_read_blocks(su.log_first_block + done, n);
++		if (error) return error;
++		SHA256_Update(&context, b, n * UFS_BLOCK);
++		if (mach_absolute_time() >= deadline) return ETIMEDOUT;
++		done += n;
++	}
++	SHA256_Final(digest, &context);
++	return mach_absolute_time() >= deadline ? ETIMEDOUT : 0;
++}
++
++/* Only explicit sweetlogslots=1 may claim an unused slot. A recognized slot 0
++ * anchors the format; unknown/partial data anywhere in the three-slot extent
++ * disables logging. Zero bytes alone do not establish ownership. The G4 digest
++ * covers the same bytes used for classification and must match PWM.
++ */
++static int
++ufs_dali_select_log_slot(const uint8_t reference[SHA256_DIGEST_LENGTH], uint64_t deadline,
++    const char run_id[33])
++{
++	uint64_t first = su.log_first_block, blocks = su.log_nblocks;
++	const uint8_t *b = (const uint8_t *)(su.dma + DMA_BOUNCE);
++	uint32_t chosen = DALI_LOG_SLOT_COUNT;
++	bool usable = true;
++	SHA256_CTX context;
++	uint8_t digest[SHA256_DIGEST_LENGTH];
++	SHA256_Init(&context);
++	su.log_first_block = 0;
++	su.log_nblocks = 0;
++	su.log_partition_ready = false;
++	if (blocks < (uint64_t)DALI_LOG_SLOT_COUNT * SWEET_LOG_BLOCKS) goto unavailable;
++	for (uint32_t slot = 0; slot < DALI_LOG_SLOT_COUNT; slot++) {
++		uint64_t offset = (uint64_t)slot * SWEET_LOG_BLOCKS;
++		bool known = false, empty = true;
++		for (uint32_t done = 0; done < SWEET_LOG_BLOCKS;) {
++			if (mach_absolute_time() >= deadline) return ETIMEDOUT;
++			uint32_t n = MIN(SWEET_LOG_BLOCKS - done, BOUNCE_SIZE / UFS_BLOCK);
++			int error = ufs_read_blocks(first + offset + done, n);
++			if (error) return error;
++			SHA256_Update(&context, b, n * UFS_BLOCK);
++			if (mach_absolute_time() >= deadline) return ETIMEDOUT;
++			if (done == 0 && ufs_dali_known_log_header(b)) {
++				known = true;
++				if ((memcmp(b + 32, "SWIDv001", 8) == 0 ||
++				    memcmp(b + 32, "SWIDv002", 8) == 0) &&
++				    memcmp(b + 40, run_id, 32) == 0) usable = false;
++			}
++			if (!known && empty) {
++				for (uint32_t i = 0; i < n * UFS_BLOCK; i++) {
++					if (b[i] != 0) { empty = false; break; }
++				}
++			}
++			done += n;
++		}
++		if ((slot == 0 && !known) || (!known && !empty)) usable = false;
++		if (!known && empty && chosen == DALI_LOG_SLOT_COUNT) chosen = slot;
++	}
++	SHA256_Final(digest, &context);
++	if (mach_absolute_time() >= deadline) return ETIMEDOUT;
++	if (memcmp(digest, reference, sizeof(digest)) != 0) {
++		printf("SWEET LOG: PWM/G4 slot digest mismatch; no log writes\n");
++		return EIO;
++	}
++	if (!usable || chosen == DALI_LOG_SLOT_COUNT) goto unavailable;
++	su.log_first_block = first + (uint64_t)chosen * SWEET_LOG_BLOCKS;
++	su.log_nblocks = SWEET_LOG_BLOCKS;
++	su.log_partition_ready = true;
++	printf("SWEET LOG: G4 slot=%u initially empty; old slots retained; ring wraps at 4 MiB\n", chosen);
++	return 0;
++
++unavailable:
++	printf("SWEET LOG: missing ownership, unknown data, or no empty slot; logging disabled\n");
++	return 0;
++}
++
+ /*
+  * WRITE(10) of count device blocks from the bounce buffer to lba. The range
+  * must lie inside the exposed root view, which caps Dali unixnu_data at 16 GiB.
+@@ -1177,6 +1624,7 @@ ufs_find_partitions(const char *root_want, const char *log_want)
+ 	memcpy(&entry_lba, b + 72, 8);
+ 	memcpy(&nent, b + 80, 4);
+ 	memcpy(&esz, b + 84, 4);
++	if (su.dali && su.hsg4_root) memcpy(su.gpt_disk_guid, b + 56, sizeof(su.gpt_disk_guid));
+ 	uint64_t entry_bytes = (uint64_t)nent * esz;
+ 	if (header_size < 92 || header_size > UFS_BLOCK || first_usable > last_usable ||
+ 	    last_usable >= su.capacity_blocks || esz != 128 || nent == 0 ||
+@@ -1231,6 +1679,12 @@ ufs_find_partitions(const char *root_want, const char *log_want)
+ 			root_found = true;
+ 			root_first = first;
+ 			root_last = last;
++			if (su.dali && su.hsg4_root) {
++				su.root_gpt_first = first;
++				su.root_gpt_last = last;
++				memcpy(su.root_gpt_type, e, sizeof(su.root_gpt_type));
++				memcpy(su.root_gpt_guid, e + 16, sizeof(su.root_gpt_guid));
++			}
+ 		}
+ 		if (is_log) {
+ 			if (log_found) {
+@@ -1246,6 +1700,30 @@ ufs_find_partitions(const char *root_want, const char *log_want)
+ 		printf("SWEET UFS: no GPT root partition named \"%s\"\n", root_want);
+ 		return ENOENT;
+ 	}
++	/* Do not let discovery hide root/log overlap before the strict optional
++	 * GPT validator has a chance to run. Cover every legacy-matched log entry,
++	 * including duplicates and root-after-log ordering. This guard is limited
++	 * to explicit Dali G4 log requests; other root modes keep their old policy.
++	 */
++	uint32_t logger = 0, slots = 0;
++	bool strict_log_overlap = su.dali && su.hsg4_root && log_want[0] &&
++	    ufs_dali_root_boot_bool("sweetlog", &logger) && logger == 1 &&
++	    ufs_dali_root_boot_bool("sweetlogslots", &slots) && slots == 1;
++	if (strict_log_overlap) {
++		for (uint32_t i = 0; i < nent; i++) {
++			const uint8_t *e = b + (uint64_t)i * esz;
++			bool used = false;
++			for (unsigned int j = 0; j < 16; j++) used |= e[j] != 0;
++			if (!used || !ufs_gpt_name_legacy_match(e, log_want)) continue;
++			uint64_t first, last;
++			memcpy(&first, e + 32, 8);
++			memcpy(&last, e + 40, 8);
++			if (root_first <= last && first <= root_last) {
++				printf("SWEET UFS: root/log GPT overlap during explicit log request\n");
++				return EPROTO;
++			}
++		}
++	}
+ 	su.first_block = root_first;
+ 	su.nblocks = root_last - root_first + 1;
+ 	if (su.dali && strcmp(root_want, "unixnu_data") == 0) {
+@@ -1263,6 +1741,14 @@ ufs_find_partitions(const char *root_want, const char *log_want)
+ 		    su.log_offset_bytes / UFS_BLOCK >= log_last - log_first + 1 ||
+ 		    log_last - log_first + 1 - su.log_offset_bytes / UFS_BLOCK < SWEET_LOG_BLOCKS) {
+ 			printf("SWEET UFS: unsafe/undersized log partition \"%s\"; logging disabled\n", log_want);
++		} else if (su.dali && su.hsg4_root) {
++			/* Defer empty-slot reads until the HS compare has succeeded. */
++			su.log_first_block = log_first + su.log_offset_bytes / UFS_BLOCK;
++			su.log_nblocks = MIN(log_last - log_first + 1 - su.log_offset_bytes / UFS_BLOCK,
++			    DALI_LOG_SPAN_BLOCKS);
++		} else if (su.dali) {
++			/* Legacy Dali would reuse slot 0, destroying a previous boot. */
++			printf("SWEET LOG: non-G4 Dali persistent logging disabled to preserve slots\n");
+ 		} else if (!ufs_log_region_available(log_first + su.log_offset_bytes / UFS_BLOCK)) {
+ 			/* The helper reports the read failure or unrecognized content. */
+ 		} else {
+@@ -1675,6 +2161,30 @@ ufs_pwm_clock_cap(void)
+ static uint32_t sweet_ufs_pwm_terminal;
+ static uint32_t sweet_ufs_pwm_root_control; /* 0 unclaimed, 1 active, 2 complete */
+ 
++/* HSG4_DIAG_BEGIN
++ * G4 probe or root trial; transition updates hold sweet_ufs_lock, and its one terminal
++ * re-emission is after unlock under the retained root-entry claim. Values are
++ * already-observed, never additional UIC or post-error MMIO reads.
++ * Mode masks use bit0=G1B/0x44 and bit1=G4B/0x11.
++ */
++struct sweet_hsg4_diagnostic {
++    const char *phase, *operation, *endpoint, *expectation;
++    uint32_t attribute, expected_min, expected_max, observed;
++    bool expected_valid, observed_valid;
++    bool first_error_valid, terminal_reemitted;
++    int first_error;
++    uint32_t avail_rx[2], avail_tx[2], unipro_version[2];
++    uint32_t pmc_submitted, pmc_completed, pmc_acknowledged, pmc_idle_ok;
++    uint32_t pmc_mode, pmc_polls, pmc_status, pmc_hcs, pmc_arg2, pmc_ack_status;
++    const char *pmc_failure_stage;
++    int pmc_error;
++    bool pmc_sampled, pmc_arg2_valid, pmc_uccs, pmc_upms, pmc_ack_status_valid;
++};
++static struct sweet_hsg4_diagnostic sweet_hsg4_diag;
++/* HSG4_DIAG_END */
++static void ufs_hsg4_report(int error);
++static void ufs_hsg4_post_probe_error(int error);
++
+ /* One indivisible, first-error-wins publication: errno<<1 | uncertain.
+  * Known failure does not authorize retry. This is independent of DMA poison.
+  */
+@@ -1724,6 +2234,13 @@ ufs_pwm_root_leave(bool guard, int error)
+     if (!guard) return;
+     if (error) {
+         (void)ufs_pwm_failure(error); /* root control remains claimed until reboot. */
++        /* Ramoops drops contended chunks. Re-emit the same frozen first error
++         * once on the terminal path, without any UFS I/O, retry or wait. */
++        if (su.hsg4_requested && sweet_hsg4_diag.first_error_valid &&
++            !sweet_hsg4_diag.terminal_reemitted) {
++            sweet_hsg4_diag.terminal_reemitted = true;
++            ufs_hsg4_report(sweet_hsg4_diag.first_error);
++        }
+     } else {
+         os_atomic_store(&sweet_ufs_pwm_root_control, 2u, release);
+     }
+@@ -1832,11 +2349,39 @@ ufs_pwm_set(uint32_t attribute, uint32_t value, uint64_t until)
+     return ufs_pwm_observe_guard("set", "guard-post", attribute);
+ }
+ 
++/* The vendor sync-length fix needs DME_PEER_SET, with the same guards and
++ * completion/ACK rules as a local SET. PA_PWRMODE is never a peer SET. */
++static int
++ufs_pwm_peer_set(uint32_t attribute, uint32_t value, uint64_t until)
++{
++    if (mach_absolute_time() >= until) return ufs_pwm_observe_error("peer-set", "deadline-pre", attribute, ETIMEDOUT);
++    if (attribute == 0x1571) return ufs_pwm_observe_error("peer-set", "bad-attribute", attribute, EINVAL);
++    int error = ufs_pwm_observe_guard("peer-set", "guard-pre", attribute);
++    if (error) return error;
++    error = ufs_mtk_uic("hs-peer-set", 4, attribute, &value);
++    if (error) return ufs_pwm_observe_error("peer-set", "uic", attribute, error);
++    if (mach_absolute_time() >= until) return ufs_pwm_observe_error("peer-set", "deadline-post", attribute, ETIMEDOUT);
++    return ufs_pwm_observe_guard("peer-set", "guard-post", attribute);
++}
++
+ static int
+ ufs_pwm_pmc_observe(const char *stage, uint32_t mode, unsigned int polls,
+     bool sampled, uint32_t status, uint32_t hcs, bool arg2_read, uint32_t arg2,
+     const struct sweet_pwm_completion *completion, int error)
+ {
++    if (su.hsg4_requested) {
++        sweet_hsg4_diag.pmc_failure_stage = stage;
++        sweet_hsg4_diag.pmc_error = error;
++        sweet_hsg4_diag.pmc_mode = mode;
++        sweet_hsg4_diag.pmc_polls = polls;
++        sweet_hsg4_diag.pmc_sampled = sampled;
++        sweet_hsg4_diag.pmc_status = status;
++        sweet_hsg4_diag.pmc_hcs = hcs;
++        sweet_hsg4_diag.pmc_arg2_valid = arg2_read;
++        sweet_hsg4_diag.pmc_arg2 = arg2;
++        sweet_hsg4_diag.pmc_uccs = completion->uccs;
++        sweet_hsg4_diag.pmc_upms = completion->upms;
++    }
+     printf("SWEET UFS PWM RAW: pmc stage=%s mode=0x%x error=%d polls=%u "
+         "sampled=%u IS=0x%x HCS=0x%x arg2_read=%u ARG2=0x%x uccs=%u upms=%u\n",
+         stage, mode, error, polls, sampled ? 1u : 0u, status, hcs,
+@@ -1851,13 +2396,43 @@ ufs_pwm_pmc_observe(const char *stage, uint32_t mode, unsigned int polls,
+ static int
+ ufs_pwm_pmc(uint32_t mode, uint64_t until)
+ {
+-    if (mach_absolute_time() >= until) return ufs_pwm_observe_error("pmc", "deadline-pre", 0x1571, ETIMEDOUT);
+-    if (mode != 0x22 && mode != 0x55 && mode != 0x44) return ufs_pwm_observe_error("pmc", "bad-mode", 0x1571, EINVAL);
++    uint32_t hsg4_bit = mode == 0x44 ? 1u : mode == 0x11 ? 2u : 0u;
++    if (su.hsg4_requested && hsg4_bit) {
++        sweet_hsg4_diag.pmc_mode = mode;
++        sweet_hsg4_diag.pmc_failure_stage = "none";
++        sweet_hsg4_diag.pmc_error = 0;
++        sweet_hsg4_diag.pmc_polls = sweet_hsg4_diag.pmc_status = 0;
++        sweet_hsg4_diag.pmc_hcs = sweet_hsg4_diag.pmc_arg2 = 0;
++        sweet_hsg4_diag.pmc_ack_status = 0;
++        sweet_hsg4_diag.pmc_sampled = sweet_hsg4_diag.pmc_arg2_valid = false;
++        sweet_hsg4_diag.pmc_uccs = sweet_hsg4_diag.pmc_upms = false;
++        sweet_hsg4_diag.pmc_ack_status_valid = false;
++    }
++    if (mach_absolute_time() >= until) {
++        if (su.hsg4_requested && hsg4_bit) {
++            sweet_hsg4_diag.pmc_failure_stage = "deadline-pre";
++            sweet_hsg4_diag.pmc_error = ETIMEDOUT;
++        }
++        return ufs_pwm_observe_error("pmc", "deadline-pre", 0x1571, ETIMEDOUT);
++    }
++    if (mode != 0x22 && mode != 0x55 && mode != 0x44 && mode != 0x11) return ufs_pwm_observe_error("pmc", "bad-mode", 0x1571, EINVAL);
+     int error = ufs_pwm_observe_guard("pmc", "guard-pre", 0x1571);
+-    if (error) return error;
++    if (error) {
++        if (su.hsg4_requested && hsg4_bit) {
++            sweet_hsg4_diag.pmc_failure_stage = "guard-pre";
++            sweet_hsg4_diag.pmc_error = error;
++        }
++        return error;
++    }
+     uint64_t span = 0, now = mach_absolute_time();
+     nanoseconds_to_absolutetime(500ull * NSEC_PER_MSEC, &span);
+-    if (span == 0 || now > UINT64_MAX - span) return ufs_pwm_observe_error("pmc", "bad-deadline", 0x1571, ETIMEDOUT);
++    if (span == 0 || now > UINT64_MAX - span) {
++        if (su.hsg4_requested && hsg4_bit) {
++            sweet_hsg4_diag.pmc_failure_stage = "bad-deadline";
++            sweet_hsg4_diag.pmc_error = ETIMEDOUT;
++        }
++        return ufs_pwm_observe_error("pmc", "bad-deadline", 0x1571, ETIMEDOUT);
++    }
+     uint64_t deadline = now + span;
+     if (until < deadline) deadline = until;
+     struct sweet_pwm_completion completion = {0};
+@@ -1868,6 +2443,10 @@ ufs_pwm_pmc(uint32_t mode, uint64_t until)
+     ufs_wr(REG_UICCMDARG2, 0);
+     ufs_wr(REG_UICCMDARG3, mode);
+     ufs_wr(REG_UICCMD, 2); /* DME_SET */
++    if (su.hsg4_requested && hsg4_bit) {
++        /* Record the MMIO submission without console I/O in the polling window. */
++        sweet_hsg4_diag.pmc_submitted |= hsg4_bit;
++    }
+     for (polls = 0; polls < 50001; ++polls) {
+         if (mach_absolute_time() >= deadline)
+             return ufs_pwm_pmc_observe("deadline", mode, polls, sampled, last_status, last_hcs,
+@@ -1884,6 +2463,7 @@ ufs_pwm_pmc(uint32_t mode, uint64_t until)
+             return ufs_pwm_pmc_observe("completion", mode, polls, sampled, last_status, last_hcs,
+                 arg2_read, last_arg2, &completion, EIO);
+         if (q == SWEET_PWM_STEP_DONE) {
++            if (su.hsg4_requested && hsg4_bit) sweet_hsg4_diag.pmc_completed |= hsg4_bit;
+             /* Check ownership/readiness again before consuming our completion. */
+             error = ufs_pwm_idle();
+             if (error)
+@@ -1891,15 +2471,35 @@ ufs_pwm_pmc(uint32_t mode, uint64_t until)
+                     arg2_read, last_arg2, &completion, error);
+             ufs_wr(REG_IS, SWEET_PWM_UCCS | SWEET_PWM_UPMS);
+             status = ufs_rd(REG_IS);
++            if (su.hsg4_requested && hsg4_bit) {
++                sweet_hsg4_diag.pmc_ack_status = status;
++                sweet_hsg4_diag.pmc_ack_status_valid = true;
++            }
+             if (status != 0) {
+                 printf("SWEET UFS PWM RAW: pmc ack IS=0x%x\n", status);
+                 return ufs_pwm_pmc_observe("ack", mode, polls, sampled, last_status, last_hcs,
+                     arg2_read, last_arg2, &completion, EIO);
+             }
++            if (su.hsg4_requested && hsg4_bit) sweet_hsg4_diag.pmc_acknowledged |= hsg4_bit;
+             error = ufs_pwm_idle();
+             if (error)
+                 return ufs_pwm_pmc_observe("idle-post-ack", mode, polls, sampled, last_status, last_hcs,
+                     arg2_read, last_arg2, &completion, error);
++            if (su.hsg4_requested && hsg4_bit) {
++                sweet_hsg4_diag.pmc_idle_ok |= hsg4_bit;
++                sweet_hsg4_diag.pmc_polls = polls;
++                sweet_hsg4_diag.pmc_sampled = sampled;
++                sweet_hsg4_diag.pmc_status = last_status;
++                sweet_hsg4_diag.pmc_hcs = last_hcs;
++                sweet_hsg4_diag.pmc_arg2_valid = arg2_read;
++                sweet_hsg4_diag.pmc_arg2 = last_arg2;
++                sweet_hsg4_diag.pmc_uccs = completion.uccs;
++                sweet_hsg4_diag.pmc_upms = completion.upms;
++                printf("SWEET UFS HSG4 PMC: event=completed mode=0x%x "
++                    "polls=%u IS=0x%x HCS=0x%x ARG2=0x%x uccs=%u upms=%u ack=0x%x idle=1\n",
++                    mode, polls, last_status, last_hcs, last_arg2,
++                    completion.uccs ? 1u : 0u, completion.upms ? 1u : 0u, status);
++            }
+             return 0;
+         }
+         delay(10);
+@@ -2655,6 +3255,10 @@ sweet_ufs_init(void)
+ 	uint32_t lun = 0;
+ 	uint32_t const *lun_prop = NULL;
+ 	unsigned int lun_size = 0;
++	uint8_t log_pwm_digest[SHA256_DIGEST_LENGTH];
++	uint64_t log_scan_until = 0;
++	char log_run_id[33] = {0};
++	bool log_slot_optin = false, log_gpt_validated = false, log_digest_valid = false;
+ 	int error;
+ 
+ 	su.failure_stage = "adt-node";
+@@ -2694,6 +3298,17 @@ sweet_ufs_init(void)
+ 	    memcmp(compatible, "mediatek,mt6991-ufshc", sizeof("mediatek,mt6991-ufshc")) == 0) {
+ 		su.dali = true;
+ 	}
++	if (su.dali && su.hsg4_root) {
++		uint32_t logger = 0, slots = 0;
++		log_slot_optin = ufs_dali_root_boot_bool("sweetlog", &logger) && logger == 1 &&
++		    ufs_dali_root_boot_bool("sweetlogslots", &slots) && slots == 1;
++		if (log_slot_optin && !ufs_dali_log_run_id(log_run_id)) {
++			log_slot_optin = false;
++			printf("SWEET LOG: invalid or all-zero image run ID; logging disabled\n");
++		}
++		if (logger == 1 && !log_slot_optin)
++			printf("SWEET LOG: explicit sweetlogslots=1 and nonzero run ID required; logging disabled\n");
++	}
+ 	su.spin_us = ufs_dali_spin_us(node, su.dali);
+ 	if (su.dali && su.wait) {
+ 		printf("SWEET UFS: bounded command poll spin=%u us\n", su.spin_us);
+@@ -2712,18 +3327,21 @@ sweet_ufs_init(void)
+ 	}
+ 	if (su.dali) {
+ 		su.failure_stage = "dali-log-offset";
+-		if (SecureDTGetProperty(node, "log-offset", (void const **)&log_offset_prop,
+-		    &log_offset_size) != kSuccess || log_offset_prop == NULL ||
+-		    log_offset_size != sizeof(su.log_offset_bytes)) {
+-			printf("SWEET UFS: missing Dali log partition offset\n");
+-			return ENXIO;
+-		}
+-		memcpy(&su.log_offset_bytes, log_offset_prop, sizeof(su.log_offset_bytes));
+-		if (su.log_offset_bytes % UFS_BLOCK) {
+-			printf("SWEET UFS: Dali log partition offset is not block aligned\n");
+-			return EINVAL;
++		bool offset_present = SecureDTGetProperty(node, "log-offset", (void const **)&log_offset_prop,
++		    &log_offset_size) == kSuccess && log_offset_prop != NULL &&
++		    log_offset_size == sizeof(su.log_offset_bytes);
++		if (offset_present) memcpy(&su.log_offset_bytes, log_offset_prop, sizeof(su.log_offset_bytes));
++		bool offset_valid = offset_present && su.log_offset_bytes % UFS_BLOCK == 0 &&
++		    (!su.hsg4_root || su.log_offset_bytes == DALI_LOG_OFFSET_BYTES);
++		if (!offset_valid) {
++			if (!su.hsg4_root) return offset_present ? EINVAL : ENXIO;
++			/* Optional logging metadata must not prevent the normal G4 root. */
++			printf("SWEET LOG: invalid Dali offset; persistent logging disabled\n");
++			su.log_partition_configured = false;
++			su.log_partition_name[0] = log_want[0] = '\0';
++		} else {
++			printf("SWEET UFS: Dali log data offset=%llu MiB\n", su.log_offset_bytes >> 20);
+ 		}
+-		printf("SWEET UFS: Dali log data offset=%llu MiB\n", su.log_offset_bytes >> 20);
+ 	}
+ 	su.failure_stage = "hci-range";
+ 	if (su.dali && (reg[0] != DALI_UFS_HCI_BASE ||
+@@ -2783,22 +3401,28 @@ sweet_ufs_init(void)
+ 	su.lun = (uint8_t)lun;
+ 	su.secsize = DEV_BSIZE;
+ 
+-	/* Allocate before the UFS lock; 4MiB normally or 64MiB for extended.
+-	 * The permanent reference lives until reboot. No BSD node is exposed.
++	/* Allocate before the UFS lock; probe mode keeps its old permanent 4/64MiB
++	 * allocation. G4 root uses a temporary 4MiB CPU-only comparison buffer; the
++	 * controller DMA points at the separate permanent bounce buffer, never this
++	 * reference, so it remains safe to free even if a command times out.
+ 	 */
+ 	vm_offset_t speed_reference = 0;
++	size_t reference_size = 0;
+ 	uint64_t speed_until = 0;
+ 	struct dali_speed_sample speed_before = {0}, speed_after = {0};
+-	if (su.speed_probe) {
++	if (su.speed_probe || su.hsg4_root) {
+ 		su.failure_stage = "speed-probe-allocate";
+-		size_t reference_size = su.speed_extended ? DALI_EXT_WINDOW_BYTES : DALI_SPEED_BYTES;
++		reference_size = su.speed_extended ? DALI_EXT_WINDOW_BYTES : DALI_SPEED_BYTES;
+ 		if (kmem_alloc(kernel_map, &speed_reference, reference_size,
+-		    KMA_DATA | KMA_ZERO | KMA_PERMANENT, VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS)
++		    KMA_DATA | KMA_ZERO | (su.speed_probe ? KMA_PERMANENT : 0),
++		    VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS)
+ 			return ENOMEM;
+-		uint64_t span = 0, now = mach_absolute_time();
+-		nanoseconds_to_absolutetime(90ull * NSEC_PER_SEC, &span);
+-		if (span == 0 || now > UINT64_MAX - span) return ETIMEDOUT;
+-		speed_until = now + span;
++		/* Preserve the legacy start point unless the optional log scan is on. */
++		if (!log_slot_optin &&
++		    !ufs_dali_deadline_after(DALI_ROOT_COMPARE_TIMEOUT_NS, &speed_until)) {
++			if (su.hsg4_root) kmem_free(kernel_map, speed_reference, reference_size);
++			return ETIMEDOUT;
++		}
+ 	}
+ 
+ 	lck_mtx_lock(&sweet_ufs_lock);
+@@ -2836,8 +3460,50 @@ sweet_ufs_init(void)
+ 		su.failure_stage = "gpt-discovery";
+ 		error = ufs_find_partitions(want, log_want);
+ 	}
+-	if (!error && su.speed_probe) {
+-		su.failure_stage = "speed-probe-pwm-read";
++	if (!error && log_slot_optin && su.log_nblocks >= SWEET_LOG_BLOCKS) {
++		su.failure_stage = "pwm-log-gpt-read";
++		if (!ufs_dali_deadline_after(DALI_LOG_SCAN_TIMEOUT_NS, &log_scan_until)) {
++			error = ETIMEDOUT;
++		} else {
++			error = ufs_dali_validate_log_gpt();
++			if (!error && mach_absolute_time() >= log_scan_until) error = ETIMEDOUT;
++			if (!error && su.log_nblocks >= SWEET_LOG_BLOCKS) {
++				log_gpt_validated = true;
++				bool maybe = false;
++				su.failure_stage = "pwm-log-candidates";
++				error = ufs_dali_log_candidate_present(&maybe, log_scan_until, log_run_id);
++				if (!error && !maybe) {
++					printf("SWEET LOG: no usable candidate; persistent logging disabled\n");
++				} else if (!error) {
++					su.failure_stage = "pwm-log-digest";
++					error = ufs_dali_log_pwm_digest(log_pwm_digest, log_scan_until);
++					if (!error) log_digest_valid = true;
++				}
++			}
++		}
++		/* A completed PWM EIO with no poisoned command or sticky link
++		 * failure affects optional logging only. Timeouts and protocol
++		 * contradictions still stop root publication.
++		 */
++		if (error == EIO && !su.command_poisoned && !ufs_pwm_reentry_error()) {
++			/* Preserve a previously validated GPT for the mandatory HS
++			 * recheck, even though no slot will be written this boot.
++			 */
++			if (!log_gpt_validated) su.log_first_block = su.log_nblocks = 0;
++			log_digest_valid = false;
++			su.log_partition_ready = false;
++			printf("SWEET LOG: completed PWM read failed; logging disabled\n");
++			error = 0;
++		}
++	}
++	/* Give the opt-in comparison its own budget after optional logging reads. */
++	if (!error && log_slot_optin &&
++	    !ufs_dali_deadline_after(DALI_ROOT_COMPARE_TIMEOUT_NS, &speed_until)) {
++		su.failure_stage = "hsg4-root-compare-deadline";
++		error = ETIMEDOUT;
++	}
++	if (!error && (su.speed_probe || su.hsg4_root)) {
++		su.failure_stage = su.hsg4_root ? "hsg4-root-pwm-read" : "speed-probe-pwm-read";
+ 		error = ufs_dali_speed_read_pass((void *)speed_reference, DALI_SPEED_BYTES,
+ 		    false, speed_until, &speed_before);
+ 	}
+@@ -2846,11 +3512,46 @@ sweet_ufs_init(void)
+ 		error = ufs_dali_prepare_hsg1(true);
+ 		if (!error) su.hsg1_active = true;
+ 	}
+-	if (!error && su.speed_probe) {
+-		su.failure_stage = "speed-probe-hs-read";
++	if (!error && su.hsg4_requested) {
++		su.failure_stage = "hsg4x2-transition";
++		error = ufs_dali_prepare_hsg4(true);
++		if (!error) su.hsg1_active = true; /* Same retained-floor command guard. */
++	}
++	if (!error && (su.speed_probe || su.hsg4_root)) {
++		su.failure_stage = su.hsg4_root ? "hsg4-root-hs-read" : "speed-probe-hs-read";
+ 		error = ufs_dali_speed_read_pass((void *)speed_reference, DALI_SPEED_BYTES,
+ 		    true, speed_until, &speed_after);
+-		if (error) (void)ufs_pwm_failure(error);
++		if (error) {
++			if (su.hsg4_requested && su.hsg1_active) ufs_hsg4_post_probe_error(error);
++			(void)ufs_pwm_failure(error);
++		}
++	}
++	if (!error && su.hsg4_root) {
++		su.hsg4_root_verified = true;
++		printf("SWEET UFS HSG4 ROOT: compare=1 bytes=%u root-mounted=0 root-writes=0 ufs-log-writes=0 physical-write-stability=unproven\n",
++		    DALI_SPEED_BYTES);
++		if (log_slot_optin && log_gpt_validated) {
++			su.failure_stage = "hsg4-log-gpt-read";
++			if (!ufs_dali_deadline_after(DALI_LOG_SCAN_TIMEOUT_NS, &log_scan_until)) {
++				error = ETIMEDOUT;
++			} else {
++				error = ufs_dali_validate_log_gpt();
++				if (!error && mach_absolute_time() >= log_scan_until) error = ETIMEDOUT;
++				/* This GPT already validated under PWM. A newly invalid G4
++				 * reread is evidence of inconsistent storage, not a mere
++				 * optional logging configuration failure.
++				 */
++				if (!error && su.log_nblocks < SWEET_LOG_BLOCKS) error = EIO;
++				if (!error && log_digest_valid) {
++					su.failure_stage = "hsg4-log-slot-read";
++					error = ufs_dali_select_log_slot(log_pwm_digest, log_scan_until, log_run_id);
++				} else if (!error) {
++					su.log_first_block = su.log_nblocks = 0;
++					su.log_partition_ready = false;
++				}
++			}
++			if (error) (void)ufs_pwm_failure(error);
++		}
+ 	}
+ 	if (!error && su.speed_probe) {
+ 		printf("SWEET UFS SPEED: v=1 bytes=%llu pwm-ticks=%llu hs-ticks=%llu "
+@@ -2877,14 +3578,18 @@ sweet_ufs_init(void)
+ 				    error, su.command_poisoned ? 1u : 0u);
+ 			}
+ 		}
+-		if (error) (void)ufs_pwm_failure(error);
+-		else printf("SWEET UFS EXT: v=1 complete=1 windows=%u window-bytes=%u "
++		if (error) {
++			if (su.hsg4_requested && su.hsg1_active) ufs_hsg4_post_probe_error(error);
++			(void)ufs_pwm_failure(error);
++		} else printf("SWEET UFS EXT: v=1 complete=1 windows=%u window-bytes=%u "
+ 		    "exact-byte-match=1 root-mounted=0 data-writes=0 ufs-log-writes=0\n",
+ 		    DALI_EXT_WINDOWS, DALI_EXT_WINDOW_BYTES);
+ 	}
+ 	/* Retained RAM console only: neither probe calls the UFS log writer. */
+ 	if (!error && su.speed_probe) su.speed_probe_done = true;
+ 	lck_mtx_unlock(&sweet_ufs_lock);
++	if (su.hsg4_root && speed_reference)
++		kmem_free(kernel_map, speed_reference, reference_size);
+ 	if (error) {
+ 		return error;
+ 	}
+@@ -2949,7 +3654,18 @@ sweet_ufs_init(void)
+ 
+ static char sweet_log_ring[SWEET_LOG_SIZE];
+ static uint64_t _Atomic sweet_log_total;
+-static int sweet_log_chan;
++/* Independent cumulative counters; separately sampled, modulo 2^64. */
++static uint64_t _Atomic sweet_log_dropped_chunks, sweet_log_dropped_bytes;
++/* Console writers never wait. Readers hold this only for bounded memory copies,
++ * never over UFS I/O. Writers that collide are deliberately dropped.
++ */
++static uint32_t _Atomic sweet_log_busy;
++#define SWEET_LOG_APPEND_MAX 256u
++#define SWEET_LOG_COPY_MAX 4096u
++#define SWEET_LOG_BATCH (64u << 10)
++/* Exactly one logger thread owns this buffer; it is never a DMA target. */
++static char sweet_log_snapshot[SWEET_LOG_BATCH];
++static int sweet_log_chan, sweet_log_fair_chan;
+ static uint32_t sweet_log_secs = SWEET_LOG_SECS;
+ 
+ /* Dali ramoops console region; the ADT carries and validates these ranges. */
+@@ -2980,14 +3696,37 @@ void sweet_log_append(const char *c, int size);
+ void
+ sweet_log_append(const char *c, int size)
+ {
+-	if (size <= 0) {
++	if (c == NULL || size <= 0) {
+ 		return;
+ 	}
+-	uint64_t at = os_atomic_add_orig(&sweet_log_total, (uint64_t)size, relaxed);
+-	for (int i = 0; i < size; i++) {
+-		sweet_log_ring[(at + (uint64_t)i) % SWEET_LOG_SIZE] = c[i];
++	/* Never spin on a writer interrupted by panic or by this console call.
++	 * Each acquisition copies at most 256 bytes, including for early/panic
++	 * direct writes that bypass the normal console's 16-byte drain.
++	 */
++	while (size > 0) {
++		uint32_t chunk = (uint32_t)MIN(size, (int)SWEET_LOG_APPEND_MAX);
++		bool dropped = true;
++		if (os_atomic_cmpxchg(&sweet_log_busy, 0, 1, acquire)) {
++			uint64_t at = os_atomic_load(&sweet_log_total, relaxed);
++			if ((uint64_t)chunk <= UINT64_MAX - at) {
++				for (uint32_t i = 0; i < chunk; i++) {
++					sweet_log_ring[(at + i) % SWEET_LOG_SIZE] = c[i];
++				}
++				/* Publish only after the complete chunk is in the ring. */
++				os_atomic_store(&sweet_log_total, at + chunk, release);
++				dropped = false;
++			}
++			os_atomic_store(&sweet_log_busy, 0, release);
++		}
++		if (dropped) {
++			(void)os_atomic_add_orig(&sweet_log_dropped_chunks, 1, relaxed);
++			(void)os_atomic_add_orig(&sweet_log_dropped_bytes, chunk, relaxed);
++		}
++		/* Also bound the ramoops helper's interrupt-masked section. */
++		sweet_ramoops_append(c, (int)chunk);
++		c += chunk;
++		size -= (int)chunk;
+ 	}
+-	sweet_ramoops_append(c, size);
+ }
+ 
+ /*
+@@ -3000,15 +3739,22 @@ uint32_t sweet_log_copy(uint64_t *pos, char *out, uint32_t max);
+ uint32_t
+ sweet_log_copy(uint64_t *pos, char *out, uint32_t max)
+ {
+-	uint64_t total = os_atomic_load(&sweet_log_total, relaxed);
+-	if (total - *pos > SWEET_LOG_SIZE) {
++	if (pos == NULL || out == NULL || max == 0 ||
++	    !os_atomic_cmpxchg(&sweet_log_busy, 0, 1, acquire)) {
++		return 0;
++	}
++	uint64_t total = os_atomic_load(&sweet_log_total, acquire);
++	if (*pos > total) {
++		*pos = total;
++	} else if (total - *pos > SWEET_LOG_SIZE) {
+ 		*pos = total - SWEET_LOG_SIZE;
+ 	}
+-	uint32_t n = (uint32_t)MIN((uint64_t)max, total - *pos);
++	uint32_t n = (uint32_t)MIN((uint64_t)MIN(max, SWEET_LOG_COPY_MAX), total - *pos);
+ 	for (uint32_t i = 0; i < n; i++) {
+ 		out[i] = sweet_log_ring[(*pos + i) % SWEET_LOG_SIZE];
+ 	}
+ 	*pos += n;
++	os_atomic_store(&sweet_log_busy, 0, release);
+ 	return n;
+ }
+ 
+@@ -3017,7 +3763,7 @@ uint64_t sweet_log_position(void);
+ uint64_t
+ sweet_log_position(void)
+ {
+-	return os_atomic_load(&sweet_log_total, relaxed);
++	return os_atomic_load(&sweet_log_total, acquire);
+ }
+ 
+ /*
+@@ -3122,16 +3868,14 @@ sweet_ramoops_start(void)
+ 	os_atomic_store(&sweet_ramoops_active, true, release);
+ 
+ 	/* Preserve the most recent pre-root output so early failures are recoverable. */
+-	uint64_t logged = os_atomic_load(&sweet_log_total, relaxed);
++	uint64_t logged = os_atomic_load(&sweet_log_total, acquire);
+ 	uint64_t pos = logged > DALI_RAMOOPS_REPLAY_MAX ? logged - DALI_RAMOOPS_REPLAY_MAX : 0;
+ 	char chunk[256];
+ 	while (pos < logged) {
+ 		uint32_t count = (uint32_t)MIN((uint64_t)sizeof(chunk), logged - pos);
+-		for (uint32_t i = 0; i < count; i++) {
+-			chunk[i] = sweet_log_ring[(pos + i) % SWEET_LOG_SIZE];
+-		}
++		count = sweet_log_copy(&pos, chunk, count);
++		if (count == 0) break; /* A live or interrupted writer must never block boot. */
+ 		sweet_ramoops_append(chunk, (int)count);
+-		pos += count;
+ 	}
+ 	sweet_ramoops_append(marker, sizeof(marker) - 1);
+ 	return true;
+@@ -3141,7 +3885,13 @@ struct sweet_log_header {
+ 	char magic[8];
+ 	uint32_t version, size;
+ 	uint64_t total, seq;
++	/* Optional v1-compatible G4 extension, CRC covers only header bytes. */
++	char identity[8], run_id[32];
++	uint64_t dropped_chunks, dropped_bytes;
++	uint32_t header_crc;
+ };
++_Static_assert(offsetof(struct sweet_log_header, dropped_chunks) == 72 &&
++    offsetof(struct sweet_log_header, header_crc) == 88, "log header layout");
+ 
+ /* The pre-root probes do not use the persistent UFS log writer. */
+ 
+@@ -3168,7 +3918,7 @@ sweet_log_fastboot_drain(uint64_t deadline)
+         !ml_get_interrupts_enabled() || ml_at_interrupt_context() || get_preemption_level() != 0 ||
+         !os_atomic_load(&sweet_log_fastboot_running, acquire) || mach_absolute_time() >= deadline)
+         return false;
+-    uint64_t target = os_atomic_load(&sweet_log_total, relaxed);
++    uint64_t target = os_atomic_load(&sweet_log_total, acquire);
+     if (target == 0)
+         return false;
+     os_atomic_store(&sweet_log_fastboot_requested, 1, release);
+@@ -3186,6 +3936,16 @@ sweet_log_fastboot_drain(uint64_t deadline)
+ }
+ #endif
+ 
++/* Bound retry frequency when a panic-stopped producer holds the gate forever. */
++static int
++sweet_log_retry_next(int previous)
++{
++	uint64_t cap = hz > 0 ? (uint64_t)(uint32_t)hz * sweet_log_secs : 1;
++	cap = MIN(cap, (uint64_t)0x7fffffffu);
++	if (cap == 0) cap = 1;
++	return (int)MIN(previous > 0 ? (uint64_t)(uint32_t)previous * 2 : 1, cap);
++}
++
+ static void
+ sweet_log_thread(__unused void *arg, __unused wait_result_t wr)
+ {
+@@ -3193,7 +3953,14 @@ sweet_log_thread(__unused void *arg, __unused wait_result_t wr)
+ 	uint64_t base = separate ? su.log_first_block :
+ 	    su.first_block + su.nblocks - SWEET_LOG_BLOCKS;
+ 	uint64_t flushed = 0, seq = 0;
++	bool backlog = false;
++	int retry_ticks = 0;
+ 	void *bounce = (void *)(su.dma + DMA_BOUNCE);
++	char run_id[33] = {0};
++	if (su.hsg4_root && !ufs_dali_run_id(run_id)) {
++		printf("SWEET LOG: missing G4 run identity; persistent logging disabled\n");
++		return;
++	}
+ 
+ 	printf("SWEET LOG: console log in %s (%u KiB at block 0x%llx)\n",
+ 	    separate ? su.log_partition_name : "root partition tail",
+@@ -3202,32 +3969,97 @@ sweet_log_thread(__unused void *arg, __unused wait_result_t wr)
+ 	os_atomic_store(&sweet_log_fastboot_running, 1, release);
+ #endif
+ 	for (;;) {
+-		(void)tsleep(&sweet_log_chan, PZERO, "sweetlog", hz * (int)sweet_log_secs);
+-		uint64_t total = os_atomic_load(&sweet_log_total, relaxed);
++		/* Release the UFS mutex between batches. Contended snapshots retry
++		 * on the private channel with bounded exponential tick backoff.
++		 * Fastboot wakeups cannot bypass this fairness opportunity.
++		 */
++		if (backlog) (void)tsleep(&sweet_log_fair_chan, PZERO, "sweetlog", retry_ticks ? retry_ticks : 1);
++		else (void)tsleep(&sweet_log_chan, PZERO, "sweetlog", hz * (int)sweet_log_secs);
++		/* A busy console writer is never waited on, including during panic. */
++		if (!os_atomic_cmpxchg(&sweet_log_busy, 0, 1, acquire)) {
++			backlog = true;
++			retry_ticks = sweet_log_retry_next(retry_ticks);
++			continue;
++		}
++		uint64_t total = os_atomic_load(&sweet_log_total, acquire);
+ 		if (total == flushed) {
++			backlog = false;
++			retry_ticks = 0;
++			os_atomic_store(&sweet_log_busy, 0, release);
+ #if DEVELOPMENT
+ 			sweet_log_fastboot_publish(flushed);
+ #endif
+ 			continue;
+ 		}
+-		uint64_t pos = total - flushed >= SWEET_LOG_SIZE ? total - SWEET_LOG_SIZE : flushed;
++		if (total - flushed > SWEET_LOG_SIZE) {
++			/* A v1 header cannot encode a hole after overrunning the RAM ring. */
++			os_atomic_store(&sweet_log_busy, 0, release);
++#if DEVELOPMENT
++			os_atomic_store(&sweet_log_fastboot_running, 0, release);
++#endif
++			printf("SWEET LOG: RAM ring overrun; stopping without publishing a gap\n");
++			return;
++		}
++		uint64_t pos = flushed;
++		uint32_t off = (uint32_t)(pos % SWEET_LOG_SIZE);
++		uint32_t blk = off / UFS_BLOCK;
++		uint64_t first = pos - off % UFS_BLOCK;
++		uint64_t wanted = total - first;
++		uint32_t n = (uint32_t)MIN(MIN((wanted + UFS_BLOCK - 1) / UFS_BLOCK,
++		    (uint64_t)(SWEET_LOG_SIZE / UFS_BLOCK - blk)),
++		    (uint64_t)(SWEET_LOG_BATCH / UFS_BLOCK));
++		uint64_t end = first + MIN(wanted, (uint64_t)n * UFS_BLOCK);
++		os_atomic_store(&sweet_log_busy, 0, release);
++		/* Snapshot at most 64 KiB, one 4 KiB gated copy at a time. If a
++		 * writer laps any not-yet-copied byte, abandon without device I/O.
++		 * No console gate is ever held across a mutex or UFS command.
++		 */
++		bool retry = false;
++		for (uint32_t i = 0; i < n; i++) {
++			if (!os_atomic_cmpxchg(&sweet_log_busy, 0, 1, acquire)) {
++				retry = true;
++				break;
++			}
++			uint64_t now = os_atomic_load(&sweet_log_total, acquire);
++			/* Only [pos,end) is copied into the disk write. Any prior
++			 * block prefix and future suffix come from the disk itself.
++			 */
++			uint64_t required = MAX(pos, first + (uint64_t)i * UFS_BLOCK);
++			if (now < required || now - required > SWEET_LOG_SIZE) {
++				retry = true;
++			} else {
++				memcpy(sweet_log_snapshot + (uint64_t)i * UFS_BLOCK,
++				    sweet_log_ring + (uint64_t)(blk + i) * UFS_BLOCK, UFS_BLOCK);
++			}
++			os_atomic_store(&sweet_log_busy, 0, release);
++			if (retry) break;
++		}
++		if (retry) {
++			backlog = true;
++			retry_ticks = sweet_log_retry_next(retry_ticks);
++			continue;
++		}
+ 		int error = 0;
+ 
+ 		lck_mtx_lock(&sweet_ufs_lock);
+ 		/* Do not overwrite DMA memory until hardware ownership is known. */
+ 		if (su.dali && su.command_poisoned) {
+ 			error = ETIMEDOUT;
+-		}
+-		while (pos < total && !error) {
+-			uint32_t off = (uint32_t)(pos % SWEET_LOG_SIZE);
+-			uint32_t blk = off / UFS_BLOCK;
+-			uint64_t need = ((uint64_t)off % UFS_BLOCK + (total - pos) + UFS_BLOCK - 1) / UFS_BLOCK;
+-			uint32_t n = (uint32_t)MIN(MIN(need, (uint64_t)(SWEET_LOG_SIZE / UFS_BLOCK - blk)),
+-			    (uint64_t)(BOUNCE_SIZE / UFS_BLOCK));
+-			memcpy(bounce, sweet_log_ring + (uint64_t)blk * UFS_BLOCK, n * UFS_BLOCK);
+-			error = separate ? ufs_write_log_blocks(base + 1 + blk, n) :
++		} else {
++			uint32_t skip = (uint32_t)(pos - first);
++			uint32_t count = (uint32_t)(end - pos);
++			/* Preserve already committed prefix and older ring suffix.
++			 * A concurrent producer can change bytes outside [pos,end)
++			 * before the RAM block snapshot is taken.
++			 */
++			if (skip != 0 || skip + count != n * UFS_BLOCK) {
++				error = ufs_read_blocks(base + 1 + blk, n);
++			}
++			if (!error) {
++				memcpy((char *)bounce + skip, sweet_log_snapshot + skip, count);
++				error = separate ? ufs_write_log_blocks(base + 1 + blk, n) :
+ 				    ufs_write_blocks(base + 1 + blk, n);
+-			pos += (uint64_t)(blk + n) * UFS_BLOCK - off;
++			}
+ 		}
+ 		if (!error) {
+ 				/* Persist payload before publishing a header that references it. */
+@@ -3242,10 +4074,20 @@ sweet_log_thread(__unused void *arg, __unused wait_result_t wr)
+ 				}
+ 			struct sweet_log_header h = {
+ 				.magic = { 'S', 'W', 'E', 'E', 'T', 'L', 'O', 'G' },
+-				.version = 1, .size = SWEET_LOG_SIZE, .total = total, .seq = ++seq,
++				.version = 1, .size = SWEET_LOG_SIZE, .total = end, .seq = ++seq,
+ 			};
++			if (su.hsg4_root) {
++				memcpy(h.identity, "SWIDv002", sizeof(h.identity));
++				memcpy(h.run_id, run_id, sizeof(h.run_id));
++				/* No recursive printf or I/O merely to report a drop. These
++				 * independent samples become visible at the next dirty flush.
++				 */
++				h.dropped_chunks = os_atomic_load(&sweet_log_dropped_chunks, relaxed);
++				h.dropped_bytes = os_atomic_load(&sweet_log_dropped_bytes, relaxed);
++				h.header_crc = crc32(0, &h, offsetof(struct sweet_log_header, header_crc));
++			}
+ 			bzero(bounce, UFS_BLOCK);
+-			memcpy(bounce, &h, sizeof(h));
++			memcpy(bounce, &h, offsetof(struct sweet_log_header, header_crc) + sizeof(h.header_crc));
+ 			error = separate ? ufs_write_log_blocks(base, 1) : ufs_write_blocks(base, 1);
+ 		}
+ 		if (!error) {
+@@ -3259,7 +4101,9 @@ sweet_log_thread(__unused void *arg, __unused wait_result_t wr)
+ 			printf("SWEET LOG: write failed (%d), stopping\n", error);
+ 			return;
+ 		}
+-		flushed = total;
++		flushed = end;
++		retry_ticks = 0;
++		backlog = os_atomic_load(&sweet_log_total, acquire) > flushed;
+ #if DEVELOPMENT
+ 		sweet_log_fastboot_publish(flushed);
+ #endif
+@@ -3318,19 +4162,38 @@ sweet_ufs_rootdev(dev_t *dev)
+     bool hsg1 = ufs_dali_speed_flag("dali-hs-g1");
+     bool speed_probe = ufs_dali_speed_flag("dali-speed-probe");
+     bool extended = ufs_dali_speed_flag("dali-speed-extended");
++    uint32_t hs_target = 0;
++    int target_error = ufs_dali_hs_target(&hs_target);
++    if (target_error) return target_error;
++    bool hsg4 = hs_target == 4, hsg4_root = false;
++    int root_option_error = ufs_dali_hsg4_root_requested(&hsg4_root);
++    if (root_option_error) return root_option_error;
+     char run_id[33] = {0};
++    uint32_t root_rw = 0, root_logger = 0;
+     if ((two_lanes && pwm_requested != 0) ||
+-        (hsg1 && (two_lanes || pwm_requested != 0)) || (speed_probe && !hsg1) ||
+-        (extended && (!speed_probe || !ufs_dali_extended_configuration(run_id)))) return EINVAL;
+-    bool pwm_guard = hsg1 || two_lanes || (pwm_requested == 1 && SWEET_PWM_PLATFORM_CAP > 1);
++        (hsg1 && (hsg4 || two_lanes || pwm_requested != 0)) ||
++        (hsg4_root && !hsg4) ||
++        (hsg4 && ((speed_probe == hsg4_root) || two_lanes || pwm_requested != 0)) ||
++        (speed_probe && !hsg1 && !hsg4) ||
++        (extended && !speed_probe) ||
++        ((extended || (hsg4 && speed_probe)) && !ufs_dali_extended_configuration(run_id)) ||
++        (hsg4_root && !ufs_dali_hsg4_root_configuration(run_id, &root_rw, &root_logger))) return EINVAL;
++    bool pwm_guard = hsg1 || hsg4 || two_lanes || (pwm_requested == 1 && SWEET_PWM_PLATFORM_CAP > 1);
+     pwm_error = ufs_pwm_root_enter(pwm_guard);
+     if (pwm_error) return pwm_error;
+     su.pwm_two_lanes = two_lanes;
+     su.hsg1_requested = hsg1;
++    su.hsg4_requested = hsg4;
++    su.hsg4_root = hsg4_root;
+     su.speed_probe = speed_probe;
+     su.speed_extended = extended;
+ 	(void)sweet_ramoops_start();
+ 	if (extended) printf("SWEET UFS EXT: v=1 start=1 run-id=%s auto=0 root-write=0 log=0\n", run_id);
++	if (hsg4 && speed_probe)
++		printf("SWEET UFS HSG4: v=1 start=1 run-id=%s auto=0 root-write=0 log=0\n", run_id);
++	if (hsg4_root)
++		printf("SWEET UFS HSG4 ROOT: v=1 start=1 run-id=%s auto=0 root-write=%u log=%u physical-write-stability=unproven\n",
++		    run_id, root_rw, root_logger);
+ 	if (!su.ready) {
+ 		su.failure_stage = "root-init";
+ 		int error = sweet_ufs_init();

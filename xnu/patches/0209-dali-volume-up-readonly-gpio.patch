@@ -1,0 +1,300 @@
+--- a/iokit/Kernel/arm/hid/SweetHID.cpp
++++ b/iokit/Kernel/arm/hid/SweetHID.cpp
+@@ -19,7 +19,11 @@
+ #include <IOKit/IOLib.h>
+ #include <IOKit/IOService.h>
+ #include <IOKit/IOTimerEventSource.h>
++#include <IOKit/IOMemoryDescriptor.h>
++#include <IOKit/IORegistryEntry.h>
+ #include <libkern/c++/OSArray.h>
++#include <libkern/c++/OSData.h>
++#include <kern/clock.h>
+ #include <pexpert/pexpert.h>
+ 
+ #include "IOHIDEventService.h"
+@@ -30,6 +34,7 @@
+ #include "IOHIDUsageTables.h"
+ #include "SweetHIDGeometry.h"
+ #include "SweetHIDWaitPolicy.h"
++#include "DaliVolumeKey.h"
+ extern "C" int sweet_dali_gui_presented(void);
+ 
+ extern "C" uint64_t mach_absolute_time(void);
+@@ -332,7 +337,9 @@
+ 	OSDeclareDefaultStructors(SweetHIDButtons);
+ public:
+ 	virtual bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
+-	void key(UInt32 usage, bool down);
++	virtual void stop(IOService *provider) APPLE_KEXT_OVERRIDE;
++	virtual void free(void) APPLE_KEXT_OVERRIDE;
++	bool key(UInt32 usage, bool down);
+ protected:
+ 	virtual UInt32 getPrimaryUsagePage() APPLE_KEXT_OVERRIDE { return kHIDPage_Consumer; }
+ 	virtual UInt32 getPrimaryUsage() APPLE_KEXT_OVERRIDE { return kHIDUsage_Csmr_ConsumerControl; }
+@@ -342,6 +349,18 @@
+ 	IOTimerEventSource *fTest;
+ 	UInt32 fTestSecs;
+ 	UInt32 fTestCount;
++	void startDaliVolume();
++	void stopDaliVolume();
++	bool daliVolumeHasClient();
++	bool daliVolumePinValid();
++	static UInt32 daliVolumeRead(IOMemoryMap *map, UInt32 offset);
++	static void daliVolumeFired(OSObject *owner, IOTimerEventSource *sender);
++	static IOReturn daliVolumeStopAction(OSObject *owner, void *, void *, void *, void *);
++	IOMemoryDescriptor *fDaliGpioMemory, *fDaliIesMemory;
++	IOMemoryMap *fDaliGpioMap, *fDaliIesMap;
++	IOTimerEventSource *fDaliVolumeTimer;
++	bool fDaliVolumeTimerAdded, fDaliVolumeRunning;
++	DaliVolumeKeyState fDaliVolumeState;
+ };
+ OSDefineMetaClassAndStructors(SweetHIDButtons, IOHIDEventService);
+ 
+@@ -385,6 +404,141 @@
+ static SweetHIDButtons *gSweetButtons;
+ static SweetHIDTouch *gSweetTouch;
+ 
++UInt32
++SweetHIDButtons::daliVolumeRead(IOMemoryMap *map, UInt32 offset)
++{
++	UInt32 value = *reinterpret_cast<volatile UInt32 *>(map->getVirtualAddress() + offset);
++	__asm__ volatile("dmb oshld" ::: "memory");
++	return value;
++}
++
++bool
++SweetHIDButtons::daliVolumePinValid()
++{
++	return dali_volume_pin_valid(daliVolumeRead(fDaliGpioMap, 0x370),
++	    daliVolumeRead(fDaliGpioMap, 0x10), daliVolumeRead(fDaliIesMap, 0x70));
++}
++
++bool
++SweetHIDButtons::daliVolumeHasClient()
++{
++	IOLockLock(_clientLock);
++	bool ready = _clients && _clients->getCount() != 0;
++	IOLockUnlock(_clientLock);
++	return ready;
++}
++
++void
++SweetHIDButtons::startDaliVolume()
++{
++	int optIn = 0;
++	if (!PE_parse_boot_argn("dalivolup", &optIn, sizeof(optIn)) || optIn != 1) return;
++	auto root = IORegistryEntry::fromPath("IODeviceTree:/");
++	OSData *compatible = root ? OSDynamicCast(OSData, root->getProperty("compatible")) : NULL;
++	if (!compatible || !dali_volume_board_enabled(optIn, compatible->getBytesNoCopy(),
++	    compatible->getLength())) {
++		IOLog("DALI VOLUP: board identity unavailable; input disabled\n");
++		return;
++	}
++	/* GPIO60 input/dir/mux and IOCFG_LM1 input-enable only. No register writes. */
++	fDaliGpioMemory = IOMemoryDescriptor::withPhysicalAddress(0x1002d000ULL, 0x1000, kIODirectionIn);
++	fDaliIesMemory = IOMemoryDescriptor::withPhysicalAddress(0x13020000ULL, 0x1000, kIODirectionIn);
++	if (fDaliGpioMemory)
++		fDaliGpioMap = fDaliGpioMemory->map(kIOMapInhibitCache | kIOMapReadOnly);
++	if (fDaliIesMemory)
++		fDaliIesMap = fDaliIesMemory->map(kIOMapInhibitCache | kIOMapReadOnly);
++	if (!fDaliGpioMap || !fDaliIesMap || !fDaliGpioMap->getVirtualAddress() ||
++	    !fDaliIesMap->getVirtualAddress() || !daliVolumePinValid()) {
++		IOLog("DALI VOLUP: mapping or firmware pin configuration rejected\n");
++		stopDaliVolume();
++		return;
++	}
++	fDaliVolumeState = {};
++	fDaliVolumeTimer = IOTimerEventSource::timerEventSource(this, &SweetHIDButtons::daliVolumeFired);
++	if (!fDaliVolumeTimer || _hidWorkLoop->addEventSource(fDaliVolumeTimer) != kIOReturnSuccess) {
++		IOLog("DALI VOLUP: timer unavailable\n");
++		stopDaliVolume();
++		return;
++	}
++	fDaliVolumeTimerAdded = fDaliVolumeRunning = true;
++	IOLog("DALI VOLUP: GPIO60 read-only polling enabled; physical behavior unverified\n");
++	fDaliVolumeTimer->setTimeoutMS(16);
++}
++
++void
++SweetHIDButtons::daliVolumeFired(OSObject *owner, IOTimerEventSource *sender)
++{
++	SweetHIDButtons *self = OSDynamicCast(SweetHIDButtons, owner);
++	if (!self || !self->fDaliVolumeRunning) return;
++	bool client = self->daliVolumeHasClient();
++	if (!self->daliVolumePinValid()) {
++		/* Cancellation only, not a sampled physical release. */
++		if (client && self->fDaliVolumeState.armed && self->fDaliVolumeState.down) {
++			bool cancelled = self->key(kHIDUsage_Csmr_VolumeIncrement, false);
++			IOLog("DALI VOLUP: invalid pin cancellation allocated=%d\n", cancelled);
++		}
++		self->fDaliVolumeState = {};
++		self->fDaliVolumeRunning = false;
++		IOLog("DALI VOLUP: firmware pin configuration changed; polling stopped\n");
++		return;
++	}
++	UInt32 data = daliVolumeRead(self->fDaliGpioMap, 0x210);
++	uint64_t ns = 0;
++	absolutetime_to_nanoseconds(mach_absolute_time(), &ns);
++	int event = dali_volume_sample(&self->fDaliVolumeState, client, data, ns);
++	if (event >= 0 && !self->key(kHIDUsage_Csmr_VolumeIncrement, event != 0)) {
++		/* The HID event was not allocated; retry this stable state next tick. */
++		self->fDaliVolumeState.down = (event == 0);
++	}
++	if (self->fDaliVolumeRunning) sender->setTimeoutMS(16);
++}
++
++IOReturn
++SweetHIDButtons::daliVolumeStopAction(OSObject *owner, void *, void *, void *, void *)
++{
++	SweetHIDButtons *self = OSDynamicCast(SweetHIDButtons, owner);
++	if (!self) return kIOReturnBadArgument;
++	self->fDaliVolumeRunning = false;
++	self->fDaliVolumeTimer->cancelTimeout();
++	self->fDaliVolumeTimer->disable();
++	if (self->fDaliVolumeState.armed && self->fDaliVolumeState.down && self->daliVolumeHasClient()) {
++		/* Balance our prior down on service teardown, not a physical sample. */
++		bool cancelled = self->key(kHIDUsage_Csmr_VolumeIncrement, false);
++		IOLog("DALI VOLUP: teardown cancellation allocated=%d\n", cancelled);
++	}
++	self->fDaliVolumeState = {};
++	return kIOReturnSuccess;
++}
++
++void
++SweetHIDButtons::stopDaliVolume()
++{
++	if (_hidWorkLoop && fDaliVolumeTimerAdded) {
++		(void)_hidWorkLoop->runAction(&SweetHIDButtons::daliVolumeStopAction, this);
++		_hidWorkLoop->removeEventSource(fDaliVolumeTimer);
++		fDaliVolumeTimerAdded = false;
++	}
++	OSSafeReleaseNULL(fDaliVolumeTimer);
++	OSSafeReleaseNULL(fDaliIesMap);
++	OSSafeReleaseNULL(fDaliGpioMap);
++	OSSafeReleaseNULL(fDaliIesMemory);
++	OSSafeReleaseNULL(fDaliGpioMemory);
++}
++
++void
++SweetHIDButtons::stop(IOService *provider)
++{
++	stopDaliVolume();
++	IOHIDEventService::stop(provider);
++}
++
++void
++SweetHIDButtons::free(void)
++{
++	stopDaliVolume();
++	IOHIDEventService::free();
++}
++
+ bool
+ SweetHIDButtons::start(IOService *provider)
+ {
+@@ -399,21 +553,22 @@
+ 	}
+ 	gSweetButtons = this;
+ 	registerService();
++	startDaliVolume();
+ 	IOLog("SWEET HID: buttons registered (test every %u s)\n", fTestSecs);
+ 	return true;
+ }
+ 
+-void
++bool
+ SweetHIDButtons::key(UInt32 usage, bool down)
+ {
+ 	IOHIDEvent *event = IOHIDEvent::keyboardEvent(mach_absolute_time(), kHIDPage_Consumer, usage, down);
+ 
+-	if (event) {
+-		IOLog("SWEET HID: key 0x%x %s (%u clients)\n", (unsigned)usage, down ? "down" : "up",
+-		    _clients ? _clients->getCount() : 0);
+-		dispatchEvent(event);
+-		event->release();
+-	}
++	if (!event) return false;
++	IOLog("SWEET HID: key 0x%x %s (%u clients)\n", (unsigned)usage, down ? "down" : "up",
++	    _clients ? _clients->getCount() : 0);
++	dispatchEvent(event);
++	event->release();
++	return true;
+ }
+ 
+ void
+--- /dev/null
++++ b/iokit/Kernel/arm/hid/DaliVolumeKey.h
+@@ -0,0 +1,73 @@
++/* Dali MT6991 GPIO60 volume-up input policy; no hardware access here. */
++#ifndef DALI_VOLUME_KEY_H
++#define DALI_VOLUME_KEY_H
++
++struct DaliVolumeKeyState {
++    bool armed;
++    bool down;
++    bool candidateValid;
++    bool candidateDown;
++    unsigned long long sinceNs;
++};
++
++/* ADT compatible is a sequence of NUL-terminated byte strings. */
++static inline bool dali_volume_board_enabled(int optIn, const void *data,
++    unsigned int length)
++{
++    static const char board[] = "xiaomi,dali";
++    const unsigned char *bytes = static_cast<const unsigned char *>(data);
++    if (optIn != 1 || !bytes || !length) return false;
++    bool found = false;
++    for (unsigned int i = 0; i < length;) {
++        unsigned int start = i;
++        while (i < length && bytes[i]) ++i;
++        if (i == length) return false;
++        if (i - start == sizeof(board) - 1) {
++            unsigned int j = 0;
++            while (j < sizeof(board) - 1 && bytes[start + j] == (unsigned char)board[j]) ++j;
++            if (j == sizeof(board) - 1) found = true;
++        }
++        ++i;
++    }
++    return found;
++}
++
++/* Pin 60 must still be GPIO input, with input buffer enabled. */
++static inline bool dali_volume_pin_valid(unsigned int mode, unsigned int dir,
++    unsigned int ies)
++{
++    return ((mode >> 16) & 0xfU) == 0 && !(dir & (1U << 28)) &&
++        (ies & (1U << 19));
++}
++
++/* -1 means no event, 1 is a physical down and 0 a physical up.  A ready
++ * client must first see a stable release; no pre-client press is replayed.
++ * The 32 ms requirement uses elapsed monotonic time, not callback count.
++ */
++static inline int dali_volume_sample(DaliVolumeKeyState *s, bool clientReady,
++    unsigned int dataIn, unsigned long long nowNs)
++{
++    if (!clientReady) {
++        *s = {};
++        return -1;
++    }
++    bool down = (dataIn & (1U << 28)) == 0; /* active low */
++    if (!s->candidateValid || s->candidateDown != down || nowNs < s->sinceNs) {
++        s->candidateValid = true;
++        s->candidateDown = down;
++        s->sinceNs = nowNs;
++        return -1;
++    }
++    if (nowNs - s->sinceNs < 32000000ULL) return -1;
++    if (!s->armed) {
++        if (!down) {
++            s->armed = true;
++            s->down = false;
++        }
++        return -1;
++    }
++    if (s->down == down) return -1;
++    s->down = down;
++    return down ? 1 : 0;
++}
++#endif

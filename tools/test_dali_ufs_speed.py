@@ -50,7 +50,7 @@ def compile_fixture(source,include,folder,name):
 def main():
     expected={path:sources.SOURCE[path] for path in PATHS}
     # The source fixture must reconstruct, not read unchecked mutable bytes.
-    assert sources.apply_exact_hunks(sources.UFS_PRE_SPEED,'bsd/dev/sweet_ufs.c',PATCH)==expected[PATHS[0]]
+    assert sources.apply_exact_hunks(sources.UFS_PRE_SPEED,'bsd/dev/sweet_ufs.c',PATCH)==sources.UFS_POST_SPEED
     assert sources.apply_exact_hunks(sources.PE_PRE_SPEED,'pexpert/arm/pe_dali_watchdog.c',PATCH)==expected[PATHS[1]]
     for previous_map,patch,next_map in (
         (sources.HS_PRE_LIVE_OPP,sources.UFS_OPP_PATCH,sources.HS_PRE_FW_INIT),
@@ -72,7 +72,7 @@ def main():
         if len(sys.argv)>1:
             actual_view=Path(sys.argv[1])
             for path,text in expected.items():
-                assert (actual_view/path).read_text(encoding='latin-1') == sources.UFS_POST_EXT.get(path, text),path
+                assert (actual_view/path).read_text(encoding='latin-1') == sources.TRIAL_SOURCE.get(path, sources.UFS_POST_EXT.get(path, text)),path
         # Historical 0200/0205 fixtures exercise their exact historical source;
         # the 0206 extended implementation has its own sanitizer fixtures.
         view=folder/'xnu'

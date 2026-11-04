@@ -1,0 +1,90 @@
+--- a/bsd/dev/sweet_touch.c
++++ b/bsd/dev/sweet_touch.c
+@@ -14,6 +14,8 @@
+ #include <kern/sched_prim.h>
+ #include <machine/machine_routines.h>
+ #include <pexpert/pexpert.h>
++#include <pexpert/device_tree.h>
++#include "SweetLegacyTouchPolicy.h"
+ 
+ extern vm_offset_t ml_io_map(vm_offset_t, vm_size_t);
+ /* Mach MIG declaration is not included by BSD's exported thread.h. */
+@@ -638,8 +640,13 @@
+ void
+ sweet_touch_init(void)
+ {
+-	int enabled = 1;
++	int enabled = 1, have_compatible;
+ 	thread_t thread;
++	DTEntry root;
++	const void *compatible = NULL;
++	unsigned int compatible_size = 0;
++	enum sweet_legacy_touch_decision policy;
++	kern_return_t kr;
+ 	if (st.started) {
+ 		return;
+ 	}
+@@ -650,7 +657,15 @@
+ 		printf("SWEET TOUCH: disabled (sweettouch=0)\n");
+ 		return;
+ 	}
+-	kern_return_t kr = kernel_thread_start(touch_thread, NULL, &thread);
++	have_compatible = SecureDTLookupEntry(NULL, "/", &root) == kSuccess &&
++	    SecureDTGetProperty(root, "compatible", &compatible, &compatible_size) == kSuccess;
++	policy = sweet_legacy_touch_policy(enabled, have_compatible, compatible, compatible_size);
++	if (policy != SWEET_LEGACY_TOUCH_ALLOW) {
++		printf("SWEET TOUCH: legacy Qualcomm path blocked (%s)\n",
++		    policy == SWEET_LEGACY_TOUCH_DALI ? "Dali" : "unknown board");
++		return;
++	}
++	kr = kernel_thread_start(touch_thread, NULL, &thread);
+ 	if (kr == KERN_SUCCESS) {
+ 		thread_deallocate(thread);
+ 	} else {
+--- /dev/null
++++ b/bsd/dev/SweetLegacyTouchPolicy.h
+@@ -0,0 +1,44 @@
++/* Policy for the legacy Qualcomm SWEET touch path.  No MMIO. */
++#ifndef SWEET_LEGACY_TOUCH_POLICY_H
++#define SWEET_LEGACY_TOUCH_POLICY_H
++
++enum sweet_legacy_touch_decision {
++    SWEET_LEGACY_TOUCH_ALLOW = 0,
++    SWEET_LEGACY_TOUCH_DISABLED,
++    SWEET_LEGACY_TOUCH_DALI,
++    SWEET_LEGACY_TOUCH_UNKNOWN_BOARD
++};
++
++/* The root compatible property is a bounded NUL-separated string list.
++ * Refuse malformed or unavailable identity rather than risk wrong-SoC MMIO.
++ * A Dali token anywhere in a valid list disables this path, even if the
++ * legacy boot argument explicitly requests it.
++ */
++static inline enum sweet_legacy_touch_decision
++sweet_legacy_touch_policy(int enabled, int have_compatible,
++    const void *value, unsigned int size)
++{
++    static const unsigned char target[] = "xiaomi,dali";
++    const unsigned char *p = (const unsigned char *)value;
++    int dali = 0, saw_token = 0;
++    unsigned int i = 0;
++
++    if (!enabled) return SWEET_LEGACY_TOUCH_DISABLED;
++    if (!have_compatible || !p || !size) return SWEET_LEGACY_TOUCH_UNKNOWN_BOARD;
++    while (i < size) {
++        unsigned int start = i, j;
++        while (i < size && p[i] != 0) ++i;
++        if (i == size) return SWEET_LEGACY_TOUCH_UNKNOWN_BOARD;
++        if (i != start) saw_token = 1;
++        if (i - start == sizeof(target) - 1) {
++            for (j = 0; j < sizeof(target) - 1; ++j) {
++                if (p[start + j] != target[j]) break;
++            }
++            if (j == sizeof(target) - 1) dali = 1;
++        }
++        ++i;
++    }
++    if (!saw_token) return SWEET_LEGACY_TOUCH_UNKNOWN_BOARD;
++    return dali ? SWEET_LEGACY_TOUCH_DALI : SWEET_LEGACY_TOUCH_ALLOW;
++}
++#endif
