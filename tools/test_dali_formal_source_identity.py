@@ -14,7 +14,10 @@ expected = {
     'bsd/sweet_hfs/core/hfs_vnops.c': '1863c19fc3231151be9f800147d0a5ba72967ad98a8432284e1b13d4c460e4d9',
     'bsd/dev/sweet_touch.c': '90ec1634c1836d16e9d1810055796f14b31a8b320878b069d82027c6f6ce5a71',
     'bsd/dev/SweetLegacyTouchPolicy.h': 'cc79805619d4726775512998bc2e3eafea98fa7da42a8a5012449f63592108fc',
-    'iokit/Kernel/arm/hid/SweetHID.cpp': '3025242102562a690dc3d63b7ec42f73f80d389941849739867f600a890a6334',
+    'iokit/Kernel/arm/DaliPMIF.cpp': 'be6e34a74f277a3287f663eba853e4fc153174e9ecc0d49dd56aaf695c261889',
+    'iokit/Kernel/arm/DaliPMIF.h': 'ba51e6bbb1fd7bc85aadd174ec61d9aee5e76bacc85a530ed89f00164a93fabd',
+    'iokit/Kernel/arm/hid/DaliPmicKeyBackend.h': 'a1fe0b7fa84303cab855ac7fc0078d77c0cade400a4bcebc576053602e4a9b36',
+    'iokit/Kernel/arm/hid/SweetHID.cpp': '3f11b2fd443b3caddebfbbfcfd82dcb7af72eea97d633c79fee69d161ae80c97',
     'iokit/Kernel/arm/hid/DaliVolumeKey.h': 'b4d268161ce2ee3956d825be12a582b93f0b74b205baa481352cb061075d5b8a',
 }
 

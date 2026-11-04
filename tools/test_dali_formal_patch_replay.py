@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Replay ordered patches 0207-0212 from formal post-0206 source bytes."""
+"""Replay ordered patches 0207-0213 from formal post-0206 source bytes."""
 from pathlib import Path
 import gzip
 import hashlib
@@ -22,6 +22,7 @@ PATCHES = [
     ROOT / 'xnu/patches/0210-sweet-dali-legacy-touch-guard.patch',
     ROOT / 'xnu/patches/0211-dali-volume-up-rejection-diagnostics.patch',
     ROOT / 'xnu/patches/0212-dali-volume-up-mode1-input.patch',
+    ROOT / 'xnu/patches/0213-dali-pmic-power-volume-down.patch',
 ]
 PATCH_SHA256 = [
     '559df291118b3bacf6bd1c30132a210ce41af75c0d0cf30b3e640ee22314917d',
@@ -30,6 +31,7 @@ PATCH_SHA256 = [
     '82810df5f999bf56e454e3d4ccb89d9a568d3b81de7c60714a9e371b37c15c1a',
     '905c3cd8e106040ff190e1d8e2a915a04fe214e411fb5b8b8aa7d75b0462c143',
     'a3b2386a63e7a28515729ca0b2a23e61b2755a7af580e5126fe56752e6d19d84',
+    '863f6ecd7aeee123dffe5b6c4713f0dddd334cef08302be18a077ea17f80af40',
 ]
 
 
@@ -59,6 +61,11 @@ with tempfile.TemporaryDirectory(prefix='dali-formal-series-') as tmp:
     subprocess.run(['git', 'apply', '--include=' + POLICY_HEADER, str(POLICY_PATCH)],
                    cwd=xnu, check=True)
     assert (xnu / POLICY_HEADER).is_file()
+    # Materialize the two PMIF files from their original patches.
+    pmif = ('iokit/Kernel/arm/DaliPMIF.cpp', 'iokit/Kernel/arm/DaliPMIF.h')
+    for name in ('0093-dali-usb-pmif-platform.patch', '0132-dali-enable-native-usb-analog-supply.patch'):
+        subprocess.run(['git', 'apply', *['--include=' + path for path in pmif],
+                        str(ROOT / 'xnu/patches' / name)], cwd=xnu, check=True)
 
     for patch in PATCHES:
         print(f'APPLY {patch.name}', flush=True)
@@ -76,5 +83,5 @@ with tempfile.TemporaryDirectory(prefix='dali-formal-series-') as tmp:
         subprocess.run([sys.executable, str(ROOT / 'tools' / script), *args],
                        check=True, cwd=ROOT, env=env, timeout=600)
 
-print('PASS ordered 0207-0212 zero-fuzz replay and materialized-source regressions.')
+print('PASS ordered 0207-0213 zero-fuzz replay and materialized-source regressions.')
 print('Source replay does not constitute native kernel build or hardware validation.')

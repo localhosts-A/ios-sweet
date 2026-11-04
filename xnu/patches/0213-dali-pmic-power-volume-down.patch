@@ -1,0 +1,402 @@
+--- a/iokit/Kernel/arm/DaliPMIF.cpp
++++ b/iokit/Kernel/arm/DaliPMIF.cpp
+@@ -7,6 +7,7 @@
+ #include <pexpert/arm64/board_config.h>
+ #if defined(SWEET)
+ #include "DaliPMIF.h"
++#include "hid/DaliPmicKeyBackend.h"
+ #include <IOKit/IOLib.h>
+ #include <IOKit/IOMemoryDescriptor.h>
+ #include <machine/machine_routines.h>
+@@ -67,6 +68,22 @@
+     }
+     return ok;
+ }
++
++struct KeyTransferContext {
++    uint32_t *status;
++};
++
++bool keyReadByte(void *opaque, unsigned short address, unsigned char *value)
++{
++    KeyTransferContext *context = static_cast<KeyTransferContext *>(opaque);
++    return transferLocked(4, address, value, false, context->status);
++}
++
++bool keyWriteByte(void *opaque, unsigned short address, unsigned char value)
++{
++    KeyTransferContext *context = static_cast<KeyTransferContext *>(opaque);
++    return transferLocked(4, address, &value, true, context->status);
++}
+ }
+ 
+ bool dali_pmif_init(uint64_t address, uint64_t size)
+@@ -149,4 +166,44 @@
+     IOLockUnlock(lock);
+     return ok;
+ }
++
++bool dali_pmif_pmic_keys_enable(uint32_t *status)
++{
++    if (!status || !threadContext()) return false;
++    IOLock *lock = __atomic_load_n(&busLock, __ATOMIC_ACQUIRE);
++    if (!lock) return false;
++    IOLockLock(lock);
++    KeyTransferContext context = {status};
++    bool ok = busIO && dali_pmic_keys_set_enabled(keyReadByte, keyWriteByte,
++        &context, true);
++    IOLockUnlock(lock);
++    return ok;
++}
++
++bool dali_pmif_pmic_keys_disable(uint32_t *status)
++{
++    if (!status || !threadContext()) return false;
++    IOLock *lock = __atomic_load_n(&busLock, __ATOMIC_ACQUIRE);
++    if (!lock) return false;
++    IOLockLock(lock);
++    KeyTransferContext context = {status};
++    bool ok = busIO && dali_pmic_keys_set_enabled(keyReadByte, keyWriteByte,
++        &context, false);
++    IOLockUnlock(lock);
++    return ok;
++}
++
++bool dali_pmif_pmic_keys_poll(uint8_t *pending, uint32_t *status)
++{
++    if (!pending || !status || !threadContext()) return false;
++    *pending = 0;
++    IOLock *lock = __atomic_load_n(&busLock, __ATOMIC_ACQUIRE);
++    if (!lock) return false;
++    IOLockLock(lock);
++    KeyTransferContext context = {status};
++    bool ok = busIO && dali_pmic_keys_poll(keyReadByte, keyWriteByte,
++        &context, pending);
++    IOLockUnlock(lock);
++    return ok;
++}
+ #endif
+--- a/iokit/Kernel/arm/DaliPMIF.h
++++ b/iokit/Kernel/arm/DaliPMIF.h
+@@ -11,4 +11,8 @@
+     bool write, uint32_t *status);
+ bool dali_pmif_read16(uint8_t sid, uint16_t address, uint16_t *value,
+     uint32_t *status);
++/* MT6363 key-only mask setup and serialized key-status/ack transaction. */
++bool dali_pmif_pmic_keys_enable(uint32_t *status);
++bool dali_pmif_pmic_keys_disable(uint32_t *status);
++bool dali_pmif_pmic_keys_poll(uint8_t *pending, uint32_t *status);
+ #endif
+--- a/iokit/Kernel/arm/hid/SweetHID.cpp
++++ b/iokit/Kernel/arm/hid/SweetHID.cpp
+@@ -35,6 +35,8 @@
+ #include "SweetHIDGeometry.h"
+ #include "SweetHIDWaitPolicy.h"
+ #include "DaliVolumeKey.h"
++#include "DaliPmicKeyBackend.h"
++#include "../DaliPMIF.h"
+ extern "C" int sweet_dali_gui_presented(void);
+ 
+ extern "C" uint64_t mach_absolute_time(void);
+@@ -351,12 +353,16 @@
+ 	UInt32 fTestCount;
+ 	void startDaliVolume();
+ 	void stopDaliVolume();
++	void startDaliPMIC();
++	void stopDaliPMIC();
+ 	bool daliVolumeHasClient();
+ 	UInt32 daliVolumeReadPinStatus(UInt32 *mode, UInt32 *dir, UInt32 *ies,
+ 	    bool *gpioReadable, bool *iesReadable);
+ 	static UInt32 daliVolumeRead(IOMemoryMap *map, UInt32 offset);
+ 	static void daliVolumeFired(OSObject *owner, IOTimerEventSource *sender);
+ 	static IOReturn daliVolumeStopAction(OSObject *owner, void *, void *, void *, void *);
++	static void daliPMICFired(OSObject *owner, IOTimerEventSource *sender);
++	static IOReturn daliPMICStopAction(OSObject *owner, void *, void *, void *, void *);
+ 	IOMemoryDescriptor *fDaliGpioMemory, *fDaliIesMemory;
+ 	IOMemoryMap *fDaliGpioMap, *fDaliIesMap;
+ 	IOTimerEventSource *fDaliVolumeTimer;
+@@ -406,6 +412,9 @@
+ 
+ static SweetHIDButtons *gSweetButtons;
+ static SweetHIDTouch *gSweetTouch;
++static IOTimerEventSource *gDaliPMICTimer;
++static bool gDaliPMICTimerAdded, gDaliPMICRunning, gDaliPMICEnabled;
++static signed char gDaliPMICKeyState[2] = {-1, -1}; /* -1 unknown, 0 up, 1 down */
+ 
+ /* Single Dali button-service diagnostic state, matching the existing singleton. */
+ struct DaliVolumeDiagnosticState {
+@@ -518,6 +527,146 @@
+ }
+ 
+ void
++SweetHIDButtons::startDaliPMIC()
++{
++	int optIn = 0;
++	if (!PE_parse_boot_argn("dalipmickey", &optIn, sizeof(optIn)) || optIn != 1 ||
++	    gDaliPMICTimer) return;
++	auto root = IORegistryEntry::fromPath("IODeviceTree:/");
++	OSData *compatible = root ? OSDynamicCast(OSData, root->getProperty("compatible")) : NULL;
++	if (!compatible || !dali_volume_board_enabled(optIn, compatible->getBytesNoCopy(),
++	    compatible->getLength())) {
++		IOLog("DALI PMIC KEYS: board identity unavailable; input disabled\n");
++		return;
++	}
++	uint32_t pmifStatus = 0;
++	if (!dali_pmif_init(0x1c01a000ULL, 0x900)) {
++		IOLog("DALI PMIC KEYS: shared PMIF unavailable\n");
++		return;
++	}
++	gDaliPMICTimer = IOTimerEventSource::timerEventSource(this,
++	    &SweetHIDButtons::daliPMICFired);
++	if (!gDaliPMICTimer || !_hidWorkLoop ||
++	    _hidWorkLoop->addEventSource(gDaliPMICTimer) != kIOReturnSuccess) {
++		OSSafeReleaseNULL(gDaliPMICTimer);
++		IOLog("DALI PMIC KEYS: timer unavailable\n");
++		return;
++	}
++	gDaliPMICTimerAdded = true;
++	if (!dali_pmif_pmic_keys_enable(&pmifStatus)) {
++		_hidWorkLoop->removeEventSource(gDaliPMICTimer);
++		gDaliPMICTimerAdded = false;
++		OSSafeReleaseNULL(gDaliPMICTimer);
++		IOLog("DALI PMIC KEYS: key IRQ enable failed PMIF=0x%x\n", pmifStatus);
++		return;
++	}
++	gDaliPMICEnabled = true;
++	gDaliPMICKeyState[0] = gDaliPMICKeyState[1] = -1;
++	gDaliPMICRunning = true;
++	IOLog("DALI PMIC KEYS: press/release polling enabled; shared foreign IRQ bits preserved\n");
++	gDaliPMICTimer->setTimeoutMS(16);
++}
++
++void
++SweetHIDButtons::daliPMICFired(OSObject *owner, IOTimerEventSource *sender)
++{
++	SweetHIDButtons *self = OSDynamicCast(SweetHIDButtons, owner);
++	if (!self || !gDaliPMICRunning) return;
++	if (!self->daliVolumeHasClient()) {
++		sender->setTimeoutMS(16);
++		return;
++	}
++
++	uint8_t pending = 0;
++	uint32_t pmifStatus = 0;
++	bool ok = dali_pmif_pmic_keys_poll(&pending, &pmifStatus);
++	if (pending) {
++		DaliPmicKeyEvent events[4];
++		unsigned char ambiguous = 0;
++		unsigned count = dali_pmic_key_decode(pending, events, &ambiguous);
++		if (ambiguous) {
++			IOLog("DALI PMIC KEYS: coalesced press/release; final physical state unknown mask=0x%x\n",
++			    ambiguous);
++			for (unsigned key = 0; key < 2; ++key) {
++				if (!(ambiguous & (1U << key))) continue;
++				if (gDaliPMICKeyState[key] == 1) {
++					UInt32 usage = key == 0 ? kHIDUsage_Csmr_Power :
++					    kHIDUsage_Csmr_VolumeDecrement;
++					if (!self->key(usage, false)) continue;
++				}
++				gDaliPMICKeyState[key] = -1;
++			}
++		}
++		for (unsigned i = 0; i < count; ++i) {
++			unsigned key = events[i].sweetKey == 0 ? 0 : 1;
++			UInt32 usage = key == 0 ? kHIDUsage_Csmr_Power :
++			    kHIDUsage_Csmr_VolumeDecrement;
++			if (events[i].down) {
++				if (gDaliPMICKeyState[key] != 1 && self->key(usage, true))
++					gDaliPMICKeyState[key] = 1;
++			} else if (gDaliPMICKeyState[key] == 1) {
++				if (self->key(usage, false)) gDaliPMICKeyState[key] = 0;
++			} else {
++				gDaliPMICKeyState[key] = 0;
++			}
++		}
++	}
++	if (!ok) {
++		gDaliPMICRunning = false;
++		for (unsigned key = 0; key < 2; ++key) {
++			if (gDaliPMICKeyState[key] == 1) {
++				UInt32 usage = key == 0 ? kHIDUsage_Csmr_Power :
++				    kHIDUsage_Csmr_VolumeDecrement;
++				(void)self->key(usage, false);
++			}
++			gDaliPMICKeyState[key] = -1;
++		}
++		IOLog("DALI PMIC KEYS: PMIF poll/ack failed; polling stopped status=0x%x\n",
++		    pmifStatus);
++		return;
++	}
++	sender->setTimeoutMS(16);
++}
++
++IOReturn
++SweetHIDButtons::daliPMICStopAction(OSObject *owner, void *, void *, void *, void *)
++{
++	SweetHIDButtons *self = OSDynamicCast(SweetHIDButtons, owner);
++	if (!self) return kIOReturnBadArgument;
++	gDaliPMICRunning = false;
++	if (gDaliPMICTimer) {
++		gDaliPMICTimer->cancelTimeout();
++		gDaliPMICTimer->disable();
++	}
++	for (unsigned key = 0; key < 2; ++key) {
++		if (gDaliPMICKeyState[key] == 1) {
++			UInt32 usage = key == 0 ? kHIDUsage_Csmr_Power :
++			    kHIDUsage_Csmr_VolumeDecrement;
++			(void)self->key(usage, false);
++		}
++		gDaliPMICKeyState[key] = -1;
++	}
++	return kIOReturnSuccess;
++}
++
++void
++SweetHIDButtons::stopDaliPMIC()
++{
++	if (_hidWorkLoop && gDaliPMICTimerAdded) {
++		(void)_hidWorkLoop->runAction(&SweetHIDButtons::daliPMICStopAction, this);
++		_hidWorkLoop->removeEventSource(gDaliPMICTimer);
++		gDaliPMICTimerAdded = false;
++	}
++	OSSafeReleaseNULL(gDaliPMICTimer);
++	if (gDaliPMICEnabled) {
++		uint32_t pmifStatus = 0;
++		(void)dali_pmif_pmic_keys_disable(&pmifStatus);
++		gDaliPMICEnabled = false;
++	}
++	gDaliPMICRunning = false;
++}
++
++void
+ SweetHIDButtons::startDaliVolume()
+ {
+ 	int optIn = 0;
+@@ -684,6 +833,7 @@
+ void
+ SweetHIDButtons::stop(IOService *provider)
+ {
++	stopDaliPMIC();
+ 	stopDaliVolume();
+ 	IOHIDEventService::stop(provider);
+ }
+@@ -691,6 +841,7 @@
+ void
+ SweetHIDButtons::free(void)
+ {
++	stopDaliPMIC();
+ 	stopDaliVolume();
+ 	IOHIDEventService::free();
+ }
+@@ -710,6 +861,7 @@
+ 	gSweetButtons = this;
+ 	registerService();
+ 	startDaliVolume();
++	startDaliPMIC();
+ 	IOLog("SWEET HID: buttons registered (test every %u s)\n", fTestSecs);
+ 	return true;
+ }
+--- /dev/null
++++ b/iokit/Kernel/arm/hid/DaliPmicKeyBackend.h
+@@ -0,0 +1,101 @@
++/* MT6363 key status protocol shared by XNU and its host test. */
++#ifndef DALI_PMIC_KEY_BACKEND_H
++#define DALI_PMIC_KEY_BACKEND_H
++
++struct DaliPmicKeyEvent {
++    int sweetKey; /* sweet_hid_key: 0 power, 2 volume down */
++    bool down;
++};
++
++static constexpr unsigned DALI_PMIC_IRQ_POWER_PRESS = 48;
++static constexpr unsigned DALI_PMIC_IRQ_DOWN_PRESS = 49;
++static constexpr unsigned DALI_PMIC_IRQ_POWER_RELEASE = 51;
++static constexpr unsigned DALI_PMIC_IRQ_DOWN_RELEASE = 52;
++static constexpr unsigned short DALI_PMIC_TOP_IRQ_STATUS = 0x004e;
++static constexpr unsigned short DALI_PMIC_TOP_RCS_CLEAR = 0x041b;
++static constexpr unsigned short DALI_PMIC_IRQ_ENABLE0 = 0x090f;
++static constexpr unsigned short DALI_PMIC_IRQ_STATUS0 = 0x091b;
++static constexpr unsigned short DALI_PMIC_IRQ_STATUS1 = 0x091c;
++static constexpr unsigned char DALI_PMIC_KEY_MASK = 0x1b;
++static constexpr unsigned char DALI_PMIC_TOP_KEY_GROUP = 0x04; /* top_bit=2 */
++
++typedef bool (*DaliPmicReadByte)(void *context, unsigned short address,
++    unsigned char *value);
++typedef bool (*DaliPmicWriteByte)(void *context, unsigned short address,
++    unsigned char value);
++
++static inline bool dali_pmic_key_event(unsigned hwirq, DaliPmicKeyEvent *event)
++{
++    if (!event) return false;
++    switch (hwirq) {
++    case DALI_PMIC_IRQ_POWER_PRESS: *event = {0, true}; return true;
++    case DALI_PMIC_IRQ_DOWN_PRESS: *event = {2, true}; return true;
++    case DALI_PMIC_IRQ_POWER_RELEASE: *event = {0, false}; return true;
++    case DALI_PMIC_IRQ_DOWN_RELEASE: *event = {2, false}; return true;
++    default: return false;
++    }
++}
++
++static inline bool dali_pmic_keys_set_enabled(DaliPmicReadByte read,
++    DaliPmicWriteByte write, void *context, bool enabled)
++{
++    unsigned char value = 0;
++    if (!read || !write || !read(context, DALI_PMIC_IRQ_ENABLE0, &value)) return false;
++    unsigned char next = enabled ? value | DALI_PMIC_KEY_MASK :
++        value & (unsigned char)~DALI_PMIC_KEY_MASK;
++    return next == value || write(context, DALI_PMIC_IRQ_ENABLE0, next);
++}
++
++/* Keep one PMIF lock from top-status snapshot through key-only W1C/RCS clear.
++ * Foreign bits remain set; global RCS is cleared only when this is the sole
++ * pending top group and both PSC status banks contain no foreign events.
++ * If the final RCS write fails, pending still reports already-cleared keys.
++ */
++static inline bool dali_pmic_keys_poll(DaliPmicReadByte read,
++    DaliPmicWriteByte write, void *context, unsigned char *pending)
++{
++    if (!pending) return false;
++    *pending = 0;
++    if (!read || !write) return false;
++
++    unsigned char top = 0, status0 = 0, status1 = 0;
++    if (!read(context, DALI_PMIC_TOP_IRQ_STATUS, &top)) return false;
++    if (!(top & DALI_PMIC_TOP_KEY_GROUP)) return true;
++    if (!read(context, DALI_PMIC_IRQ_STATUS0, &status0) ||
++        !read(context, DALI_PMIC_IRQ_STATUS1, &status1)) return false;
++
++    unsigned char keys = status0 & DALI_PMIC_KEY_MASK;
++    if (!keys) return true;
++    if (!write(context, DALI_PMIC_IRQ_STATUS0, keys)) return false;
++    *pending = keys;
++
++    if (top == DALI_PMIC_TOP_KEY_GROUP &&
++        !(status0 & (unsigned char)~DALI_PMIC_KEY_MASK) && !status1) {
++        return write(context, DALI_PMIC_TOP_RCS_CLEAR, 1);
++    }
++    return true;
++}
++
++/* Same-key press+release latched together has no recoverable ordering/state. */
++static inline unsigned dali_pmic_key_decode(unsigned char status,
++    DaliPmicKeyEvent events[4], unsigned char *ambiguousKeys)
++{
++    unsigned char ambiguous = 0;
++    if ((status & 0x01) && (status & 0x08)) ambiguous |= 0x01;
++    if ((status & 0x02) && (status & 0x10)) ambiguous |= 0x02;
++    if (ambiguousKeys) *ambiguousKeys = ambiguous;
++    if (!events) return 0;
++
++    unsigned count = 0;
++    if (!(ambiguous & 0x01) && (status & 0x01))
++        (void)dali_pmic_key_event(DALI_PMIC_IRQ_POWER_PRESS, &events[count++]);
++    if (!(ambiguous & 0x02) && (status & 0x02))
++        (void)dali_pmic_key_event(DALI_PMIC_IRQ_DOWN_PRESS, &events[count++]);
++    if (!(ambiguous & 0x01) && (status & 0x08))
++        (void)dali_pmic_key_event(DALI_PMIC_IRQ_POWER_RELEASE, &events[count++]);
++    if (!(ambiguous & 0x02) && (status & 0x10))
++        (void)dali_pmic_key_event(DALI_PMIC_IRQ_DOWN_RELEASE, &events[count++]);
++    return count;
++}
++
++#endif
