@@ -19,8 +19,7 @@ sys.path.insert(0, str(HERE))
 import sweet_log_evidence as evidence
 import sweet_preboot_capture as preboot
 
-PROJECT = Path('/run/media/baka/07ede09a-a5d9-4bb0-8dc6-9a4c9910f38f/IOS')
-STOCK = PROJECT / 'ios-sweet-upstream/backup/dali-25060RK16C-pairtest-20261020'
+STOCK_IMAGES = ('init_boot_b.img', 'boot_b.img')
 PSTORE_COMMAND = 'test -r /sys/fs/pstore/console-ramoops-0 && exec cat /sys/fs/pstore/console-ramoops-0'
 
 
@@ -77,6 +76,29 @@ def run_logged(transport, arguments, output):
     return result
 
 
+def validate_stock_images(stock_image_dir):
+    """Resolve both required recovery images before any transport activity."""
+    directory = Path(stock_image_dir).expanduser()
+    try:
+        directory = directory.resolve(strict=True)
+    except OSError as error:
+        raise ValueError('stock image directory is unavailable') from error
+    if not directory.is_dir():
+        raise ValueError('stock image path must be a directory')
+
+    images = {}
+    for name in STOCK_IMAGES:
+        image = directory / name
+        try:
+            image = image.resolve(strict=True)
+        except OSError as error:
+            raise ValueError('required stock image is unavailable: ' + name) from error
+        if not image.is_file() or not os.access(image, os.R_OK):
+            raise ValueError('required stock image is not a readable file: ' + name)
+        images[name] = image
+    return images
+
+
 def capture_pstore(directory, transport):
     try:
         result = transport.adb(['exec-out', 'sh', '-c', PSTORE_COMMAND], timeout=30)
@@ -129,7 +151,9 @@ def capture_after_return(trial_dir, pre_dir, pre_sha256, run_id, transport):
     return result
 
 
-def recover(trial_dir, pre_dir, pre_sha256, run_id, transport, return_timeout=2550, reboot_trial=False):
+def recover(trial_dir, pre_dir, pre_sha256, run_id, transport, stock_image_dir,
+            return_timeout=2550, reboot_trial=False):
+    stock_images = validate_stock_images(stock_image_dir)
     trial_dir = Path(trial_dir)
     if not trial_dir.is_dir():
         raise ValueError('trial_dir must already exist')
@@ -170,7 +194,7 @@ def recover(trial_dir, pre_dir, pre_sha256, run_id, transport, return_timeout=25
             for partition, image in (('init_boot_b', 'init_boot_b.img'), ('boot_b', 'boot_b.img')):
                 state['in_progress'] = 'restore_' + partition
                 save()
-                run_logged(transport, ['flash', partition, str(STOCK / image)],
+                run_logged(transport, ['flash', partition, str(stock_images[image])],
                            trial_dir / ('restore-' + partition + '.log'))
                 state[partition + '_stock_flash_exit_zero'] = True
                 save()
@@ -202,11 +226,14 @@ def main():
     p.add_argument('--preboot-receipt-sha256', required=True)
     p.add_argument('--run-id', required=True)
     p.add_argument('--serial')
+    p.add_argument('--stock-image-dir', type=Path, required=True,
+                   help='directory containing init_boot_b.img and boot_b.img')
     p.add_argument('--return-timeout', type=int, default=2550)
     p.add_argument('--reboot-trial', action='store_true')
     args = p.parse_args()
     state = recover(args.trial_dir, args.preboot_dir, args.preboot_receipt_sha256,
-                    args.run_id, Transport(args.serial), args.return_timeout, args.reboot_trial)
+                    args.run_id, Transport(args.serial), args.stock_image_dir,
+                    args.return_timeout, args.reboot_trial)
     print(json.dumps({'boot_images_restored': state['boot_images_restored'],
                       'all_slots_complete': state['capture']['all_slots_complete'],
                       'comparison': state['capture']['comparison'],

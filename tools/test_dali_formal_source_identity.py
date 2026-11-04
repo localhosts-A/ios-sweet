@@ -14,8 +14,8 @@ expected = {
     'bsd/sweet_hfs/core/hfs_vnops.c': '1863c19fc3231151be9f800147d0a5ba72967ad98a8432284e1b13d4c460e4d9',
     'bsd/dev/sweet_touch.c': '90ec1634c1836d16e9d1810055796f14b31a8b320878b069d82027c6f6ce5a71',
     'bsd/dev/SweetLegacyTouchPolicy.h': 'cc79805619d4726775512998bc2e3eafea98fa7da42a8a5012449f63592108fc',
-    'iokit/Kernel/arm/hid/SweetHID.cpp': '61a5671cd01f834e42f6374432f394049d59c766ab52bfd76b1666dddc3f5c36',
-    'iokit/Kernel/arm/hid/DaliVolumeKey.h': '42da45b453b3f9bebd34f29bf434d6a88786b673ae0c6bf8c98520a4f67a1837',
+    'iokit/Kernel/arm/hid/SweetHID.cpp': '0e05a5c761379480dffe826676abbc04cc06d6e9338c67df87fc25ac6e935d98',
+    'iokit/Kernel/arm/hid/DaliVolumeKey.h': 'a6e52fd1e7e8416fa61a6cdd72ca27b22d2afae1585e5bd6ff57c74e22728e5d',
 }
 
 

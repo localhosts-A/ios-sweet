@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Replay ordered patches 0207-0210 from formal post-0206 source bytes."""
+"""Replay ordered patches 0207-0211 from formal post-0206 source bytes."""
 from pathlib import Path
 import gzip
 import hashlib
@@ -13,17 +13,21 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
 import test_dali_gui_load_progress as source
 
+POLICY_PATCH = ROOT / 'xnu/patches/0170-dali-finite-late-gui-startup-budgets.patch'
+POLICY_HEADER = 'iokit/Kernel/arm/hid/SweetHIDWaitPolicy.h'
 PATCHES = [
     ROOT / 'xnu/patches/0207-dali-ufs-g4-root-slot-logger-v6.patch',
     ROOT / 'xnu/patches/0208-sweet-hfs-nonjournal-full-fsync-error.patch',
     ROOT / 'xnu/patches/0209-dali-volume-up-readonly-gpio.patch',
     ROOT / 'xnu/patches/0210-sweet-dali-legacy-touch-guard.patch',
+    ROOT / 'xnu/patches/0211-dali-volume-up-rejection-diagnostics.patch',
 ]
 PATCH_SHA256 = [
     '559df291118b3bacf6bd1c30132a210ce41af75c0d0cf30b3e640ee22314917d',
     '898da76194126c9ecbec9e439928ff0af2d4ea367be303d391fb0f9adb88749a',
     '2c80c29cbf1433922efa864b964cd57a71bed67b5764facf6c586f78ab0335d9',
     '82810df5f999bf56e454e3d4ccb89d9a568d3b81de7c60714a9e371b37c15c1a',
+    '905c3cd8e106040ff190e1d8e2a915a04fe214e411fb5b8b8aa7d75b0462c143',
 ]
 
 
@@ -48,9 +52,11 @@ with tempfile.TemporaryDirectory(prefix='dali-formal-series-') as tmp:
         target = xnu / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / 'tools/dali_input_tests/base' / rel, target)
-    wait = Path('/run/media/baka/07ede09a-a5d9-4bb0-8dc6-9a4c9910f38f/IOS/.tmp/xnu-linux-local-20261104/workspace/xnu-0206-fixture-v1/iokit/Kernel/arm/hid/SweetHIDWaitPolicy.h')
-    assert wait.is_file()
-    shutil.copyfile(wait, xnu / 'iokit/Kernel/arm/hid/SweetHIDWaitPolicy.h')
+    # Materialize the prerequisite header directly from its formal 0170 patch;
+    # do not depend on a workstation-specific source checkout or fixture path.
+    subprocess.run(['git', 'apply', '--include=' + POLICY_HEADER, str(POLICY_PATCH)],
+                   cwd=xnu, check=True)
+    assert (xnu / POLICY_HEADER).is_file()
 
     for patch in PATCHES:
         print(f'APPLY {patch.name}', flush=True)
@@ -68,5 +74,5 @@ with tempfile.TemporaryDirectory(prefix='dali-formal-series-') as tmp:
         subprocess.run([sys.executable, str(ROOT / 'tools' / script), *args],
                        check=True, cwd=ROOT, env=env, timeout=600)
 
-print('PASS ordered 0207-0210 zero-fuzz replay and materialized-source regressions.')
+print('PASS ordered 0207-0211 zero-fuzz replay and materialized-source regressions.')
 print('Source replay does not constitute native kernel build or hardware validation.')

@@ -22,8 +22,9 @@ def result(code=0, out=b'', err=b''):
 class Fake:
     def __init__(self, slots, fail_slot=None, flash_fail=None, pstore='missing'):
         self.slots=slots;self.fail_slot=fail_slot;self.flash_fail=flash_fail;self.pstore=pstore
-        self.adb_calls=[];self.fastboot_calls=[];self.states=iter((False,True))
+        self.adb_calls=[];self.fastboot_calls=[];self.transport_calls=[];self.states=iter((False,True))
     def adb(self,args,timeout=60):
+        self.transport_calls.append(('adb',list(args)))
         self.adb_calls.append((list(args),timeout))
         if args[:3]==['shell','blockdev','--getsize64']:
             return result(out=b'33554432\n')
@@ -38,9 +39,14 @@ class Fake:
             if self.pstore=='data':return result(out=b'ramoops-data')
             return result(1,b'')
         raise AssertionError(args)
-    def fastboot_present(self):return next(self.states)
-    def android_ready(self):return True
+    def fastboot_present(self):
+        self.transport_calls.append(('fastboot_present',))
+        return next(self.states)
+    def android_ready(self):
+        self.transport_calls.append(('android_ready',))
+        return True
     def fastboot(self,args,timeout=120):
+        self.transport_calls.append(('fastboot',list(args)))
         self.fastboot_calls.append((list(args),timeout))
         if args[0]=='flash' and args[1]==self.flash_fail:return result(1,b'',b'failed')
         return result(0,b'OKAY')
@@ -51,6 +57,12 @@ class Fake:
 
 
 class TestRunner(unittest.TestCase):
+    def stock_images(self,root,missing=None):
+        stock=root/'stock';stock.mkdir(exist_ok=True)
+        for name in rr.STOCK_IMAGES:
+            if name != missing:(stock/name).write_bytes(b'stock-image')
+        return stock
+
     def inventory(self,root):
         fake=Fake([header(),EMPTY,EMPTY]);code,status=pre.capture_preboot(root/'pre',RID,fake)
         self.assertEqual(code,0,status);self.assertFalse(status['device_write_occurred'])
@@ -79,11 +91,21 @@ class TestRunner(unittest.TestCase):
             with self.assertRaises(Exception):pre.capture_preboot(root/'zero','0'*32,untouched)
             self.assertFalse((root/'zero').exists());self.assertEqual(untouched.adb_calls,[])
 
+    def test_missing_stock_image_stops_before_any_transport_operation(self):
+        with tempfile.TemporaryDirectory(prefix='sweetlog-runner-') as t:
+            root=Path(t);pre_dir,digest=self.inventory(root);trial=root/'trial';trial.mkdir()
+            stock=self.stock_images(root,missing='boot_b.img')
+            fake=Fake([header(),EMPTY,EMPTY])
+            with self.assertRaisesRegex(ValueError,'required stock image is unavailable: boot_b.img'):
+                rr.recover(trial,pre_dir,digest,RID,fake,stock)
+            self.assertEqual(fake.transport_calls,[])
+            self.assertFalse((trial/'return-recovery.json').exists())
+
     def test_one_shot_restore_capture_and_unverified_candidate(self):
         with tempfile.TemporaryDirectory(prefix='sweetlog-runner-') as t:
             root=Path(t);pre_dir,digest=self.inventory(root);trial=root/'trial';trial.mkdir()
             fake=Fake([header(),header(RID),EMPTY],pstore='missing')
-            state=rr.recover(trial,pre_dir,digest,RID,fake)
+            state=rr.recover(trial,pre_dir,digest,RID,fake,self.stock_images(root))
             self.assertTrue(state['boot_images_restored']);self.assertTrue(state['android_ready'])
             self.assertTrue(state['capture']['all_slots_complete'])
             self.assertEqual(state['capture']['comparison']['helper_exit'],5)
@@ -99,34 +121,34 @@ class TestRunner(unittest.TestCase):
             self.assertFalse(receipt['root_rewritten']);self.assertFalse(receipt['automatic_fastboot_return_verified'])
             self.assertEqual(receipt['capture']['comparison']['helper_exit'],5)
             before=len(fake.fastboot_calls)
-            with self.assertRaises(FileExistsError):rr.recover(trial,pre_dir,digest,RID,fake)
+            with self.assertRaises(FileExistsError):rr.recover(trial,pre_dir,digest,RID,fake,self.stock_images(root))
             self.assertEqual(len(fake.fastboot_calls),before)
 
     def test_stock_flash_failure_is_never_retried(self):
         with tempfile.TemporaryDirectory(prefix='sweetlog-runner-') as t:
             root=Path(t);pre_dir,digest=self.inventory(root);trial=root/'trial';trial.mkdir()
             fake=Fake([header(),EMPTY,EMPTY],flash_fail='init_boot_b')
-            with self.assertRaises(RuntimeError):rr.recover(trial,pre_dir,digest,RID,fake)
+            with self.assertRaises(RuntimeError):rr.recover(trial,pre_dir,digest,RID,fake,self.stock_images(root))
             self.assertEqual([c[:2] for c,_ in fake.fastboot_calls],[['flash','init_boot_b']])
             self.assertIn('error',json.loads((trial/'return-recovery.json').read_text()))
-            with self.assertRaises(FileExistsError):rr.recover(trial,pre_dir,digest,RID,fake)
+            with self.assertRaises(FileExistsError):rr.recover(trial,pre_dir,digest,RID,fake,self.stock_images(root))
             self.assertEqual(len(fake.fastboot_calls),1)
 
     def test_second_stock_flash_failure_is_never_retried(self):
         with tempfile.TemporaryDirectory(prefix='sweetlog-runner-') as t:
             root=Path(t);pre_dir,digest=self.inventory(root);trial=root/'trial';trial.mkdir()
             fake=Fake([header(),EMPTY,EMPTY],flash_fail='boot_b')
-            with self.assertRaises(RuntimeError):rr.recover(trial,pre_dir,digest,RID,fake)
+            with self.assertRaises(RuntimeError):rr.recover(trial,pre_dir,digest,RID,fake,self.stock_images(root))
             self.assertEqual([c[:2] for c,_ in fake.fastboot_calls],[['flash','init_boot_b'],['flash','boot_b']])
             self.assertFalse(json.loads((trial/'return-recovery.json').read_text())['boot_images_restored'])
-            with self.assertRaises(FileExistsError):rr.recover(trial,pre_dir,digest,RID,fake)
+            with self.assertRaises(FileExistsError):rr.recover(trial,pre_dir,digest,RID,fake,self.stock_images(root))
             self.assertEqual(len(fake.fastboot_calls),2)
 
     def test_bad_pinned_preboot_hash_cannot_claim_candidate(self):
         with tempfile.TemporaryDirectory(prefix='sweetlog-runner-') as t:
             root=Path(t);pre_dir,_=self.inventory(root);trial=root/'trial';trial.mkdir()
             fake=Fake([header(),header(RID),EMPTY],pstore='missing')
-            state=rr.recover(trial,pre_dir,'0'*64,RID,fake)
+            state=rr.recover(trial,pre_dir,'0'*64,RID,fake,self.stock_images(root))
             self.assertTrue(state['capture']['all_slots_complete'])
             self.assertEqual(state['capture']['comparison']['helper_exit'],6)
             self.assertFalse(state['capture']['comparison']['candidate_only'])
@@ -137,7 +159,7 @@ class TestRunner(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='sweetlog-runner-') as t:
             root=Path(t);pre_dir,digest=self.inventory(root);trial=root/'trial';trial.mkdir()
             fake=Fake([header(),header(RID),EMPTY],fail_slot=0,pstore='data')
-            state=rr.recover(trial,pre_dir,digest,RID,fake)
+            state=rr.recover(trial,pre_dir,digest,RID,fake,self.stock_images(root))
             self.assertFalse(state['capture']['all_slots_complete'])
             self.assertIsNone(state['capture']['comparison'])
             self.assertTrue(state['capture']['pstore']['saved'])
@@ -151,7 +173,7 @@ class TestRunner(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='sweetlog-runner-') as t:
             root=Path(t);pre_dir,digest=self.inventory(root);trial=root/'trial';trial.mkdir()
             fake=Fake([header(),header(RID),EMPTY],fail_slot='timeout-1',pstore='data')
-            state=rr.recover(trial,pre_dir,digest,RID,fake)
+            state=rr.recover(trial,pre_dir,digest,RID,fake,self.stock_images(root))
             self.assertFalse(state['capture']['all_slots_complete'])
             self.assertEqual((trial/'posttrial-slots/slot1.bin').read_bytes(),b'partial-timeout')
             self.assertEqual((trial/'posttrial-slots/slot2.bin').stat().st_size,len(EMPTY))
@@ -161,7 +183,7 @@ class TestRunner(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='sweetlog-runner-') as t:
             root=Path(t);pre_dir,digest=self.inventory(root);trial=root/'trial';trial.mkdir()
             fake=Fake([header(),header(RID),EMPTY],pstore='timeout')
-            state=rr.recover(trial,pre_dir,digest,RID,fake)
+            state=rr.recover(trial,pre_dir,digest,RID,fake,self.stock_images(root))
             self.assertTrue(state['capture']['all_slots_complete'])
             self.assertIn('TimeoutExpired',state['capture']['pstore']['error'])
             self.assertTrue(state['capture']['comparison']['candidate_only'])

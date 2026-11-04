@@ -1,0 +1,276 @@
+--- a/iokit/Kernel/arm/hid/SweetHID.cpp
++++ b/iokit/Kernel/arm/hid/SweetHID.cpp
+@@ -352,7 +352,8 @@
+ 	void startDaliVolume();
+ 	void stopDaliVolume();
+ 	bool daliVolumeHasClient();
+-	bool daliVolumePinValid();
++	UInt32 daliVolumeReadPinStatus(UInt32 *mode, UInt32 *dir, UInt32 *ies,
++	    bool *gpioReadable, bool *iesReadable);
+ 	static UInt32 daliVolumeRead(IOMemoryMap *map, UInt32 offset);
+ 	static void daliVolumeFired(OSObject *owner, IOTimerEventSource *sender);
+ 	static IOReturn daliVolumeStopAction(OSObject *owner, void *, void *, void *, void *);
+@@ -404,6 +405,24 @@
+ static SweetHIDButtons *gSweetButtons;
+ static SweetHIDTouch *gSweetTouch;
+ 
++/* Single Dali button-service diagnostic state, matching the existing singleton. */
++struct DaliVolumeDiagnosticState {
++	bool diagnosticOnly;
++	bool lastDinValid;
++	bool lastDinHigh;
++	UInt32 pollCount;
++	UInt32 dinLogCount;
++	uint64_t startedNs;
++};
++static DaliVolumeDiagnosticState gDaliVolumeDiagnostic = {};
++static const UInt32 kDaliVolumeDiagnosticPollMs = 100;
++static const UInt32 kDaliVolumeDiagnosticWindowSeconds = 600;
++static const UInt32 kDaliVolumeDiagnosticMaxPolls = 6001;
++static const UInt32 kDaliVolumeDiagnosticMaxDinLogs = 16;
++static const uint64_t kDaliVolumeDiagnosticWindowNs = 600000000000ULL;
++static const UInt32 kDaliVolumeRejectGpioMap = 1U << 8;
++static const UInt32 kDaliVolumeRejectIesMap = 1U << 9;
++
+ UInt32
+ SweetHIDButtons::daliVolumeRead(IOMemoryMap *map, UInt32 offset)
+ {
+@@ -412,11 +431,76 @@
+ 	return value;
+ }
+ 
+-bool
+-SweetHIDButtons::daliVolumePinValid()
++UInt32
++SweetHIDButtons::daliVolumeReadPinStatus(UInt32 *mode, UInt32 *dir, UInt32 *ies,
++    bool *gpioReadable, bool *iesReadable)
++{
++	*mode = *dir = *ies = 0;
++	*gpioReadable = fDaliGpioMap && fDaliGpioMap->getVirtualAddress();
++	*iesReadable = fDaliIesMap && fDaliIesMap->getVirtualAddress();
++	UInt32 rejects = 0;
++	if (!*gpioReadable) {
++		rejects |= kDaliVolumeRejectGpioMap;
++	} else {
++		*mode = daliVolumeRead(fDaliGpioMap, 0x370);
++		*dir = daliVolumeRead(fDaliGpioMap, 0x10);
++		if (((*mode >> 16) & 0xfU) != 0)
++			rejects |= DALI_VOLUME_PIN_MODE_INVALID;
++		if (*dir & (1U << 28))
++			rejects |= DALI_VOLUME_PIN_DIRECTION_OUTPUT;
++	}
++	if (!*iesReadable) {
++		rejects |= kDaliVolumeRejectIesMap;
++	} else {
++		*ies = daliVolumeRead(fDaliIesMap, 0x70);
++		if (!(*ies & (1U << 19)))
++			rejects |= DALI_VOLUME_PIN_IES_DISABLED;
++	}
++	return rejects;
++}
++
++static void
++daliVolumeLogPinSnapshot(bool gpioDesc, bool gpioMap, bool gpioVa,
++    bool iesDesc, bool iesMap, bool iesVa, bool gpioReadable, bool iesReadable,
++    UInt32 mode, UInt32 dir, UInt32 ies, UInt32 din, UInt32 rejects)
++{
++	IOLog("DALI VOLUP: MMIO map gpio(desc=%u map=%u va=%u) iocfg-lm1(desc=%u map=%u va=%u)\n",
++	    gpioDesc, gpioMap, gpioVa, iesDesc, iesMap, iesVa);
++	IOLog("DALI VOLUP: pin snapshot gpio-readable=%u ies-readable=%u mode@+0x370=0x%08x mode60=%u dir@+0x10=0x%08x dir60=%u ies@+0x70=0x%08x ies60=%u din@+0x210=0x%08x din60=%u reject=0x%03x\n",
++	    gpioReadable, iesReadable, mode, (mode >> 16) & 0xfU, dir,
++	    (dir >> 28) & 1U, ies, (ies >> 19) & 1U, din, (din >> 28) & 1U,
++	    rejects);
++}
++
++static void
++daliVolumeResetDiagnostic(bool diagnosticOnly, uint64_t nowNs, bool haveDin, UInt32 din)
++{
++	gDaliVolumeDiagnostic = {};
++	gDaliVolumeDiagnostic.diagnosticOnly = diagnosticOnly;
++	gDaliVolumeDiagnostic.startedNs = nowNs;
++	if (haveDin) {
++		gDaliVolumeDiagnostic.lastDinValid = true;
++		gDaliVolumeDiagnostic.lastDinHigh = (din & (1U << 28)) != 0;
++	}
++}
++
++static void
++daliVolumeTraceDin(UInt32 raw)
+ {
+-	return dali_volume_pin_valid(daliVolumeRead(fDaliGpioMap, 0x370),
+-	    daliVolumeRead(fDaliGpioMap, 0x10), daliVolumeRead(fDaliIesMap, 0x70));
++	if (gDaliVolumeDiagnostic.pollCount != ~0U)
++		gDaliVolumeDiagnostic.pollCount++;
++	bool high = (raw & (1U << 28)) != 0;
++	if (gDaliVolumeDiagnostic.lastDinValid && gDaliVolumeDiagnostic.lastDinHigh == high)
++		return;
++	gDaliVolumeDiagnostic.lastDinValid = true;
++	gDaliVolumeDiagnostic.lastDinHigh = high;
++	if (gDaliVolumeDiagnostic.dinLogCount < kDaliVolumeDiagnosticMaxDinLogs) {
++		UInt32 transition = ++gDaliVolumeDiagnostic.dinLogCount;
++		IOLog("DALI VOLUP: DIN transition=%u sample=%u trust=%s raw=0x%08x bit28=%u active-low=%u\n",
++		    transition, gDaliVolumeDiagnostic.pollCount,
++		    gDaliVolumeDiagnostic.diagnosticOnly ? "unvalidated" : "config-valid",
++		    raw, high, high ? 0U : 1U);
++	}
+ }
+ 
+ bool
+@@ -440,29 +524,49 @@
+ 		IOLog("DALI VOLUP: board identity unavailable; input disabled\n");
+ 		return;
+ 	}
+-	/* GPIO60 input/dir/mux and IOCFG_LM1 input-enable only. No register writes. */
++	/* Read-only mappings only; no GPIO/IOCFG writes or mode repair. */
+ 	fDaliGpioMemory = IOMemoryDescriptor::withPhysicalAddress(0x1002d000ULL, 0x1000, kIODirectionIn);
+ 	fDaliIesMemory = IOMemoryDescriptor::withPhysicalAddress(0x13020000ULL, 0x1000, kIODirectionIn);
+ 	if (fDaliGpioMemory)
+ 		fDaliGpioMap = fDaliGpioMemory->map(kIOMapInhibitCache | kIOMapReadOnly);
+ 	if (fDaliIesMemory)
+ 		fDaliIesMap = fDaliIesMemory->map(kIOMapInhibitCache | kIOMapReadOnly);
+-	if (!fDaliGpioMap || !fDaliIesMap || !fDaliGpioMap->getVirtualAddress() ||
+-	    !fDaliIesMap->getVirtualAddress() || !daliVolumePinValid()) {
+-		IOLog("DALI VOLUP: mapping or firmware pin configuration rejected\n");
++
++	bool gpioVa = fDaliGpioMap && fDaliGpioMap->getVirtualAddress();
++	bool iesVa = fDaliIesMap && fDaliIesMap->getVirtualAddress();
++	bool gpioReadable = false, iesReadable = false;
++	UInt32 mode = 0, dir = 0, ies = 0;
++	UInt32 rejects = daliVolumeReadPinStatus(&mode, &dir, &ies, &gpioReadable, &iesReadable);
++	UInt32 din = gpioReadable ? daliVolumeRead(fDaliGpioMap, 0x210) : 0;
++	daliVolumeLogPinSnapshot(fDaliGpioMemory != NULL, fDaliGpioMap != NULL, gpioVa,
++	    fDaliIesMemory != NULL, fDaliIesMap != NULL, iesVa, gpioReadable, iesReadable,
++	    mode, dir, ies, din, rejects);
++	if (!gpioReadable) {
++		IOLog("DALI VOLUP: GPIO MMIO unavailable; input and DIN sampling disabled (reject=0x%03x)\n",
++		    rejects);
+ 		stopDaliVolume();
+ 		return;
+ 	}
++
++	uint64_t nowNs = 0;
++	absolutetime_to_nanoseconds(mach_absolute_time(), &nowNs);
+ 	fDaliVolumeState = {};
++	daliVolumeResetDiagnostic(rejects != 0, nowNs, true, din);
+ 	fDaliVolumeTimer = IOTimerEventSource::timerEventSource(this, &SweetHIDButtons::daliVolumeFired);
+ 	if (!fDaliVolumeTimer || _hidWorkLoop->addEventSource(fDaliVolumeTimer) != kIOReturnSuccess) {
+-		IOLog("DALI VOLUP: timer unavailable\n");
++		IOLog("DALI VOLUP: timer unavailable (reject=0x%03x)\n", rejects);
+ 		stopDaliVolume();
+ 		return;
+ 	}
+ 	fDaliVolumeTimerAdded = fDaliVolumeRunning = true;
+-	IOLog("DALI VOLUP: GPIO60 read-only polling enabled; physical behavior unverified\n");
+-	fDaliVolumeTimer->setTimeoutMS(16);
++	if (rejects == 0) {
++		IOLog("DALI VOLUP: GPIO60 read-only polling enabled; physical behavior unverified\n");
++		fDaliVolumeTimer->setTimeoutMS(16);
++	} else {
++		IOLog("DALI VOLUP: pin check rejected (0x%03x); HID events disabled; read-only DIN diagnostic window=%u s, poll=%u ms\n",
++		    rejects, kDaliVolumeDiagnosticWindowSeconds, kDaliVolumeDiagnosticPollMs);
++		fDaliVolumeTimer->setTimeoutMS(kDaliVolumeDiagnosticPollMs);
++	}
+ }
+ 
+ void
+@@ -470,21 +574,59 @@
+ {
+ 	SweetHIDButtons *self = OSDynamicCast(SweetHIDButtons, owner);
+ 	if (!self || !self->fDaliVolumeRunning) return;
++	uint64_t ns = 0;
++	absolutetime_to_nanoseconds(mach_absolute_time(), &ns);
++
++	if (gDaliVolumeDiagnostic.diagnosticOnly) {
++		UInt32 data = daliVolumeRead(self->fDaliGpioMap, 0x210);
++		daliVolumeTraceDin(data);
++		if (ns < gDaliVolumeDiagnostic.startedNs ||
++		    ns - gDaliVolumeDiagnostic.startedNs >= kDaliVolumeDiagnosticWindowNs ||
++		    gDaliVolumeDiagnostic.pollCount >= kDaliVolumeDiagnosticMaxPolls) {
++			self->fDaliVolumeRunning = false;
++			IOLog("DALI VOLUP: read-only DIN diagnostic complete polls=%u transitions-logged=%u limit=%u s\n",
++			    gDaliVolumeDiagnostic.pollCount, gDaliVolumeDiagnostic.dinLogCount,
++			    kDaliVolumeDiagnosticWindowSeconds);
++			return;
++		}
++		sender->setTimeoutMS(kDaliVolumeDiagnosticPollMs);
++		return;
++	}
++
+ 	bool client = self->daliVolumeHasClient();
+-	if (!self->daliVolumePinValid()) {
+-		/* Cancellation only, not a sampled physical release. */
++	UInt32 mode = 0, dir = 0, ies = 0;
++	bool gpioReadable = false, iesReadable = false;
++	UInt32 rejects = self->daliVolumeReadPinStatus(&mode, &dir, &ies,
++	    &gpioReadable, &iesReadable);
++	if (rejects != 0) {
++		UInt32 din = gpioReadable ? daliVolumeRead(self->fDaliGpioMap, 0x210) : 0;
++		bool gpioVa = self->fDaliGpioMap && self->fDaliGpioMap->getVirtualAddress();
++		bool iesVa = self->fDaliIesMap && self->fDaliIesMap->getVirtualAddress();
++		daliVolumeLogPinSnapshot(self->fDaliGpioMemory != NULL,
++		    self->fDaliGpioMap != NULL, gpioVa, self->fDaliIesMemory != NULL,
++		    self->fDaliIesMap != NULL, iesVa, gpioReadable, iesReadable,
++		    mode, dir, ies, din, rejects);
+ 		if (client && self->fDaliVolumeState.armed && self->fDaliVolumeState.down) {
++			/* Cancellation only, not a sampled physical release. */
+ 			bool cancelled = self->key(kHIDUsage_Csmr_VolumeIncrement, false);
+ 			IOLog("DALI VOLUP: invalid pin cancellation allocated=%d\n", cancelled);
+ 		}
+ 		self->fDaliVolumeState = {};
+-		self->fDaliVolumeRunning = false;
+-		IOLog("DALI VOLUP: firmware pin configuration changed; polling stopped\n");
++		if (!gpioReadable) {
++			self->fDaliVolumeRunning = false;
++			IOLog("DALI VOLUP: GPIO MMIO unavailable; polling stopped (reject=0x%03x)\n",
++			    rejects);
++			return;
++		}
++		daliVolumeResetDiagnostic(true, ns, true, din);
++		IOLog("DALI VOLUP: pin check changed (0x%03x); HID events disabled; read-only DIN diagnostic window=%u s\n",
++		    rejects, kDaliVolumeDiagnosticWindowSeconds);
++		sender->setTimeoutMS(kDaliVolumeDiagnosticPollMs);
+ 		return;
+ 	}
++
+ 	UInt32 data = daliVolumeRead(self->fDaliGpioMap, 0x210);
+-	uint64_t ns = 0;
+-	absolutetime_to_nanoseconds(mach_absolute_time(), &ns);
++	daliVolumeTraceDin(data);
+ 	int event = dali_volume_sample(&self->fDaliVolumeState, client, data, ns);
+ 	if (event >= 0 && !self->key(kHIDUsage_Csmr_VolumeIncrement, event != 0)) {
+ 		/* The HID event was not allocated; retry this stable state next tick. */
+--- a/iokit/Kernel/arm/hid/DaliVolumeKey.h
++++ b/iokit/Kernel/arm/hid/DaliVolumeKey.h
+@@ -32,12 +32,29 @@
+     return found;
+ }
+ 
+-/* Pin 60 must still be GPIO input, with input buffer enabled. */
++/* Each bit names a read-only validation failure; offsets/fields are derived
++ * from the MT6991 pinctrl table and Dali's saved Android live DT. */
++enum {
++    DALI_VOLUME_PIN_MODE_INVALID = 1U << 0,
++    DALI_VOLUME_PIN_DIRECTION_OUTPUT = 1U << 1,
++    DALI_VOLUME_PIN_IES_DISABLED = 1U << 2,
++};
++
++static inline unsigned int dali_volume_pin_rejects(unsigned int mode,
++    unsigned int dir, unsigned int ies)
++{
++    unsigned int rejects = 0;
++    if (((mode >> 16) & 0xfU) != 0) rejects |= DALI_VOLUME_PIN_MODE_INVALID;
++    if (dir & (1U << 28)) rejects |= DALI_VOLUME_PIN_DIRECTION_OUTPUT;
++    if (!(ies & (1U << 19))) rejects |= DALI_VOLUME_PIN_IES_DISABLED;
++    return rejects;
++}
++
++/* Pin 60 must still be GPIO input, with its input buffer enabled. */
+ static inline bool dali_volume_pin_valid(unsigned int mode, unsigned int dir,
+     unsigned int ies)
+ {
+-    return ((mode >> 16) & 0xfU) == 0 && !(dir & (1U << 28)) &&
+-        (ies & (1U << 19));
++    return dali_volume_pin_rejects(mode, dir, ies) == 0;
+ }
+ 
+ /* -1 means no event, 1 is a physical down and 0 a physical up.  A ready
