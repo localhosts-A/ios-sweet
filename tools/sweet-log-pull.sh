@@ -103,7 +103,7 @@ if [ "$all" -eq 1 ]; then
 	for i in 0 1 2; do
 		skip=$((4096 + i * 1025))
 		adb_cmd exec-out dd "if=$dev" bs=4096 "skip=$skip" count=1025 status=none 2>/dev/null > "$out.slot$i.bin"
-		actual=$(stat -c %s "$out.slot$i.bin")
+		actual=$(wc -c < "$out.slot$i.bin")
 		[ "$actual" -eq $((1025 * 4096)) ] || { echo "short slot $i read: $actual bytes; raw kept" >&2; exit 1; }
 	done
 	matches=0
@@ -142,7 +142,7 @@ if [ -e "$out" ] || [ -L "$out" ] || [ -e "$out.bin" ] || [ -L "$out.bin" ]; the
 	echo "refusing to replace prior output or raw capture" >&2; exit 1
 fi
 adb_cmd exec-out dd "if=$dev" bs=4096 "skip=$skip" count=1025 status=none 2>/dev/null > "$out.bin"
-actual=$(stat -c %s "$out.bin")
+actual=$(wc -c < "$out.bin")
 [ "$actual" -eq $((1025 * 4096)) ] || { echo "short partition read: got $actual bytes" >&2; exit 1; }
 echo "$partition ($dev): $bytes bytes, read blocks $skip..$((skip + 1024)) ($actual bytes)" >&2
 if [ "$expected_set" -eq 1 ]; then
