@@ -92,6 +92,8 @@ on:
       - "tools/test_dali_input_patch_replay.py"
       - "tools/test_dali_volume_diagnostic.py"
       - "tools/dali_volume_diagnostic_tests/**"
+      - "tools/test_dali_volume_mode1.py"
+      - "tools/dali_volume_mode1_tests/**"
       - "tools/test_dali_formal_source_identity.py"
       - "tools/test_dali_formal_patch_replay.py"
       - "tools/dali_input_tests/**"
@@ -236,6 +238,7 @@ jobs:
           python3 -I tools/test_dali_hfs_fsync_host.py
           python3 -I tools/test_dali_input_patch_replay.py
           python3 -I tools/test_dali_volume_diagnostic.py
+          python3 -I tools/test_dali_volume_mode1.py
           python3 -I tools/test_dali_formal_patch_replay.py
 
       - name: Build

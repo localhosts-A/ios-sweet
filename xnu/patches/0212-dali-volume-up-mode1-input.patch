@@ -1,0 +1,105 @@
+--- a/iokit/Kernel/arm/hid/SweetHID.cpp
++++ b/iokit/Kernel/arm/hid/SweetHID.cpp
+@@ -361,6 +361,8 @@
+ 	IOMemoryMap *fDaliGpioMap, *fDaliIesMap;
+ 	IOTimerEventSource *fDaliVolumeTimer;
+ 	bool fDaliVolumeTimerAdded, fDaliVolumeRunning;
++	bool fDaliVolumeModeKnown;
++	UInt32 fDaliVolumeExpectedMode;
+ 	DaliVolumeKeyState fDaliVolumeState;
+ };
+ OSDefineMetaClassAndStructors(SweetHIDButtons, IOHIDEventService);
+@@ -444,8 +446,11 @@
+ 	} else {
+ 		*mode = daliVolumeRead(fDaliGpioMap, 0x370);
+ 		*dir = daliVolumeRead(fDaliGpioMap, 0x10);
+-		if (((*mode >> 16) & 0xfU) != 0)
++		if (!dali_volume_pin_mode_supported(*mode))
+ 			rejects |= DALI_VOLUME_PIN_MODE_INVALID;
++			else if (fDaliVolumeModeKnown &&
++			    dali_volume_pin_mode(*mode) != fDaliVolumeExpectedMode)
++				rejects |= DALI_VOLUME_PIN_MODE_CHANGED;
+ 		if (*dir & (1U << 28))
+ 			rejects |= DALI_VOLUME_PIN_DIRECTION_OUTPUT;
+ 	}
+@@ -498,7 +503,7 @@
+ 		UInt32 transition = ++gDaliVolumeDiagnostic.dinLogCount;
+ 		IOLog("DALI VOLUP: DIN transition=%u sample=%u trust=%s raw=0x%08x bit28=%u active-low=%u\n",
+ 		    transition, gDaliVolumeDiagnostic.pollCount,
+-		    gDaliVolumeDiagnostic.diagnosticOnly ? "unvalidated" : "config-valid",
++		    gDaliVolumeDiagnostic.diagnosticOnly ? "unvalidated" : "pin-config-valid-key-correlation-unverified",
+ 		    raw, high, high ? 0U : 1U);
+ 	}
+ }
+@@ -517,6 +522,8 @@
+ {
+ 	int optIn = 0;
+ 	if (!PE_parse_boot_argn("dalivolup", &optIn, sizeof(optIn)) || optIn != 1) return;
++	fDaliVolumeModeKnown = false;
++	fDaliVolumeExpectedMode = 0;
+ 	auto root = IORegistryEntry::fromPath("IODeviceTree:/");
+ 	OSData *compatible = root ? OSDynamicCast(OSData, root->getProperty("compatible")) : NULL;
+ 	if (!compatible || !dali_volume_board_enabled(optIn, compatible->getBytesNoCopy(),
+@@ -548,6 +555,11 @@
+ 		return;
+ 	}
+ 
++	if (dali_volume_pin_mode_supported(mode)) {
++		fDaliVolumeExpectedMode = dali_volume_pin_mode(mode);
++		fDaliVolumeModeKnown = true;
++	}
++
+ 	uint64_t nowNs = 0;
+ 	absolutetime_to_nanoseconds(mach_absolute_time(), &nowNs);
+ 	fDaliVolumeState = {};
+@@ -560,7 +572,9 @@
+ 	}
+ 	fDaliVolumeTimerAdded = fDaliVolumeRunning = true;
+ 	if (rejects == 0) {
+-		IOLog("DALI VOLUP: GPIO60 read-only polling enabled; physical behavior unverified\n");
++		UInt32 mode60 = dali_volume_pin_mode(mode);
++		IOLog("DALI VOLUP: GPIO60 read-only DI polling enabled mux60=%u source=%s; physical key correlation unverified\n",
++		    mode60, mode60 == 1 ? "KPCOL0" : "GPIO");
+ 		fDaliVolumeTimer->setTimeoutMS(16);
+ 	} else {
+ 		IOLog("DALI VOLUP: pin check rejected (0x%03x); HID events disabled; read-only DIN diagnostic window=%u s, poll=%u ms\n",
+--- a/iokit/Kernel/arm/hid/DaliVolumeKey.h
++++ b/iokit/Kernel/arm/hid/DaliVolumeKey.h
+@@ -38,19 +38,35 @@
+     DALI_VOLUME_PIN_MODE_INVALID = 1U << 0,
+     DALI_VOLUME_PIN_DIRECTION_OUTPUT = 1U << 1,
+     DALI_VOLUME_PIN_IES_DISABLED = 1U << 2,
++    DALI_VOLUME_PIN_MODE_CHANGED = 1U << 3,
+ };
++
++static inline unsigned int dali_volume_pin_mode(unsigned int mode)
++{
++    return (mode >> 16) & 0xfU;
++}
++
++/* MT6991 GPIO60 supports GPIO (mode 0) and KPCOL0 (mode 1). Only those
++ * observed mappings are accepted; non-GPIO mode still uses the GPIO DI
++ * register and is not, by itself, evidence that a transition is a keypress.
++ */
++static inline bool dali_volume_pin_mode_supported(unsigned int mode)
++{
++    unsigned int mux = dali_volume_pin_mode(mode);
++    return mux == 0 || mux == 1;
++}
+ 
+ static inline unsigned int dali_volume_pin_rejects(unsigned int mode,
+     unsigned int dir, unsigned int ies)
+ {
+     unsigned int rejects = 0;
+-    if (((mode >> 16) & 0xfU) != 0) rejects |= DALI_VOLUME_PIN_MODE_INVALID;
++    if (!dali_volume_pin_mode_supported(mode)) rejects |= DALI_VOLUME_PIN_MODE_INVALID;
+     if (dir & (1U << 28)) rejects |= DALI_VOLUME_PIN_DIRECTION_OUTPUT;
+     if (!(ies & (1U << 19))) rejects |= DALI_VOLUME_PIN_IES_DISABLED;
+     return rejects;
+ }
+ 
+-/* Pin 60 must still be GPIO input, with its input buffer enabled. */
++/* GPIO60 DI is sampled only with input direction and input-enable active. */
+ static inline bool dali_volume_pin_valid(unsigned int mode, unsigned int dir,
+     unsigned int ies)
+ {

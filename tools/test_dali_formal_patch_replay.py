@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Replay ordered patches 0207-0211 from formal post-0206 source bytes."""
+"""Replay ordered patches 0207-0212 from formal post-0206 source bytes."""
 from pathlib import Path
 import gzip
 import hashlib
@@ -21,6 +21,7 @@ PATCHES = [
     ROOT / 'xnu/patches/0209-dali-volume-up-readonly-gpio.patch',
     ROOT / 'xnu/patches/0210-sweet-dali-legacy-touch-guard.patch',
     ROOT / 'xnu/patches/0211-dali-volume-up-rejection-diagnostics.patch',
+    ROOT / 'xnu/patches/0212-dali-volume-up-mode1-input.patch',
 ]
 PATCH_SHA256 = [
     '559df291118b3bacf6bd1c30132a210ce41af75c0d0cf30b3e640ee22314917d',
@@ -28,6 +29,7 @@ PATCH_SHA256 = [
     '2c80c29cbf1433922efa864b964cd57a71bed67b5764facf6c586f78ab0335d9',
     '82810df5f999bf56e454e3d4ccb89d9a568d3b81de7c60714a9e371b37c15c1a',
     '905c3cd8e106040ff190e1d8e2a915a04fe214e411fb5b8b8aa7d75b0462c143',
+    'a3b2386a63e7a28515729ca0b2a23e61b2755a7af580e5126fe56752e6d19d84',
 ]
 
 
@@ -74,5 +76,5 @@ with tempfile.TemporaryDirectory(prefix='dali-formal-series-') as tmp:
         subprocess.run([sys.executable, str(ROOT / 'tools' / script), *args],
                        check=True, cwd=ROOT, env=env, timeout=600)
 
-print('PASS ordered 0207-0211 zero-fuzz replay and materialized-source regressions.')
+print('PASS ordered 0207-0212 zero-fuzz replay and materialized-source regressions.')
 print('Source replay does not constitute native kernel build or hardware validation.')
