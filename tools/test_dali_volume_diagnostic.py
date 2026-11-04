@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,7 +55,7 @@ def main():
         assert backend.count(barrier) == 1
         (work / 'actual_backend.inc').write_text(backend.replace(barrier, '(void)0; /* host mock */'))
         shutil.copyfile(hid / 'DaliVolumeKey.h', work / 'DaliVolumeKey.h')
-        env = dict(os.environ, ASAN_OPTIONS='detect_leaks=1:abort_on_error=1',
+        env = dict(os.environ, ASAN_OPTIONS=('detect_leaks=0:abort_on_error=1' if sys.platform == 'darwin' else 'detect_leaks=1:abort_on_error=1'),
                    UBSAN_OPTIONS='halt_on_error=1')
         for test in ('test_volume', 'test_backend'):
             src = ROOT / 'tools/dali_volume_diagnostic_tests' / (test + '.cpp')

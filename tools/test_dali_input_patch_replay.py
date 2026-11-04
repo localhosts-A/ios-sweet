@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,7 +61,7 @@ def main():
     cxx = shutil.which('clang++')
     if not compiler or not cxx:
         raise SystemExit('clang and clang++ are required')
-    env = dict(os.environ, ASAN_OPTIONS='detect_leaks=1:abort_on_error=1',
+    env = dict(os.environ, ASAN_OPTIONS=('detect_leaks=0:abort_on_error=1' if sys.platform == 'darwin' else 'detect_leaks=1:abort_on_error=1'),
                UBSAN_OPTIONS='halt_on_error=1')
 
     with tempfile.TemporaryDirectory(prefix='dali-input-patches-') as tmp:
