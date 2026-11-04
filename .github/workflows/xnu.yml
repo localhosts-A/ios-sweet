@@ -90,6 +90,8 @@ on:
       - "tools/test_dali_g4_root_integration.py"
       - "tools/test_dali_hfs_fsync_host.py"
       - "tools/test_dali_input_patch_replay.py"
+      - "tools/test_dali_volume_diagnostic.py"
+      - "tools/dali_volume_diagnostic_tests/**"
       - "tools/test_dali_formal_source_identity.py"
       - "tools/test_dali_formal_patch_replay.py"
       - "tools/dali_input_tests/**"
