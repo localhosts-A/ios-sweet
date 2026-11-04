@@ -30,7 +30,9 @@ prefix=r'''
 #define DEVELOPMENT 1
 #define PZERO 0
 #define ETIMEDOUT 60
+#ifndef __unused
 #define __unused __attribute__((unused))
+#endif
 #define MIN(a,b) ((a)<(b)?(a):(b))
 #define MAX(a,b) ((a)>(b)?(a):(b))
 #define bzero(p,n) memset(p,0,n)

@@ -31,7 +31,9 @@ prefix=r'''
 static bool cmp(_Atomic uint32_t *p,uint32_t b,uint32_t a){return atomic_compare_exchange_strong_explicit(p,&b,a,memory_order_acquire,memory_order_relaxed);}
 #define os_atomic_cmpxchg(p,b,a,o) cmp(p,b,a)
 #define bzero(p,n) memset(p,0,n)
+#ifndef __unused
 #define __unused __attribute__((unused))
+#endif
 typedef int wait_result_t;
 static char sweet_log_ring[SWEET_LOG_SIZE];static _Atomic uint64_t sweet_log_total,sweet_log_dropped_chunks,sweet_log_dropped_bytes;
 static _Atomic uint32_t sweet_log_busy;
