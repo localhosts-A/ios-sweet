@@ -151,7 +151,7 @@ jobs:
             15.*) ;;
             *) echo "Expected macOS 15 Arm64 runner" >&2; exit 1 ;;
           esac
-          brew install jq gum bash cmake ninja ccache
+          brew install jq gum bash cmake ninja ccache openssl@3
           command -v xcodes
           sw_vers
           ls -d /Applications/Xcode*.app

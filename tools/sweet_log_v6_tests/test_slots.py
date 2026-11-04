@@ -45,7 +45,6 @@ SLOT_PREFIX = r'''
 #define STORAGE_BLOCKS 8192u
 typedef uintptr_t vm_offset_t;
 typedef uint64_t addr64_t;
-typedef unsigned long dev_t;
 '''
 SLOT_STUBS = r'''
 static unsigned char disk[STORAGE_BLOCKS * UFS_BLOCK], dma[DMA_SIZE];
@@ -188,7 +187,11 @@ class TestSlots(unittest.TestCase):
             (p/'test.c').write_text(source)
             cmd = ['clang', '-std=gnu11', '-O1', '-Wall', '-Wextra', '-Werror',
                    '-Wno-unused-function', '-Wno-unused-variable', '-Wno-deprecated-declarations', '-fsanitize=address,undefined',
-                   '-fno-sanitize-recover=all', str(p/'test.c'), '-o', str(p/'test'), '-lcrypto']
+                   '-fno-sanitize-recover=all']
+            if sys.platform == 'darwin':
+                prefix = Path(subprocess.check_output(['brew', '--prefix', 'openssl@3'], text=True).strip())
+                cmd.extend(['-I' + str(prefix / 'include'), '-L' + str(prefix / 'lib')])
+            cmd.extend([str(p/'test.c'), '-o', str(p/'test'), '-lcrypto'])
             subprocess.run(cmd, check=True)
             subprocess.run([str(p/'test')], check=True, timeout=120)
 
