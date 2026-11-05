@@ -60,7 +60,10 @@ jobs:
           sudo xcode-select -s "${DEVELOPER_DIR%/Contents/Developer}"
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-path
-          brew install llvm spirv-llvm-translator spirv-tools bindgen ninja pkgconf
+          brew install llvm spirv-llvm-translator spirv-tools ninja pkgconf
+          # bindgen 0.73.2 + Homebrew libclang emitted size_t as an opaque array in kraid; pin the CLI.
+          cargo install bindgen-cli --version 0.71.1 --locked
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --target aarch64-apple-ios
           # The G1UltraMetal scripts call $X9_HOMEBREW/bin/rustup.
           [ -e "$X9_HOMEBREW/bin/rustup" ] || ln -s "$(command -v rustup)" "$X9_HOMEBREW/bin/rustup"
@@ -106,8 +109,12 @@ jobs:
           [built-in options]
           rust_args = ['-C', 'link-arg=-isysroot', '-C', 'link-arg=$MACSDK']
           EOF
-          export PATH="$W/build-env/bin:$X9_HOMEBREW/bin:$PATH"
+          export PATH="$W/build-env/bin:$HOME/.cargo/bin:$X9_HOMEBREW/bin:$PATH"
           export LIBCLANG_PATH="$X9_HOMEBREW/opt/llvm/lib"
+          # libclang from Homebrew does not know the macOS SDK; without it size_t is unresolved.
+          export SDKROOT="$MACSDK"
+          export BINDGEN_EXTRA_CLANG_ARGS="-isysroot $MACSDK"
+          bindgen --version
           meson setup "$W/build-panvk-host" "$W/mesa-render-source" --native-file "$W/panvk-host.native" \
             --buildtype=release -Dplatforms=[] -Dgallium-drivers=[] -Dvulkan-drivers=panfrost \
             -Dglx=disabled -Degl=disabled -Dgbm=disabled -Dopengl=false -Dgles1=disabled -Dgles2=disabled \
