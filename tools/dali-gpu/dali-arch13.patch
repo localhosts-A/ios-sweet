@@ -1,0 +1,54 @@
+diff --git a/build/third_party/00-mesa-panvk-x9.patch b/build/third_party/00-mesa-panvk-x9.patch
+--- a/build/third_party/00-mesa-panvk-x9.patch
++++ b/build/third_party/00-mesa-panvk-x9.patch
+@@ -383,7 +383,7 @@
+  ]
+  
+ -foreach arch : [6, 7, 10, 11, 12, 13, 14]
+-+x9_archs = get_option('x9-native-kmod') ? [14] : [6, 7, 10, 11, 12, 13, 14]
+++x9_archs = get_option('x9-native-kmod') ? [13] : [6, 7, 10, 11, 12, 13, 14]
+ +x9_link_frameworks = get_option('x9-native-kmod') ? ['-framework', 'IOKit', '-framework', 'CoreFoundation'] : []
+ +foreach arch : x9_archs
+    per_arch_files = common_per_arch_files
+@@ -757,13 +757,13 @@
+  #define panvk_arch_name(name, version) panvk_##version##_##name
+  
+ +#ifdef X9_NATIVE_KMOD
+-+/* X9 only dispatches the verified GPU architecture. */
+++/* Dali (MT6991, G925) only dispatches the verified v13 GPU architecture. */
+ +#define panvk_arch_dispatch(arch, name, ...) do { \
+-+ if ((arch) != 14) UNREACHABLE("non-v14 native GPU"); \
+-+ panvk_arch_name(name, v14)(__VA_ARGS__); } while (0)
+++ if ((arch) != 13) UNREACHABLE("non-v13 native GPU"); \
+++ panvk_arch_name(name, v13)(__VA_ARGS__); } while (0)
+ +#define panvk_arch_dispatch_ret(arch, name, ret, ...) do { \
+-+ if ((arch) != 14) UNREACHABLE("non-v14 native GPU"); \
+-+ ret = panvk_arch_name(name, v14)(__VA_ARGS__); } while (0)
+++ if ((arch) != 13) UNREACHABLE("non-v13 native GPU"); \
+++ ret = panvk_arch_name(name, v13)(__VA_ARGS__); } while (0)
+ +#else
+  #define panvk_arch_dispatch(arch, name, ...)                                   \
+     do {                                                                        \
+diff --git a/metal/General/X9RenderTransport.c b/metal/General/X9RenderTransport.c
+--- a/metal/General/X9RenderTransport.c
++++ b/metal/General/X9RenderTransport.c
+@@ -30,7 +30,7 @@
+  result=IOConnectCallStructMethod(port,X9RenderGetCaps,NULL,0,&actual,&bytes);
+  if(result!=KERN_SUCCESS){failure("native caps",result);IOServiceClose(port);return NULL;}
+  if(bytes!=sizeof(actual)||actual.abi!=X9_RENDER_ABI||actual.bytes!=sizeof(actual)||
+-    actual.gpu_id!=0xe8800010ULL||actual.host_page_bytes!=16384||
++    actual.gpu_id!=0xd8300015ULL||actual.host_page_bytes!=16384||
+     actual.max_streams<X9_RENDER_MAX_STREAMS||!actual.max_mappings||
+     actual.va_start>=actual.va_end||actual.va_start<X9_RENDER_MIN_VA||actual.va_end>X9_RENDER_MAX_VA||
+     (actual.capabilities&(X9RenderBufferObjects|X9RenderHostImport|X9RenderCSFSubmit|X9RenderTiler|X9RenderFragment))!=(X9RenderBufferObjects|X9RenderHostImport|X9RenderCSFSubmit|X9RenderTiler|X9RenderFragment)) {
+diff --git a/metal/General/panvk/X9PanVKSubmitPlan.c b/metal/General/panvk/X9PanVKSubmitPlan.c
+--- a/metal/General/panvk/X9PanVKSubmitPlan.c
++++ b/metal/General/panvk/X9PanVKSubmitPlan.c
+@@ -1,6 +1,6 @@
+ /* SPDX-License-Identifier: MIT */
+ #include "X9PanVKSubmitPlan.h"
+-#include "genxml/v14_pack.h"
++#include "genxml/v13_pack.h"
+ #include <stdlib.h>
+ #include <string.h>
+ #include <errno.h>

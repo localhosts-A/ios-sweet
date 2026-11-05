@@ -1,0 +1,185 @@
+# Draft for localhosts-A/ios-sweet, branch ci/dali-gpu-userspace-20261106.
+# Repo layout this expects:
+#   .github/workflows/dali-gpu-userspace.yml   (this file)
+#   tools/dali-gpu/dali-arch13.patch           (G1UltraMetal X9 v14 -> dali v13)
+#   tools/dali-gpu/ld-undefined-to-rsp.py      (builds the missing PanVK link rsp)
+# Builds X9PanVK<N>.bundle (Mesa PanVK v13 + X9 native transport) and
+# X9GeneralMetal<N>.bundle (metal2vulkan + Metal frontend) for iOS 16 arm64.
+# No device access, no secrets.
+name: dali-gpu-userspace
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: Plugin revision N for X9GeneralMetal<N>/X9PanVK<N> (170..9999); the dali kernel must publish the same N
+        default: "1300"
+  push:
+    branches: [ci/dali-gpu-userspace-20261106]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dali-gpu-userspace-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  G1ULTRAMETAL_COMMIT: b50131cdd31afb0ecfac9f9ba1e572a585fdd5b6
+  MESA_COMMIT: 300b5fd7b44120b80607d1c90b40bb126e8d3ec8
+  METAL2VULKAN_COMMIT: 219f01365dc4c8eb346816c405b5b17403793764
+  LIBDRM_VERSION: 2.4.133
+  RUST_TOOLCHAIN: 1.98.0
+  DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+  X9_HOMEBREW: /opt/homebrew
+  REVISION: ${{ inputs.revision || '1300' }}
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ios-sweet
+
+      - uses: actions/checkout@v4
+        with:
+          repository: tosasitill/G1UltraMetal
+          ref: ${{ env.G1ULTRAMETAL_COMMIT }}
+          path: g1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Toolchain
+        run: |
+          set -euxo pipefail
+          [ "$(uname -m)" = arm64 ]
+          sudo xcode-select -s "${DEVELOPER_DIR%/Contents/Developer}"
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-path
+          brew install llvm spirv-llvm-translator spirv-tools bindgen ninja pkgconf
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --target aarch64-apple-ios
+          # The G1UltraMetal scripts call $X9_HOMEBREW/bin/rustup.
+          [ -e "$X9_HOMEBREW/bin/rustup" ] || ln -s "$(command -v rustup)" "$X9_HOMEBREW/bin/rustup"
+
+      - name: Sources and patches
+        working-directory: g1
+        run: |
+          set -euxo pipefail
+          G1="$PWD"
+          W="$G1/.local/x9/work/x9-metal-render"
+          mkdir -p "$W/mesa-render-source" "$W/metal2vulkan-pan205-source" "$W/render-link-inputs" .local/x9/MaliMetal/X9
+          curl -fsSL "https://codeload.github.com/chaotic-cx/mesa-mirror/tar.gz/$MESA_COMMIT" \
+            | tar -xf - --strip-components=1 -C "$W/mesa-render-source"
+          curl -fsSL "https://codeload.github.com/steelbrain/metal2vulkan/tar.gz/$METAL2VULKAN_COMMIT" \
+            | tar -xf - --strip-components=1 -C "$W/metal2vulkan-pan205-source"
+          curl -fsSL "https://dri.freedesktop.org/libdrm/libdrm-$LIBDRM_VERSION.tar.xz" | tar -xf - -C "$W"
+          # dali: PAN_ARCH 13, GPU_ID 0xd8300015, v13 genxml.
+          git apply ../ios-sweet/tools/dali-gpu/dali-arch13.patch
+          # The X9 patch hard-codes the author's checkout; point it at this one.
+          sed -i '' "s#/Users/tosasitill/ios_plj110#$G1#g" build/third_party/00-mesa-panvk-x9.patch
+          ln -s "$G1/metal/General" .local/x9/MaliMetal/X9/General
+          ln -s "$G1/build/scripts/prepare-panvk-native-budget.py" "$W/prepare-panvk-native-budget.py"
+          /usr/bin/patch -d "$W/mesa-render-source" -p1 --batch --forward --fuzz=0 -i "$G1/build/third_party/00-mesa-panvk-x9.patch"
+          for p in pan194 pan195 pan196 pan198 pan200 pan201 pan203 pan204 pan205; do
+            /usr/bin/patch -d "$W/metal2vulkan-pan205-source" -p1 --batch --forward --fuzz=0 \
+              -i "$G1/build/third_party/metal2vulkan-pan205/$p-runtime-local.patch"
+          done
+          python3 -m venv "$W/build-env"
+          "$W/build-env/bin/pip" install -r build/requirements-metal.txt
+          echo "W=$W" >> "$GITHUB_ENV"
+
+      - name: Host shader tools (mesa_clc, vtn_bindgen2, panfrost_compile)
+        run: |
+          set -euxo pipefail
+          RUSTC_HOST="$(rustup which --toolchain "$RUST_TOOLCHAIN" rustc)"
+          MACSDK="$DEVELOPER_DIR/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
+          cat > "$W/panvk-host.native" <<EOF
+          [binaries]
+          c = '/usr/bin/clang'
+          cpp = '/usr/bin/clang++'
+          rust = '$RUSTC_HOST'
+          llvm-config = '$X9_HOMEBREW/opt/llvm/bin/llvm-config'
+          [built-in options]
+          rust_args = ['-C', 'link-arg=-isysroot', '-C', 'link-arg=$MACSDK']
+          EOF
+          export PATH="$W/build-env/bin:$X9_HOMEBREW/bin:$PATH"
+          export LIBCLANG_PATH="$X9_HOMEBREW/opt/llvm/lib"
+          meson setup "$W/build-panvk-host" "$W/mesa-render-source" --native-file "$W/panvk-host.native" \
+            --buildtype=release -Dplatforms=[] -Dgallium-drivers=[] -Dvulkan-drivers=panfrost \
+            -Dglx=disabled -Degl=disabled -Dgbm=disabled -Dopengl=false -Dgles1=disabled -Dgles2=disabled \
+            -Dllvm=enabled -Dmesa-clc=enabled -Dprecomp-compiler=enabled \
+            -Dzstd=disabled -Dxmlconfig=disabled -Dexpat=disabled -Dvalgrind=disabled -Dlibunwind=disabled \
+            -Dlmsensors=disabled -Dshader-cache=disabled -Dbuild-tests=false -Dtools=[] -Dvideo-codecs=[] -Dvulkan-layers=[]
+          ninja -C "$W/build-panvk-host" src/compiler/clc/mesa_clc src/compiler/spirv/vtn_bindgen2 src/panfrost/clc/panfrost_compile
+
+      - name: PanVK v13 cross build (libvulkan_panfrost.dylib)
+        working-directory: g1
+        run: |
+          set -euxo pipefail
+          RSP="$W/render-link-inputs/optional-vulkan-entrypoints.rsp"
+          printf '%s\n' -dead_strip > "$RSP"
+          ok=0
+          for pass in 1 2 3; do
+            if python3 -I build/scripts/build-panvk-native-ios.py 2>&1 | tee "$W/panvk-pass$pass.log"; then ok=1; break; fi
+            python3 -I ../ios-sweet/tools/dali-gpu/ld-undefined-to-rsp.py --log "$W/panvk-pass$pass.log" --rsp "$RSP"
+          done
+          [ "$ok" = 1 ]
+
+      - name: Package X9PanVK, build X9GeneralMetal, write allowlist
+        working-directory: g1
+        run: |
+          set -euxo pipefail
+          OUT="$GITHUB_WORKSPACE/out/dali-gpu-userspace-$REVISION"
+          python3 -I build/scripts/package-panvk-native.py --revision "$REVISION"
+          python3 -I build/scripts/build-general-metal.py --revision "$REVISION"
+          python3 -I build/scripts/package-plugins.py --revision "$REVISION" --out "$OUT"
+          # X9-only installer (needs an iOS shell); dali has none.
+          rm -f "$OUT/plugin-package/install-on-ios.sh"
+          cp "$W/render-link-inputs/optional-vulkan-entrypoints.rsp" "$OUT/"
+          for b in X9PanVK X9GeneralMetal; do
+            exe="$OUT/plugin-package/$b$REVISION.bundle/$b"
+            { file "$exe"; otool -L "$exe"; nm -um "$exe"; } > "$OUT/$b-imports.txt"
+          done
+          {
+            echo "revision=$REVISION"
+            echo "ios-sweet=$GITHUB_SHA"
+            echo "G1UltraMetal=$G1ULTRAMETAL_COMMIT + tools/dali-gpu/dali-arch13.patch"
+            echo "mesa=$MESA_COMMIT + 00 + 02..12 + fixed tiler budget"
+            echo "metal2vulkan=$METAL2VULKAN_COMMIT + pan194,195,196,198,200,201,203,204,205 + 0023,0025"
+            echo "libdrm=$LIBDRM_VERSION (headers only)"
+            xcodebuild -version
+            xcrun --sdk iphoneos --show-sdk-version
+            "$(rustup which --toolchain "$RUST_TOOLCHAIN" rustc)" --version
+            "$X9_HOMEBREW/opt/llvm/bin/llvm-config" --version
+          } > "$OUT/build-info.txt"
+          cd "$OUT"
+          find . -type f ! -path ./SHA256SUMS -print0 | sort -z | xargs -0 shasum -a 256 > SHA256SUMS
+          cd ..
+          tar -cf "dali-gpu-userspace-$REVISION.tar" "dali-gpu-userspace-$REVISION"
+          shasum -a 256 "dali-gpu-userspace-$REVISION.tar" > "dali-gpu-userspace-$REVISION.tar.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dali-gpu-userspace-${{ env.REVISION }}
+          path: |
+            out/dali-gpu-userspace-${{ env.REVISION }}.tar
+            out/dali-gpu-userspace-${{ env.REVISION }}.tar.sha256
+            out/dali-gpu-userspace-${{ env.REVISION }}/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: dali-gpu-userspace-logs
+          path: |
+            g1/.local/x9/work/x9-metal-render/panvk-pass*.log
+            g1/.local/x9/work/x9-metal-render/render-link-inputs/
+            g1/.local/x9/work/x9-metal-render/build-panvk-host/meson-logs/
+            g1/.local/x9/work/x9-metal-render/build-panvk-native-ios/meson-logs/
+          if-no-files-found: ignore
+          retention-days: 7
