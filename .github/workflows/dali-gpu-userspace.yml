@@ -60,10 +60,7 @@ jobs:
           sudo xcode-select -s "${DEVELOPER_DIR%/Contents/Developer}"
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-path
-          brew install llvm spirv-llvm-translator spirv-tools ninja pkgconf
-          # bindgen 0.73.2 + Homebrew libclang emitted size_t as an opaque array in kraid; pin the CLI.
-          cargo install bindgen-cli --version 0.71.1 --locked
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          brew install llvm spirv-llvm-translator spirv-tools bindgen ninja pkgconf
           rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --target aarch64-apple-ios
           # The G1UltraMetal scripts call $X9_HOMEBREW/bin/rustup.
           [ -e "$X9_HOMEBREW/bin/rustup" ] || ln -s "$(command -v rustup)" "$X9_HOMEBREW/bin/rustup"
@@ -110,11 +107,17 @@ jobs:
           rust_args = ['-C', 'link-arg=-isysroot', '-C', 'link-arg=$MACSDK']
           EOF
           export PATH="$W/build-env/bin:$HOME/.cargo/bin:$X9_HOMEBREW/bin:$PATH"
+          # Run 1: Homebrew libclang without an SDK left size_t opaque in kraid.
+          # Run 2: adding -isysroot alone made every NIR struct opaque (no clang resource dir).
+          # Pass both the SDK and Homebrew clang's own resource dir to bindgen's libclang.
           export LIBCLANG_PATH="$X9_HOMEBREW/opt/llvm/lib"
-          # libclang from Homebrew does not know the macOS SDK; without it size_t is unresolved.
           export SDKROOT="$MACSDK"
-          export BINDGEN_EXTRA_CLANG_ARGS="-isysroot $MACSDK"
+          RES="$("$X9_HOMEBREW/opt/llvm/bin/clang" -print-resource-dir)"
+          export BINDGEN_EXTRA_CLANG_ARGS="-isysroot $MACSDK -resource-dir $RES"
           bindgen --version
+          echo 'typedef unsigned long size_check_t; struct s { struct s *n; int v; };' > /tmp/bg.h
+          printf '#include <stdio.h>\n#include "/tmp/bg.h"\n' > /tmp/bg2.h
+          bindgen /tmp/bg2.h --allowlist-function fwrite --allowlist-type s -- $BINDGEN_EXTRA_CLANG_ARGS | grep -E 'fn fwrite|pub struct s|__n: usize|usize' | head -5
           meson setup "$W/build-panvk-host" "$W/mesa-render-source" --native-file "$W/panvk-host.native" \
             --buildtype=release -Dplatforms=[] -Dgallium-drivers=[] -Dvulkan-drivers=panfrost \
             -Dglx=disabled -Degl=disabled -Dgbm=disabled -Dopengl=false -Dgles1=disabled -Dgles2=disabled \
