@@ -81,6 +81,9 @@ jobs:
           git apply ../ios-sweet/tools/dali-gpu/dali-arch13.patch
           # The X9 patch hard-codes the author's checkout; point it at this one.
           sed -i '' "s#/Users/tosasitill/ios_plj110#$G1#g" build/third_party/00-mesa-panvk-x9.patch
+          # Same libclang fix for the iOS cross build (see the host tools step).
+          sed -i '' "s#env\['LIBCLANG_PATH'\]=BREW+'/opt/llvm/lib'#env['LIBCLANG_PATH']='$DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/lib'#" build/scripts/build-panvk-native-ios.py
+          grep -n "LIBCLANG_PATH" build/scripts/build-panvk-native-ios.py
           ln -s "$G1/metal/General" .local/x9/MaliMetal/X9/General
           ln -s "$G1/build/scripts/prepare-panvk-native-budget.py" "$W/prepare-panvk-native-budget.py"
           /usr/bin/patch -d "$W/mesa-render-source" -p1 --batch --forward --fuzz=0 -i "$G1/build/third_party/00-mesa-panvk-x9.patch"
@@ -107,13 +110,13 @@ jobs:
           rust_args = ['-C', 'link-arg=-isysroot', '-C', 'link-arg=$MACSDK']
           EOF
           export PATH="$W/build-env/bin:$HOME/.cargo/bin:$X9_HOMEBREW/bin:$PATH"
-          # Run 1: Homebrew libclang without an SDK left size_t opaque in kraid.
-          # Run 2: adding -isysroot alone made every NIR struct opaque (no clang resource dir).
-          # Pass both the SDK and Homebrew clang's own resource dir to bindgen's libclang.
-          export LIBCLANG_PATH="$X9_HOMEBREW/opt/llvm/lib"
+          # Runs 1-3: Homebrew libclang 23 exposes size_t as clang's new predefined sugar type,
+          # which bindgen turns into an opaque array (kraid fwrite, then every NIR struct).
+          # Use Xcode's libclang (Apple clang 17) for bindgen; LLVM 23 stays for mesa_clc.
+          export LIBCLANG_PATH="$DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/lib"
+          ls "$LIBCLANG_PATH"/libclang.dylib
           export SDKROOT="$MACSDK"
-          RES="$("$X9_HOMEBREW/opt/llvm/bin/clang" -print-resource-dir)"
-          export BINDGEN_EXTRA_CLANG_ARGS="-isysroot $MACSDK -resource-dir $RES"
+          export BINDGEN_EXTRA_CLANG_ARGS="-isysroot $MACSDK"
           bindgen --version
           echo 'typedef unsigned long size_check_t; struct s { struct s *n; int v; };' > /tmp/bg.h
           printf '#include <stdio.h>\n#include "/tmp/bg.h"\n' > /tmp/bg2.h
