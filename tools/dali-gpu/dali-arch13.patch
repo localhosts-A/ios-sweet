@@ -1,7 +1,8 @@
 diff --git a/build/third_party/00-mesa-panvk-x9.patch b/build/third_party/00-mesa-panvk-x9.patch
+index bfce945..e625bd4 100644
 --- a/build/third_party/00-mesa-panvk-x9.patch
 +++ b/build/third_party/00-mesa-panvk-x9.patch
-@@ -383,7 +383,7 @@
+@@ -383,7 +383,7 @@ index 7c87fe4..f085f76 100644
   ]
   
  -foreach arch : [6, 7, 10, 11, 12, 13, 14]
@@ -10,7 +11,7 @@ diff --git a/build/third_party/00-mesa-panvk-x9.patch b/build/third_party/00-mes
  +x9_link_frameworks = get_option('x9-native-kmod') ? ['-framework', 'IOKit', '-framework', 'CoreFoundation'] : []
  +foreach arch : x9_archs
     per_arch_files = common_per_arch_files
-@@ -757,13 +757,13 @@
+@@ -757,13 +757,13 @@ index 3052c0c..9f06f9e 100644
   #define panvk_arch_name(name, version) panvk_##version##_##name
   
  +#ifdef X9_NATIVE_KMOD
@@ -29,10 +30,47 @@ diff --git a/build/third_party/00-mesa-panvk-x9.patch b/build/third_party/00-mes
  +#else
   #define panvk_arch_dispatch(arch, name, ...)                                   \
      do {                                                                        \
+diff --git a/metal/General/X9GeneralMetalFactory.mm b/metal/General/X9GeneralMetalFactory.mm
+index f55a8b6..b7168f8 100644
+--- a/metal/General/X9GeneralMetalFactory.mm
++++ b/metal/General/X9GeneralMetalFactory.mm
+@@ -20,20 +20,26 @@ static void missing_selector(const char *object,const char *selector) {
+  int fd=open("/dev/console",O_WRONLY|O_NOCTTY);
+  if(fd>=0){dprintf(fd,"X9 GENERAL METAL: missing class=%s selector=%s\n",object,selector);close(fd);}
+ }
++// NSLog does not reach the Dali USB log; /dev/console lines do.
++static void refused(const char *step,const char *detail) {
++ int fd=open("/dev/console",O_WRONLY|O_NOCTTY);
++ if(fd>=0){dprintf(fd,"X9 GENERAL METAL: factory refused caller=%s step=%s reason=%s\n",getprogname(),step,detail);close(fd);}
++}
+ @implementation X9GeneralMetalFactory
+ - (instancetype)initWithAcceleratorPort:(unsigned)port {
+  self=[super init];if(!self)return nil;
+- if(!port)return nil;
++ if(!port){refused("port","no accelerator port");return nil;}
+  char args[2048]={0};size_t bytes=sizeof(args)-1;bool enabled=false;
+- if(sysctlbyname("kern.bootargs",args,&bytes,NULL,0))return nil;
++ if(sysctlbyname("kern.bootargs",args,&bytes,NULL,0)){refused("bootargs","kern.bootargs unreadable");return nil;}
+  char *save=NULL;
++ // Dali: the kernel returns the plugin names only with daligpumetal=2 (backboardd) or 3 (all callers).
+  for(char *token=strtok_r(args," \t\r\n",&save);token;token=strtok_r(NULL," \t\r\n",&save))
+-  if(!strcmp(token,"x9_metal_render=1"))enabled=true;
+- if(!enabled)return nil;
++  if(!strcmp(token,"daligpumetal=2")||!strcmp(token,"daligpumetal=3"))enabled=true;
++ if(!enabled){refused("bootargs","need daligpumetal=2 or daligpumetal=3");return nil;}
+  // Do not substitute the fixed compute service for a rendering backend. The
+  // bridge owns the native probe; this layer sees only the answers.
+  struct NmbBackendProbe probe={0};
+- if(!nmb_backend_probe(&probe))return nil;
++ if(!nmb_backend_probe(&probe))return nil;   /* the probe writes its own refusal line */
+  native_bridge_metal_set_shader_core_mask(probe.shader_present);
+  const char *cache=geteuid()==0?"/private/var/root/Library/Caches/X9GeneralMetal":"/private/var/mobile/Library/Caches/X9GeneralMetal";
+  int entry_fd=open("/dev/console",O_WRONLY|O_NOCTTY);
 diff --git a/metal/General/X9RenderTransport.c b/metal/General/X9RenderTransport.c
+index ac7db1f..e86b503 100644
 --- a/metal/General/X9RenderTransport.c
 +++ b/metal/General/X9RenderTransport.c
-@@ -30,7 +30,7 @@
+@@ -30,7 +30,7 @@ struct X9RenderConnection *x9_render_open(struct X9RenderCaps *caps) {
   result=IOConnectCallStructMethod(port,X9RenderGetCaps,NULL,0,&actual,&bytes);
   if(result!=KERN_SUCCESS){failure("native caps",result);IOServiceClose(port);return NULL;}
   if(bytes!=sizeof(actual)||actual.abi!=X9_RENDER_ABI||actual.bytes!=sizeof(actual)||
@@ -41,7 +79,70 @@ diff --git a/metal/General/X9RenderTransport.c b/metal/General/X9RenderTransport
      actual.max_streams<X9_RENDER_MAX_STREAMS||!actual.max_mappings||
      actual.va_start>=actual.va_end||actual.va_start<X9_RENDER_MIN_VA||actual.va_end>X9_RENDER_MAX_VA||
      (actual.capabilities&(X9RenderBufferObjects|X9RenderHostImport|X9RenderCSFSubmit|X9RenderTiler|X9RenderFragment))!=(X9RenderBufferObjects|X9RenderHostImport|X9RenderCSFSubmit|X9RenderTiler|X9RenderFragment)) {
+diff --git a/metal/General/bridge/NativeBackendProbe.mm b/metal/General/bridge/NativeBackendProbe.mm
+index 913c496..8e04311 100644
+--- a/metal/General/bridge/NativeBackendProbe.mm
++++ b/metal/General/bridge/NativeBackendProbe.mm
+@@ -6,6 +6,18 @@
+ #include "NativeBackendProbe.h"
+ #include "../NativeBridgeMetalFrontend.h"
+ #include "../X9RenderTransport.h"
++#include "NativeMetalObjects.h"
++#include <fcntl.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <unistd.h>
++
++// NSLog does not reach the Dali USB log; /dev/console lines do. One line per refusal.
++static bool console_refusal(const char *what,const char *step,const char *reason) {
++ int fd=open("/dev/console",O_WRONLY|O_NOCTTY);
++ if(fd>=0){dprintf(fd,"X9 GENERAL METAL: %s refused caller=%s step=%s reason=%s\n",what,getprogname(),step,reason&&reason[0]?reason:"(none)");close(fd);}
++ return false;
++}
+ 
+ #ifndef X9_PANVK_BUNDLE_PATH
+ #define X9_PANVK_BUNDLE_PATH "/System/Library/Extensions/X9PanVK170.bundle/X9PanVK"
+@@ -15,7 +27,7 @@ extern "C" bool nmb_backend_probe(struct NmbBackendProbe *out) {
+  if(!out)return false;
+  bzero(out,sizeof(*out));
+  io_service_t render=IOServiceGetMatchingService(kIOMainPortDefault,IOServiceMatching("SweetX9Render"));
+- if(!render)return false;
++ if(!render)return console_refusal("probe","service","no SweetX9Render service");
+  CFTypeRef abi=IORegistryEntryCreateCFProperty(render,CFSTR("X9RenderABI"),kCFAllocatorDefault,0);
+  CFTypeRef ready=IORegistryEntryCreateCFProperty(render,CFSTR("X9RenderReady"),kCFAllocatorDefault,0);
+  int version=0;
+@@ -23,13 +35,13 @@ extern "C" bool nmb_backend_probe(struct NmbBackendProbe *out) {
+   CFNumberGetValue((CFNumberRef)abi,kCFNumberIntType,&version)&&version==1&&
+   ready&&CFGetTypeID(ready)==CFBooleanGetTypeID()&&CFBooleanGetValue((CFBooleanRef)ready);
+  if(abi)CFRelease(abi);if(ready)CFRelease(ready);IOObjectRelease(render);
+- if(!usable)return false;
++ if(!usable)return console_refusal("probe","registry","X9RenderABI!=1 or X9RenderReady!=true");
+  // Registry metadata alone does not prove the caller can open the renderer.
+  struct X9RenderCaps caps={0};
+  struct X9RenderConnection *connection=x9_render_open(&caps);
+- if(!connection)return false;
++ if(!connection)return console_refusal("probe","open",x9_render_last_error());
+  x9_render_close(connection);
+- if(!caps.shader_present)return false;
++ if(!caps.shader_present)return console_refusal("probe","caps","shader_present=0");
+  out->shader_present=caps.shader_present;
+  return true;
+ }
+@@ -39,6 +51,10 @@ extern "C" const char *nmb_backend_loader_path(void) { return X9_PANVK_BUNDLE_PA
+ extern "C" id nmb_backend_open(const char *cache,unsigned accelerator_port,
+                                void (*missing)(const char *,const char *)) {
+  uint64_t registry=0;
+- if(IORegistryEntryGetRegistryEntryID(accelerator_port,&registry)!=KERN_SUCCESS)return nil;
+- return native_bridge_metal_open(X9_PANVK_BUNDLE_PATH,cache,registry,missing);
++ if(IORegistryEntryGetRegistryEntryID(accelerator_port,&registry)!=KERN_SUCCESS) {
++  console_refusal("device open","registry-id","IORegistryEntryGetRegistryEntryID failed");return nil;
++ }
++ id device=native_bridge_metal_open(X9_PANVK_BUNDLE_PATH,cache,registry,missing);
++ if(!device)console_refusal("device open","native_bridge_metal_open",nmb_last_error());
++ return device;
+ }
 diff --git a/metal/General/panvk/X9PanVKSubmitPlan.c b/metal/General/panvk/X9PanVKSubmitPlan.c
+index c3f0e40..0c0d456 100644
 --- a/metal/General/panvk/X9PanVKSubmitPlan.c
 +++ b/metal/General/panvk/X9PanVKSubmitPlan.c
 @@ -1,6 +1,6 @@
