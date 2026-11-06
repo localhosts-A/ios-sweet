@@ -141,6 +141,153 @@ index 913c496..8e04311 100644
 + if(!device)console_refusal("device open","native_bridge_metal_open",nmb_last_error());
 + return device;
  }
+diff --git a/metal/General/panvk/X9PanVKMemory.c b/metal/General/panvk/X9PanVKMemory.c
+index f2213ff..ace847c 100644
+--- a/metal/General/panvk/X9PanVKMemory.c
++++ b/metal/General/panvk/X9PanVKMemory.c
+@@ -26,9 +26,19 @@ struct x9_dev {
+  uint64_t cache_ops,cache_range_bytes,cache_bo_bytes,cache_merged;
+  bool failed;
+ };
+-struct x9_bo {struct pan_kmod_bo base;uint32_t memory_type,native_flags;void *imported_host;};
++/* IOKit keeps ONE user mapping per resource and task: a second
++ * IOConnectMapMemory64 returns the same address, and the first
++ * IOConnectUnmapMemory64 removes it for every user, so the second unmap fails.
++ * PanVK maps one BO more than once (host image copy, CRC init, vkMapMemory),
++ * so the CPU mapping is counted here and unmapped when the last user unmaps. */
++struct x9_bo {struct pan_kmod_bo base;uint32_t memory_type,native_flags,cpu_maps;void *imported_host,*cpu;};
+ static struct x9_dev *device(struct pan_kmod_dev *dev){return container_of(dev,struct x9_dev,base);}
+ static int error(int e){errno=e;return -1;}
++/* Name the first reason the device is failed; every later call returns EIO. */
++static void fail(struct x9_dev *d,const char *why) {
++ if(!d->failed)x9_panvk_log("X9 PANVK FAILED: reason=%s errno=%d",why,errno);
++ d->failed=true;
++}
+ static int call(struct x9_dev *d,uint32_t op,const void *in,size_t ilen,void *out,size_t olen) {
+  if(d->failed)return error(EIO);
+  int ret=x9_render_call(d->connection,op,in,ilen,out,olen);
+@@ -82,7 +92,7 @@ static void free_bo(struct pan_kmod_bo *bo) {
+  pan_kmod_bo_cleanup(bo);simple_mtx_lock(&d->lock);
+  /* Retain kernel backing until connection teardown if the caller drops a BO
+   * still mapped or the GPU's ownership cannot be established. */
+- for(unsigned i=0;i<d->count;i++)if(d->mappings[i].handle==bo->handle)d->failed=true;
++ for(unsigned i=0;i<d->count;i++)if(d->mappings[i].handle==bo->handle)fail(d,"free of a GPU-mapped bo");
+  struct X9RenderHandle request={X9_RENDER_ABI,bo->handle};
+  if(!d->failed)call(d,X9RenderRelease,&request,sizeof(request),NULL,0);
+  simple_mtx_unlock(&d->lock);pan_kmod_dev_free(bo->dev,b);
+@@ -99,8 +109,14 @@ static void *map_cpu(struct pan_kmod_bo *bo,int prot,int flags,void *hint) {
+   return b->imported_host;
+  }
+  simple_mtx_lock(&d->lock);uint64_t bytes=0;
+- void *ptr=d->failed?NULL:x9_render_map_buffer(d->connection,b->memory_type,&bytes);
+- if(ptr&&bytes!=bo->size){x9_render_unmap_buffer(d->connection,b->memory_type,ptr);ptr=NULL;d->failed=true;errno=EPROTO;}
++ void *ptr=b->cpu;
++ if(ptr)b->cpu_maps++;
++ else if(d->failed)errno=EIO;
++ else {
++  ptr=x9_render_map_buffer(d->connection,b->memory_type,&bytes);
++  if(ptr&&bytes!=bo->size){x9_render_unmap_buffer(d->connection,b->memory_type,ptr);ptr=NULL;errno=EPROTO;fail(d,"map size");}
++  if(ptr){b->cpu=ptr;b->cpu_maps=1;}
++ }
+  simple_mtx_unlock(&d->lock);return ptr?ptr:MAP_FAILED;
+ }
+ /* Offset/size are BO-relative, not virtual addresses. Round outward only
+@@ -142,14 +158,14 @@ static int flush_maps(struct pan_kmod_dev *dev) {
+  struct x9_dev *d=device(dev);int result=0;simple_mtx_lock(&d->lock);
+  struct pan_kmod_bo *pending_bo=NULL;struct X9RenderCacheRequest pending={0};
+  util_dynarray_foreach(&dev->pending_bo_syncs.array,struct pan_kmod_deferred_bo_sync,sync) {
+-  if(!sync->bo||sync->bo->dev!=dev||sync->start>sync->bo->size||sync->size>sync->bo->size-sync->start){result=error(EINVAL);d->failed=true;break;}
++  if(!sync->bo||sync->bo->dev!=dev||sync->start>sync->bo->size||sync->size>sync->bo->size-sync->start){result=error(EINVAL);fail(d,"flush sync range");break;}
+   if(!sync->size)continue;
+   /* Deferred uploads (imports included) already carry exact ranges. Merge
+    * consecutive overlapping/adjacent operations only for the SAME BO and
+    * operation. Never reorder an invalidate past a clean or across another BO
+    * which could be an alias. No merging across submits or immediate calls. */
+   struct X9RenderCacheRequest req;
+-  if(cache_request(sync->bo,sync->start,sync->size,sync->type,&req)){result=-1;d->failed=true;break;}
++  if(cache_request(sync->bo,sync->start,sync->size,sync->type,&req)){result=-1;fail(d,"flush cache request");break;}
+   if(pending_bo==sync->bo&&pending.operation==req.operation&&
+      req.offset<=pending.offset+pending.bytes&&pending.offset<=req.offset+req.bytes) {
+    uint64_t start=MIN2(pending.offset,req.offset),end=MAX2(pending.offset+pending.bytes,req.offset+req.bytes);
+@@ -177,7 +193,7 @@ static bool wait_bo(struct pan_kmod_bo *bo,int64_t timeout,bool read_only) {
+   if(!call(d,X9RenderWait,&req,sizeof(req),&reply,sizeof(reply))) {
+    ready=reply.abi==X9_RENDER_ABI&&reply.group==req.group&&reply.submission_id==req.submission_id&&
+     reply.completed_id==req.submission_id&&!reply.status&&!reply.fault_status&&!reply.exception_type&&!reply.fault_address&&!reply.reserved;
+-   if(!ready){d->failed=true;errno=EPROTO;}
++   if(!ready){errno=EPROTO;fail(d,"wait completion");}
+   }
+  }
+  simple_mtx_unlock(&d->lock);return ready;
+@@ -197,7 +213,7 @@ static int unmap_slot(struct x9_dev *d,unsigned i) {
+ }
+ static void destroy_vm(struct pan_kmod_vm *vm) {
+  struct x9_dev *d=device(vm->dev);simple_mtx_lock(&d->lock);
+- if(d->group_count)d->failed=true; /* groups must be destroyed before their VM */
++ if(d->group_count)fail(d,"vm destroyed with groups"); /* groups must be destroyed before their VM */
+  while(d->count&&!d->failed)if(unmap_slot(d,d->count-1))break;
+  d->vm=NULL;simple_mtx_unlock(&d->lock);
+  pan_kmod_vm_cleanup(vm);pan_kmod_dev_free(vm->dev,vm);
+@@ -242,7 +258,7 @@ static int bind_vm(struct pan_kmod_vm *vm,enum pan_kmod_vm_op_mode mode,struct p
+  }
+  /* A multi-op request can partially succeed. Fail the VM instead of retrying
+   * or presenting the remaining operations as an atomic rollback. */
+- if(result)d->failed=true;
++ if(result)fail(d,"bind_vm");
+ done:simple_mtx_unlock(&d->lock);return result;
+ }
+ static enum pan_kmod_vm_state vm_state(struct pan_kmod_vm *vm) {
+@@ -298,7 +314,7 @@ int x9_pan_kmod_group_create(struct pan_kmod_dev *dev,const struct X9RenderGroup
+      actual.priority!=request->priority||actual.max_compute!=request->max_compute||actual.max_fragment!=request->max_fragment||
+      actual.max_tiler!=request->max_tiler||actual.tiler_heap_bytes!=request->tiler_heap_bytes)ret=error(EPROTO);
+   for(unsigned i=0;!ret&&i<d->group_count;i++)if(d->groups[i]==actual.handle)ret=error(EPROTO);
+-  if(ret)d->failed=true;else {d->groups[d->group_count++]=actual.handle;*reply=actual;}
++  if(ret)fail(d,"group reply");else {d->groups[d->group_count++]=actual.handle;*reply=actual;}
+  }
+ done:simple_mtx_unlock(&d->lock);return ret;
+ }
+@@ -333,7 +349,7 @@ int x9_pan_kmod_submit(struct pan_kmod_dev *dev,uint32_t group,const struct X9Re
+    * queued/pending acknowledgment is not accepted as rendering success. */
+   if(actual.abi!=X9_RENDER_ABI||actual.group!=group||actual.submission_id!=request.submission_id||
+      actual.completed_id!=request.submission_id||actual.status||actual.reserved||actual.fault_status||actual.exception_type||actual.fault_address) {
+-   d->failed=true;ret=error(EPROTO);
++   ret=error(EPROTO);fail(d,"submit completion");
+   }else {d->last_submission=request.submission_id;d->last_group=group;*reply=actual;}
+  }
+ done:simple_mtx_unlock(&d->lock);return ret;
+@@ -343,9 +359,12 @@ int x9_pan_kmod_unmap_cpu(struct pan_kmod_bo *bo,void *address) {
+  if(!bo||bo->dev->ops!=&ops||!address)return error(EINVAL);
+  struct x9_dev *d=device(bo->dev);struct x9_bo *b=container_of(bo,struct x9_bo,base);
+  simple_mtx_lock(&d->lock);
+- int ret=b->imported_host?(address==b->imported_host?0:error(EINVAL)):
+-  x9_render_unmap_buffer(d->connection,b->memory_type,address);
+- if(ret)d->failed=true;
++ int ret;
++ if(b->imported_host)ret=address==b->imported_host?0:error(EINVAL);
++ else if(!b->cpu_maps||address!=b->cpu)ret=error(EINVAL);
++ else if(--b->cpu_maps)ret=0;
++ else {ret=x9_render_unmap_buffer(d->connection,b->memory_type,address);b->cpu=NULL;}
++ if(ret)fail(d,"unmap_cpu");
+  simple_mtx_unlock(&d->lock);return ret;
+ }
+ 
+@@ -373,7 +392,7 @@ int x9_pan_kmod_group_check(struct pan_kmod_dev *dev,uint32_t group) {
+   ret=call(d,X9RenderWait,&req,sizeof(req),&reply,sizeof(reply));
+   if(!ret&&(reply.abi!=X9_RENDER_ABI||reply.group!=group||reply.submission_id!=d->last_submission||
+      reply.completed_id!=d->last_submission||reply.status||reply.reserved||reply.fault_status||reply.exception_type||reply.fault_address)) {
+-   d->failed=true;ret=error(EPROTO);
++   ret=error(EPROTO);fail(d,"group_check completion");
+   }
+  }
+  /* Older groups have no pending jobs: this backend submits synchronously
+@@ -411,7 +430,7 @@ struct pan_kmod_bo *x9_pan_kmod_import_host(struct pan_kmod_dev *dev,struct pan_
+   }
+  }
+  if(!ret&&(reply.abi!=X9_RENDER_ABI||!reply.handle||!reply.memory_type||reply.flags!=req.flags||reply.bytes!=bytes)) {
+-  d->failed=true;ret=error(EPROTO);
++  ret=error(EPROTO);fail(d,"import reply");
+  }
+  simple_mtx_unlock(&d->lock);
+  if(ret){pan_kmod_dev_free(dev,bo);return NULL;}
 diff --git a/metal/General/panvk/X9PanVKSubmitPlan.c b/metal/General/panvk/X9PanVKSubmitPlan.c
 index c3f0e40..0c0d456 100644
 --- a/metal/General/panvk/X9PanVKSubmitPlan.c
