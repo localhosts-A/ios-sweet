@@ -1,8 +1,8 @@
 diff --git a/metal/General/NativeBridgeMetalFrontend.mm b/metal/General/NativeBridgeMetalFrontend.mm
-index bee4a1a..3e6b753 100644
+index bee4a1a..a4c0d56 100644
 --- a/metal/General/NativeBridgeMetalFrontend.mm
 +++ b/metal/General/NativeBridgeMetalFrontend.mm
-@@ -1632,6 +1632,133 @@ static bool pipelineArchives(NSArray *list,std::vector<NmbBinaryArchive *> &arch
+@@ -1632,6 +1632,136 @@ static bool pipelineArchives(NSArray *list,std::vector<NmbBinaryArchive *> &arch
  @protocol NBOriginalStitching
  - (NSString *)newDagStringWithGraphs:(NSArray<MTLFunctionStitchingGraph *> *)graphs;
  @end
@@ -38,13 +38,16 @@ index bee4a1a..3e6b753 100644
 +// level's block rows at that pitch. Nothing else is assumed: a format outside ASTC
 +// still answers nil, and the caller sees a failed decode rather than a wrong image.
 +static BOOL astcBlockExtent(NSUInteger fmt,NSUInteger *bw,NSUInteger *bh) {
-+ // ASTC LDR 204..218 and HDR 222..236; 209, 219..221 are unassigned.
-+ static const uint8_t w[13]={4,5,5,6,6,8,8,8,10,10,10,12,12};
-+ static const uint8_t h[13]={4,4,5,5,6,5,6,8, 5, 6, 8,10,12};
++ // The 14 footprints, in Metal's raw-value order (the runtime's own FOOTPRINTS table).
++ static const uint8_t w[14]={4,5,5,6,6,8,8,8,10,10,10,10,12,12};
++ static const uint8_t h[14]={4,4,5,5,6,5,6,8, 5, 6, 8,10,10,12};
 + NSUInteger i=(NSUInteger)-1;
-+ if(fmt>=204&&fmt<=218)i=fmt-204;
-+ else if(fmt>=222&&fmt<=236)i=fmt-222;
-+ if(i>=13U)return NO;
++ // ASTC LDR 204..218 and HDR 222..236, each missing one unassigned value (209, 227).
++ if(fmt>=204&&fmt<=208)i=fmt-204;
++ else if(fmt>=210&&fmt<=218)i=fmt-205;
++ else if(fmt>=222&&fmt<=226)i=fmt-222;
++ else if(fmt>=228&&fmt<=236)i=fmt-223;
++ if(i>=14U)return NO;
 + *bw=w[i];*bh=h[i];return YES;
 +}
 +@interface NBTextureLayout : NSObject
@@ -136,7 +139,7 @@ index bee4a1a..3e6b753 100644
  @interface NBDeviceMethods : NSObject
  @end
  @implementation NBDeviceMethods
-@@ -1704,17 +1831,17 @@ static bool pipelineArchives(NSArray *list,std::vector<NmbBinaryArchive *> &arch
+@@ -1704,17 +1834,17 @@ static bool pipelineArchives(NSArray *list,std::vector<NmbBinaryArchive *> &arch
   for(NSUInteger i=0;i<count;i++)if(resources[i])[held addObject:resources[i]];
   group.resources=held;return group;
  }
@@ -158,7 +161,7 @@ index bee4a1a..3e6b753 100644
  }
  - (id<MTLCommandQueue>)newCommandQueueWithMaxCommandBufferCount:(NSUInteger)count {(void)count;return [(id<MTLDevice>)self newCommandQueue];}
  - (id<MTLBuffer>)newBufferWithLength:(NSUInteger)length options:(MTLResourceOptions)options {
-@@ -1798,10 +1925,26 @@ static bool pipelineArchives(NSArray *list,std::vector<NmbBinaryArchive *> &arch
+@@ -1798,10 +1928,26 @@ static bool pipelineArchives(NSArray *list,std::vector<NmbBinaryArchive *> &arch
     (unsigned long long)d.width,(unsigned long long)d.height,(unsigned long long)d.pixelFormat,IOSurfaceGetPixelFormat(surface),
     (unsigned long long)row,(unsigned long long)(start-(uintptr_t)base),(unsigned long long)allocation,(unsigned long long)bytes);
    uint64_t routes[6]={};
