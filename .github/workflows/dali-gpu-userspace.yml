@@ -79,6 +79,11 @@ jobs:
           curl -fsSL "https://dri.freedesktop.org/libdrm/libdrm-$LIBDRM_VERSION.tar.xz" | tar -xf - -C "$W"
           # dali: PAN_ARCH 13, GPU_ID 0xd8300015, v13 genxml.
           git apply ../ios-sweet/tools/dali-gpu/dali-arch13.patch
+          # Apple's MTLTextureLayout object, which the frontend left unanswered (nil): QuartzCore
+          # decodes a compressed image into host memory of [layout size] bytes at [layout
+          # alignment] and both of its callers test the answer with `cbz x0`, so a nil layout
+          # loses the whole decoded image (SpringBoard's icons).
+          git apply ../ios-sweet/tools/dali-gpu/dali-texture-layout.patch
           # The X9 patch hard-codes the author's checkout; point it at this one.
           sed -i '' "s#/Users/tosasitill/ios_plj110#$G1#g" build/third_party/00-mesa-panvk-x9.patch
           # Same libclang fix for the iOS cross build (see the host tools step).
@@ -160,7 +165,7 @@ jobs:
           {
             echo "revision=$REVISION"
             echo "ios-sweet=$GITHUB_SHA"
-            echo "G1UltraMetal=$G1ULTRAMETAL_COMMIT + tools/dali-gpu/dali-arch13.patch"
+            echo "G1UltraMetal=$G1ULTRAMETAL_COMMIT + tools/dali-gpu/dali-arch13.patch + tools/dali-gpu/dali-texture-layout.patch"
             echo "mesa=$MESA_COMMIT + 00 + 02..12 + fixed tiler budget"
             echo "metal2vulkan=$METAL2VULKAN_COMMIT + pan194,195,196,198,200,201,203,204,205 + 0023,0025"
             echo "libdrm=$LIBDRM_VERSION (headers only)"

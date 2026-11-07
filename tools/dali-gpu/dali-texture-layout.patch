@@ -1,0 +1,135 @@
+diff --git a/metal/General/NativeBridgeMetalFrontend.mm b/metal/General/NativeBridgeMetalFrontend.mm
+index bee4a1a..c1a83cc 100644
+--- a/metal/General/NativeBridgeMetalFrontend.mm
++++ b/metal/General/NativeBridgeMetalFrontend.mm
+@@ -1632,6 +1632,80 @@ static bool pipelineArchives(NSArray *list,std::vector<NmbBinaryArchive *> &arch
+ @protocol NBOriginalStitching
+ - (NSString *)newDagStringWithGraphs:(NSArray<MTLFunctionStitchingGraph *> *)graphs;
+ @end
++// ---- Apple's texture layout object ----
++// The `MTLTextureLayout` protocol; Apple's own is MTLIOAccelTextureLayout
++// (`-[MTLIOAccelTextureLayout initWithDevice:descriptor:]`, Metal.dis 0x181abbc0c).
++// QuartzCore asks for it in `CA::Render::new_mtl_texture_layout` (QuartzCore.dis
++// 0x1884ccc68), called from `CA::Render::CompressedImage::new_image_with_texture_data`
++// (0x18835864c) and `CA::Render::CompressedImage::decode` (0x18849d954): a compressed
++// image is decoded into host memory of `[layout size]` bytes aligned to
++// `[layout alignment]` (aligned_malloc at 0x188358b10), written level by level through
++// `copyFromLinearBytes:...` (0x188358b88, textureLevel advanced each turn), and handed
++// on. Both callers test the answer with `cbz x0` (0x188358c90, 0x18849db78): a nil
++// layout loses the whole decoded image.
++//
++// Every shape here is the runtime's own answer, never a guess: the row pitch and the
++// texel size come from `nmb_device_linear_bytes_per_row` (the device's format
++// description and linear alignment, `pixel_format_info.rs`), and the alignment is the
++// runtime's `LINEAR_ALIGNMENT` (16; `private_properties.rs`,
++// `deviceLinearTextureAlignmentBytes`). A format no linear image backs answers 0 there
++// and the layout is nil: the caller sees a failed decode, not a wrong image.
++@interface NBTextureLayout : NSObject
++@property(nonatomic) NSUInteger width,height,levels,rowPitch,texelBytes,byteSize,byteAlignment;
++@end
++@implementation NBTextureLayout
++- (NSUInteger)size {return _byteSize;}
++- (NSUInteger)alignment {return _byteAlignment;}
++// The decoded image is written through copyFromLinearBytes and the memory is the
++// caller's (aligned_malloc), so these two have nothing to do here.
++- (void)initializeTextureMemory:(void *)memory {(void)memory;}
++- (void)finalizeTextureMemory:(void *)memory {(void)memory;}
++- (void)copyFromLinearBytes:(const void *)bytes linearOffset:(NSUInteger)offset linearBytesPerRow:(NSUInteger)linearRow
++ linearBytesPerImage:(NSUInteger)linearImage toTextureMemory:(void *)memory textureSlice:(NSUInteger)slice
++ textureLevel:(NSUInteger)level textureRegion:(MTLRegion)region {
++ (void)linearImage;(void)slice;
++ if(!bytes||!memory||level>=_levels)return;
++ const uint8_t *src=(const uint8_t *)bytes+offset;
++ const NSUInteger lw=_width>>level?:(NSUInteger)1,lh=_height>>level?:(NSUInteger)1;
++ // The levels are packed inside the one allocation in order, each level's rows at the
++ // layout's row pitch; the copy lands at the level's start plus the region's origin.
++ uint64_t levelOffset=0;
++ for(NSUInteger i=0;i<level;i++)levelOffset+=(uint64_t)_rowPitch*((_height>>i)?(_height>>i):1);
++ const NSUInteger ox=region.origin.x,oy=region.origin.y;
++ // A zero-sized region means the whole level (the caller's own reads use this shape).
++ const NSUInteger tw=region.size.width?region.size.width:lw-(ox<lw?ox:0);
++ const NSUInteger th=region.size.height?region.size.height:lh-(oy<lh?oy:0);
++ if(ox>=lw||oy>=lh||!tw||!th)return;
++ const NSUInteger cols=MIN(tw,lw-ox),rows=MIN(th,lh-oy);
++ uint8_t *dst=(uint8_t *)memory+levelOffset+(uint64_t)oy*_rowPitch+(uint64_t)ox*_texelBytes;
++ const size_t span=(size_t)cols*_texelBytes;
++ for(NSUInteger y=0;y<rows;y++){memcpy(dst,src+(size_t)ox*_texelBytes,span);dst+=_rowPitch;src+=linearRow;}
++}
++@end
++// The layout for `d`: the row pitch is `requiredLinearTextureBytesPerRowForDescriptor:`'s
++// (the runtime's own linear row for the format and width); the texel size is that same
++// query at 1024 texels ("1024*texel" is a multiple of the 16-byte linear alignment for
++// every format with a texel size) divided back out; the size is the levels packed at the
++// row pitch. Nil where the format has no linear row: the caller sees a failed decode.
++static id makeTextureLayout(MTLTextureDescriptor *d,BOOL backed) {
++ if(!d)return nil;
++ const NSUInteger rows=d.height?d.height:1,cols=d.width?d.width:1;
++ const uint64_t pitch=nmb_device_linear_bytes_per_row(gDevice,d.pixelFormat,d.width);
++ if(!pitch){NBLOG(@"native-metal: texture layout refused: %@",lastError());return nil;}
++ const uint64_t wide=nmb_device_linear_bytes_per_row(gDevice,d.pixelFormat,1024);
++ const NSUInteger texel=wide?(NSUInteger)(wide/1024):4;
++ uint64_t size=0;const NSUInteger levels=d.mipmapLevelCount?d.mipmapLevelCount:1;
++ for(NSUInteger i=0;i<levels;i++)size+=(uint64_t)pitch*((rows>>i)?(rows>>i):1);
++ if(!size)size=pitch;
++ NBTextureLayout *layout=[NBTextureLayout new];
++ layout.width=cols;layout.height=rows;layout.levels=levels;layout.rowPitch=(NSUInteger)pitch;
++ layout.texelBytes=texel;layout.byteAlignment=16;layout.byteSize=(NSUInteger)size;
++ NBLOG(@"X9 TEXTURE layout: %lux%lu fmt=%lu levels=%lu row=%lu texel=%lu align=%lu size=%lu backed=%d",
++  (unsigned long)cols,(unsigned long)rows,(unsigned long)d.pixelFormat,(unsigned long)levels,
++  (unsigned long)layout.rowPitch,(unsigned long)texel,(unsigned long)layout.byteAlignment,
++  (unsigned long)layout.byteSize,(int)backed);
++ return layout;
++}
+ @interface NBDeviceMethods : NSObject
+ @end
+ @implementation NBDeviceMethods
+@@ -1704,17 +1778,17 @@ static bool pipelineArchives(NSArray *list,std::vector<NmbBinaryArchive *> &arch
+  for(NSUInteger i=0;i<count;i++)if(resources[i])[held addObject:resources[i]];
+  group.resources=held;return group;
+ }
+-// Not made here: a texture over raw memory in Apple's layout, and Apple's texture layout object. Both are refused, with the reason, rather than
++// Not made here: a texture over raw memory in Apple's layout. Refused, with the reason, rather than
+ // answered with a guessed shape.
+ - (id<MTLTexture>)newTextureWithBytesNoCopy:(void *)bytes length:(NSUInteger)length descriptor:(MTLTextureDescriptor *)d deallocator:(void (^)(void *,NSUInteger))deallocator {
+  (void)bytes;(void)length;(void)d;(void)deallocator;
+  NBLOG(@"native-metal: newTextureWithBytesNoCopy:length:descriptor:deallocator: is not implemented (Apple's texture layout of raw memory is not known)");
+  return nil;
+ }
++// Apple's texture layout object, at NBTextureLayout (above): the byte size and alignment of a
++// texture's host memory, its linear row pitch, and the write of a linear image into it.
+ - (id)newTextureLayoutWithDescriptor:(MTLTextureDescriptor *)d isHeapOrBufferBacked:(BOOL)backed {
+- (void)d;(void)backed;
+- NBLOG(@"native-metal: newTextureLayoutWithDescriptor:isHeapOrBufferBacked: is not implemented (Apple's layout object is not known)");
+- return nil;
++ return makeTextureLayout(d,backed);
+ }
+ - (id<MTLCommandQueue>)newCommandQueueWithMaxCommandBufferCount:(NSUInteger)count {(void)count;return [(id<MTLDevice>)self newCommandQueue];}
+ - (id<MTLBuffer>)newBufferWithLength:(NSUInteger)length options:(MTLResourceOptions)options {
+@@ -1798,10 +1872,26 @@ static bool pipelineArchives(NSArray *list,std::vector<NmbBinaryArchive *> &arch
+    (unsigned long long)d.width,(unsigned long long)d.height,(unsigned long long)d.pixelFormat,IOSurfaceGetPixelFormat(surface),
+    (unsigned long long)row,(unsigned long long)(start-(uintptr_t)base),(unsigned long long)allocation,(unsigned long long)bytes);
+   uint64_t routes[6]={};
+-  if(nmb_device_texture_import_stats(gDevice,routes))
++  if(nmb_device_texture_import_stats(gDevice,routes)) {
+    NBLOG(@"X9 TEXTURE routes: direct=%llu pitched=%llu shadow=%llu reject_pitch=%llu reject_image=%llu reject_memory=%llu",
+     (unsigned long long)routes[0],(unsigned long long)routes[1],(unsigned long long)routes[2],
+     (unsigned long long)routes[3],(unsigned long long)routes[4],(unsigned long long)routes[5]);
++   // Which path this particular surface's image took, and why: the route deltas since the
++   // last import, with this import's own row and the alignment the driver's linear images
++   // take. A shadow here is the in-place route refusing these bytes, not the shadow itself
++   // failing (the runtime's host_texture_shadows_refused_* name the class of refusal);
++   // `pitched` counts an image the driver laid at Metal's pitch. `nmb_last_warning` carries
++   // the runtime's own words for the last one, which name the exact reason.
++   static uint64_t prev[6]={};
++   const uint64_t d_direct=routes[0]-prev[0],d_pitched=routes[1]-prev[1],d_shadow=routes[2]-prev[2];
++   const uint64_t d_pitch=routes[3]-prev[3],d_image=routes[4]-prev[4],d_mem=routes[5]-prev[5];
++   for(unsigned i=0;i<6;i++)prev[i]=routes[i];
++   char why[160]={};nmb_last_warning(why,sizeof why);
++   NBLOG(@"X9 TEXTURE route: id=%u %llux%llu row=%llu delta direct=%llu pitched=%llu shadow=%llu reject_pitch=%llu reject_image=%llu reject_memory=%llu why=%s",
++    IOSurfaceGetID(surface),(unsigned long long)IOSurfaceGetWidth(surface),(unsigned long long)IOSurfaceGetHeight(surface),(unsigned long long)row,
++    (unsigned long long)d_direct,(unsigned long long)d_pitched,(unsigned long long)d_shadow,
++    (unsigned long long)d_pitch,(unsigned long long)d_image,(unsigned long long)d_mem,why[0]?why:"-");
++  }
+  }
+  return (id<MTLTexture>)texture;
+ }
