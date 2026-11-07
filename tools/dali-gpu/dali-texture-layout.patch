@@ -1,8 +1,8 @@
 diff --git a/metal/General/NativeBridgeMetalFrontend.mm b/metal/General/NativeBridgeMetalFrontend.mm
-index bee4a1a..c1a83cc 100644
+index bee4a1a..3e6b753 100644
 --- a/metal/General/NativeBridgeMetalFrontend.mm
 +++ b/metal/General/NativeBridgeMetalFrontend.mm
-@@ -1632,6 +1632,80 @@ static bool pipelineArchives(NSArray *list,std::vector<NmbBinaryArchive *> &arch
+@@ -1632,6 +1632,133 @@ static bool pipelineArchives(NSArray *list,std::vector<NmbBinaryArchive *> &arch
  @protocol NBOriginalStitching
  - (NSString *)newDagStringWithGraphs:(NSArray<MTLFunctionStitchingGraph *> *)graphs;
  @end
@@ -24,8 +24,31 @@ index bee4a1a..c1a83cc 100644
 +// runtime's `LINEAR_ALIGNMENT` (16; `private_properties.rs`,
 +// `deviceLinearTextureAlignmentBytes`). A format no linear image backs answers 0 there
 +// and the layout is nil: the caller sees a failed decode, not a wrong image.
++//
++// A compressed format has no linear row at all (`nmb_device_linear_bytes_per_row` answers
++// 0 and the runtime names the refusal `NotLinear`), and SpringBoard's app icons are
++// exactly that: the v51 run's 15 `texture layout refused: ... NotLinear { pixel_format:
++// ASTC4x4LDR }` are the icon decodes losing their whole image again.
++//
++// ASTC is the format in play, and its shape is not a guess: a block is 16 bytes (the
++// runtime's own `astc_decode.rs` reads `&[u8; 16]`), and the footprint is the format's
++// own two digits (`ASTC_4x4_LDR` is 4x4, `ASTC_12x12_LDR` is 12x12; the same table
++// `astc_decode.rs` carries, blocks of one to twelve texels a side). The image is those
++// blocks row-major, so a row is `ceil(width/blockWidth)` blocks and the layout is the
++// level's block rows at that pitch. Nothing else is assumed: a format outside ASTC
++// still answers nil, and the caller sees a failed decode rather than a wrong image.
++static BOOL astcBlockExtent(NSUInteger fmt,NSUInteger *bw,NSUInteger *bh) {
++ // ASTC LDR 204..218 and HDR 222..236; 209, 219..221 are unassigned.
++ static const uint8_t w[13]={4,5,5,6,6,8,8,8,10,10,10,12,12};
++ static const uint8_t h[13]={4,4,5,5,6,5,6,8, 5, 6, 8,10,12};
++ NSUInteger i=(NSUInteger)-1;
++ if(fmt>=204&&fmt<=218)i=fmt-204;
++ else if(fmt>=222&&fmt<=236)i=fmt-222;
++ if(i>=13U)return NO;
++ *bw=w[i];*bh=h[i];return YES;
++}
 +@interface NBTextureLayout : NSObject
-+@property(nonatomic) NSUInteger width,height,levels,rowPitch,texelBytes,byteSize,byteAlignment;
++@property(nonatomic) NSUInteger width,height,levels,rowPitch,texelBytes,byteSize,byteAlignment,blockWidth,blockHeight;
 +@end
 +@implementation NBTextureLayout
 +- (NSUInteger)size {return _byteSize;}
@@ -34,6 +57,12 @@ index bee4a1a..c1a83cc 100644
 +// caller's (aligned_malloc), so these two have nothing to do here.
 +- (void)initializeTextureMemory:(void *)memory {(void)memory;}
 +- (void)finalizeTextureMemory:(void *)memory {(void)memory;}
++// A level's rows, in whole units of the layout's row: one row each for a linear format,
++// one block row (`ceil(height/blockHeight)`) for a compressed one.
++- (NSUInteger)unitsInLevel:(NSUInteger)level {
++ const NSUInteger lh=(_height>>level)?(_height>>level):1;
++ return _blockHeight?((lh+_blockHeight-1)/_blockHeight):lh;
++}
 +- (void)copyFromLinearBytes:(const void *)bytes linearOffset:(NSUInteger)offset linearBytesPerRow:(NSUInteger)linearRow
 + linearBytesPerImage:(NSUInteger)linearImage toTextureMemory:(void *)memory textureSlice:(NSUInteger)slice
 + textureLevel:(NSUInteger)level textureRegion:(MTLRegion)region {
@@ -41,34 +70,58 @@ index bee4a1a..c1a83cc 100644
 + if(!bytes||!memory||level>=_levels)return;
 + const uint8_t *src=(const uint8_t *)bytes+offset;
 + const NSUInteger lw=_width>>level?:(NSUInteger)1,lh=_height>>level?:(NSUInteger)1;
++ const NSUInteger pw=_blockWidth?_blockWidth:1,ph=_blockHeight?_blockHeight:1,unit=_blockWidth?_texelBytes:1;
 + // The levels are packed inside the one allocation in order, each level's rows at the
 + // layout's row pitch; the copy lands at the level's start plus the region's origin.
 + uint64_t levelOffset=0;
-+ for(NSUInteger i=0;i<level;i++)levelOffset+=(uint64_t)_rowPitch*((_height>>i)?(_height>>i):1);
++ for(NSUInteger i=0;i<level;i++)levelOffset+=(uint64_t)_rowPitch*[self unitsInLevel:i];
 + const NSUInteger ox=region.origin.x,oy=region.origin.y;
 + // A zero-sized region means the whole level (the caller's own reads use this shape).
 + const NSUInteger tw=region.size.width?region.size.width:lw-(ox<lw?ox:0);
 + const NSUInteger th=region.size.height?region.size.height:lh-(oy<lh?oy:0);
 + if(ox>=lw||oy>=lh||!tw||!th)return;
 + const NSUInteger cols=MIN(tw,lw-ox),rows=MIN(th,lh-oy);
-+ uint8_t *dst=(uint8_t *)memory+levelOffset+(uint64_t)oy*_rowPitch+(uint64_t)ox*_texelBytes;
-+ const size_t span=(size_t)cols*_texelBytes;
-+ for(NSUInteger y=0;y<rows;y++){memcpy(dst,src+(size_t)ox*_texelBytes,span);dst+=_rowPitch;src+=linearRow;}
++ // A block format addresses whole blocks: the region's block origin and block count.
++ const NSUInteger bx=ox/pw,by=oy/ph,bc=(cols+pw-1)/pw,br=(rows+ph-1)/ph;
++ uint8_t *dst=(uint8_t *)memory+levelOffset+(uint64_t)by*_rowPitch+(uint64_t)bx*unit;
++ const size_t span=(size_t)bc*unit;
++ for(NSUInteger y=0;y<br;y++){memcpy(dst,src+(size_t)bx*unit,span);dst+=_rowPitch;src+=linearRow;}
 +}
 +@end
 +// The layout for `d`: the row pitch is `requiredLinearTextureBytesPerRowForDescriptor:`'s
 +// (the runtime's own linear row for the format and width); the texel size is that same
 +// query at 1024 texels ("1024*texel" is a multiple of the 16-byte linear alignment for
 +// every format with a texel size) divided back out; the size is the levels packed at the
-+// row pitch. Nil where the format has no linear row: the caller sees a failed decode.
++// row pitch. ASTC takes its own block layout instead (above). Nil where neither applies:
++// the caller sees a failed decode.
 +static id makeTextureLayout(MTLTextureDescriptor *d,BOOL backed) {
 + if(!d)return nil;
-+ const NSUInteger rows=d.height?d.height:1,cols=d.width?d.width:1;
++ const NSUInteger rows=d.height?d.height:1,cols=d.width?d.width:1,levels=d.mipmapLevelCount?d.mipmapLevelCount:1;
++ NSUInteger bw=0,bh=0;
++ if(astcBlockExtent(d.pixelFormat,&bw,&bh)){
++  // A row is `ceil(width/blockWidth)` 16-byte blocks; a level is its block rows at it.
++  const uint64_t pitch=(uint64_t)((cols+bw-1)/bw)*16;
++  uint64_t size=0;
++  for(NSUInteger i=0;i<levels;i++){
++   const NSUInteger lh=(rows>>i)?(rows>>i):1;
++   size+=(uint64_t)pitch*((lh+bh-1)/bh);
++  }
++  if(!size)size=pitch;
++  NBTextureLayout *layout=[NBTextureLayout new];
++  layout.width=cols;layout.height=rows;layout.levels=levels;layout.rowPitch=(NSUInteger)pitch;
++  layout.texelBytes=16;layout.byteAlignment=16;layout.byteSize=(NSUInteger)size;
++  layout.blockWidth=bw;layout.blockHeight=bh;
++  NBLOG(@"X9 TEXTURE layout: %lux%lu fmt=%lu levels=%lu row=%lu block=%lux%lu bytes=16 align=16 size=%lu backed=%d astc",
++   (unsigned long)cols,(unsigned long)rows,(unsigned long)d.pixelFormat,(unsigned long)levels,
++   (unsigned long)pitch,(unsigned long)bw,(unsigned long)bh,
++   (unsigned long)layout.byteSize,(int)backed);
++  return layout;
++ }
 + const uint64_t pitch=nmb_device_linear_bytes_per_row(gDevice,d.pixelFormat,d.width);
 + if(!pitch){NBLOG(@"native-metal: texture layout refused: %@",lastError());return nil;}
 + const uint64_t wide=nmb_device_linear_bytes_per_row(gDevice,d.pixelFormat,1024);
 + const NSUInteger texel=wide?(NSUInteger)(wide/1024):4;
-+ uint64_t size=0;const NSUInteger levels=d.mipmapLevelCount?d.mipmapLevelCount:1;
++ uint64_t size=0;
 + for(NSUInteger i=0;i<levels;i++)size+=(uint64_t)pitch*((rows>>i)?(rows>>i):1);
 + if(!size)size=pitch;
 + NBTextureLayout *layout=[NBTextureLayout new];
@@ -83,7 +136,7 @@ index bee4a1a..c1a83cc 100644
  @interface NBDeviceMethods : NSObject
  @end
  @implementation NBDeviceMethods
-@@ -1704,17 +1778,17 @@ static bool pipelineArchives(NSArray *list,std::vector<NmbBinaryArchive *> &arch
+@@ -1704,17 +1831,17 @@ static bool pipelineArchives(NSArray *list,std::vector<NmbBinaryArchive *> &arch
   for(NSUInteger i=0;i<count;i++)if(resources[i])[held addObject:resources[i]];
   group.resources=held;return group;
  }
@@ -105,7 +158,7 @@ index bee4a1a..c1a83cc 100644
  }
  - (id<MTLCommandQueue>)newCommandQueueWithMaxCommandBufferCount:(NSUInteger)count {(void)count;return [(id<MTLDevice>)self newCommandQueue];}
  - (id<MTLBuffer>)newBufferWithLength:(NSUInteger)length options:(MTLResourceOptions)options {
-@@ -1798,10 +1872,26 @@ static bool pipelineArchives(NSArray *list,std::vector<NmbBinaryArchive *> &arch
+@@ -1798,10 +1925,26 @@ static bool pipelineArchives(NSArray *list,std::vector<NmbBinaryArchive *> &arch
     (unsigned long long)d.width,(unsigned long long)d.height,(unsigned long long)d.pixelFormat,IOSurfaceGetPixelFormat(surface),
     (unsigned long long)row,(unsigned long long)(start-(uintptr_t)base),(unsigned long long)allocation,(unsigned long long)bytes);
    uint64_t routes[6]={};

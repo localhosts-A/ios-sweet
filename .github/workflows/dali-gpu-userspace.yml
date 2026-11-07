@@ -82,7 +82,7 @@ jobs:
           # Apple's MTLTextureLayout object, which the frontend left unanswered (nil): QuartzCore
           # decodes a compressed image into host memory of [layout size] bytes at [layout
           # alignment] and both of its callers test the answer with `cbz x0`, so a nil layout
-          # loses the whole decoded image (SpringBoard's icons).
+          # loses the whole decoded image (SpringBoard's ASTC4x4LDR icons).
           git apply ../ios-sweet/tools/dali-gpu/dali-texture-layout.patch
           # The X9 patch hard-codes the author's checkout; point it at this one.
           sed -i '' "s#/Users/tosasitill/ios_plj110#$G1#g" build/third_party/00-mesa-panvk-x9.patch
